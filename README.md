@@ -11,3 +11,4 @@ A bunch of scripts exists that allow to perform the main tasks. Each of them has
 celerite_script.py --> Main script to fit a lightcurve and derive posteriors using celerite. Covariance functions are input using a config file. The mean function can be (for now) a constant function or a Linear function. The MCMC chain convergence is evaluated on the fly. A config file is needed with the parameter ranges (see config_file folder for examples).
 
 
+generate_lc.py --> Generates a lightcurve based on an existing observing window. The model is specifiec
