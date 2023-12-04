@@ -144,7 +144,8 @@ def neg_log_like(params, y, gp):
     gp.set_parameter_vector(params)
     return -gp.log_likelihood(y)
 
-def log_probability(params):
+
+def log_probability(params, y, gp):
     """https://celerite.readthedocs.io/en/stable/tutorials/modeling/"""
     gp.set_parameter_vector(params)
 
@@ -225,6 +226,7 @@ def read_rxte_data(input_file, tmin=0, tmax=np.inf):
     y = filtered_data[rate_column]
     yerr = filtered_data[err_column]
     return time, y, yerr
+
 
 def read_fermi_lat(input_file, tmin=0, tmax=np.inf):
     """Modify this function to read your data and filter it by time"""
@@ -428,6 +430,8 @@ if __name__ == "__main__":
                       dpi=100)
     plt.close(model_fig)
 
+    ndim = len(initial_params)
+
     if args.fit:
         # solution contains the information about the fit. .x is the best fit parameters
         solution = minimize(neg_log_like, initial_params, method="L-BFGS-B", bounds=gp.get_parameter_bounds(), args=(y, gp))
@@ -446,6 +450,7 @@ if __name__ == "__main__":
         best_params = gp.get_parameter_dict()
         print("Best-fit params\n -------")
         print(best_params)
+
         for term in gp.kernel.terms:
             if "kernel:log_omega0" in term.get_parameter_names():
                 omega_par = "kernel:log_omega0"
@@ -533,9 +538,7 @@ if __name__ == "__main__":
         psd_best_fit_figure.savefig("%s/psd_best_fit_components.png" % outdir, bbox_inches="tight")
         plt.close(psd_best_fit_figure)
 
-    ndim = len(initial_params)
-
-    if args.fit:
+        # reinitialize best fit parameters
         warnings.warn("Initial samples reset based on best-fit parameters")
         initial_samples = np.empty((nwalkers, ndim))
         #initial_samples = solution.x + 1e-2 * np.random.randn(nwalkers, ndim)
@@ -573,7 +576,7 @@ if __name__ == "__main__":
     print(initial_samples)
 
     with Pool(cores) as pool:
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_probability, pool=pool)
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_probability, pool=pool, args=(y, gp))
 
         # Now we'll sample for up to max_n steps
         for sample in sampler.sample(initial_samples, iterations=max_n, progress=True):
