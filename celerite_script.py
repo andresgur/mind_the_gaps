@@ -250,7 +250,7 @@ days_to_seconds = 24 * 3600
 if __name__ == "__main__":
 
     ap = argparse.ArgumentParser(description='Perform fit and MCMC error estimation using celerite models (see Foreman-Mackey et al 2017. 10.3847/1538-3881/aa9332)')
-    ap.add_argument("-c", "--config_file", nargs='?', help="Config file with initial parameter constraints", type=str, default="/home/andresgur/scripts/swift_scripts/celerite_config/parameters.config")
+    ap.add_argument("-c", "--config_file", nargs='?', help="Config file with initial parameter constraints", type=str, required=True)
     ap.add_argument("--cores", nargs='?', help="Number of cores for parallelization.Default 16", type=int, default=16)
     ap.add_argument("--tmin", nargs='?', help="Minimum time in data time units", type=float, default=0)
     ap.add_argument("--tmax", nargs='?', help="Maximum time in data time units", type=float, default=np.Infinity)
@@ -259,7 +259,7 @@ if __name__ == "__main__":
     ap.add_argument("-m", "--meanmodel", help="A model for the mean. If provided the mean will be fitted. Default fix constant model (i.e. no fitting)",
                     choices=["Constant", "Linear"], default=None, nargs="?")
     ap.add_argument("--log", help="Whether to take the log of the data. Default False", action="store_true")
-    ap.add_argument("-f", "--file", nargs='?', help="Swift qdp file", type=str, default="PCCURVE.qdp")
+    ap.add_argument("input_file", nargs=1, help="Lightcurve '\t' separated file with timestamps, rates, errors", type=str)
     args = ap.parse_args()
 
 
@@ -278,10 +278,10 @@ if __name__ == "__main__":
     else:
         warnings.warn("Style file not found")
 
-    python_command = "python %s --tmin %.2f --tmax %.2f -c %s -f %s -o %s" % (__file__,
-                        args.tmin, args.tmax, args.config_file, args.file, args.outdir)
+    python_command = "python %s %s --tmin %.2f --tmax %.2f -c %s -o %s" % (__file__, args.input_file[0],
+                        args.tmin, args.tmax, args.config_file, args.outdir)
 
-    count_rate_file = args.file
+    count_rate_file = args.input_file[0]
     tmin = args.tmin
     tmax = args.tmax
 
