@@ -108,8 +108,13 @@ class LinearModel(Model):
     def get_value(self,x):
         return self.slope * x + self.intercept
 
+    def compute_gradient(self, x):
+        # derive with respect to slope, and derive with respect to intercept
+        return np.array([np.ones_like(x) * x, np.ones_like(x)])
+
 
 class LensingProfile(Model):
     parameter_names = ("lense_mass", "stellar_mass", "")
     def get_value(self, x):
         # TODO: add calculation here
+        return np.nan
