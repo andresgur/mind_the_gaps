@@ -10,17 +10,49 @@ import argparse
 from scipy.optimize import minimize
 from shutil import copyfile
 import celerite
+from celerite.modeling import ConstantModel
 import corner
 import emcee
 import astropy.units as u
 from multiprocessing import Pool
 from mind_the_gaps.celerite_models import Lorentzian, DampedRandomWalk, Cosinus, BendingPowerlaw, LinearModel
-from celerite.modeling import ConstantModel
 import readingutils as ru
 import warnings
 from scipy.stats import norm, kstest
 from astropy.stats import sigma_clip
 os.environ["OMP_NUM_THREADS"] = "1" # https://emcee.readthedocs.io/en/stable/tutorials/parallel/
+
+def standarized_residuals(data, model, uncer,  ouput):
+
+    std_res = (data - model) / uncer
+
+
+    xrange = np.arange(np.min(std_res), np.max(std_res), 0.05)
+
+    counts, bins = np.histogram(std_res, bins='auto')
+    bin_widths = np.diff(bins)
+    normalized_res = counts / (len(std_res) * bin_widths)
+
+    fig, ax = plt.subplots()
+    plt.bar(bins[:-1], normalized_res, width=bin_widths, edgecolor="black", facecolor="None", label="St residuals")
+    mu, std = norm.fit(std_res, loc=0, scale=1)
+    plt.axvline(mu, label="%.4f$\pm$%.4f" % (mu, std))
+
+    # ks test
+    gauss = norm(loc=0, scale=1)
+    plt.plot(xrange, gauss.pdf(xrange))
+    kstest_res = kstest(gauss.rvs, std_res[~np.isinf(std_res)], N=2000)
+    plt.text(0.15, 0.8, "p-value = %.3f" %(kstest_res.pvalue),
+             transform=ax.transAxes,fontsize=24)
+    plt.legend()
+    plt.savefig("%s/standarized_res_%s.png" % (outdir, ouput), dpi=100)
+    plt.close(fig)
+
+    print("Mu and std of the std resduals (%.3f+-%.3f)" % (mu, std))
+    print("P-value (Values <0.05 indicate the fit is bad) for the std residuals: %.5f" % kstest_res.pvalue)
+    np.savetxt("%s/std_res_%s.dat" % (outdir, ouput), std_res, header="res", fmt="%.5f")
+    return
+
 
 
 def read_config_file(config_file, walkers=32):
@@ -279,9 +311,6 @@ if __name__ == "__main__":
     else:
         warnings.warn("Style file not found")
 
-    python_command = "python %s %s --tmin %.2f --tmax %.2f -c %s -o %s" % (__file__, args.input_file[0],
-                        args.tmin, args.tmax, args.config_file, args.outdir)
-
     count_rate_file = args.input_file[0]
     tmin = args.tmin
     tmax = args.tmax
@@ -476,6 +505,8 @@ if __name__ == "__main__":
         # get model prediction
         pred_mean, pred_var = gp.predict(y, time_model, return_var=True)
         pred_std = np.sqrt(pred_var)
+
+        standarized_residuals(y, pred_mean, pred_std, "best_fit")
         color = "orange"
         ax1.errorbar(time / days_to_seconds, y, yerr=yerr, fmt=".k", capsize=0)
         if args.log:
@@ -597,6 +628,7 @@ if __name__ == "__main__":
                 print("Convergence reached after %d samples!" % sampler.iteration)
                 break
             old_tau = tau
+
     acceptance_ratio = sampler.acceptance_fraction
     print("Acceptance ratio: (%)")
     print(acceptance_ratio)
@@ -699,7 +731,7 @@ if __name__ == "__main__":
     bic = - 2 * loglikes[best_loglikehood] + k * np.log(len(y))
     aicc = 2 * k - 2 * loglikes[best_loglikehood] + 2 * k * (k + 1) / (len(y) - k - 1)
 
-    out_file = open("%s/log_likehood.txt" % (outdir), "w+")
+    out_file = open("%s/max_log_likehood.txt" % (outdir), "w+")
     out_file.write("#loglikehood\tBIC\tAICc\tn\tp\n")
     out_file.write("%.3f\t%.2f\t%.2f\t%d\t%d" % (max_loglikehood, bic, aicc, len(y), k))
     out_file.close()
@@ -708,46 +740,8 @@ if __name__ == "__main__":
     gp.compute(time, yerr)
     # (No need to pass time as it'll be assumed the same datapoints as GP compute (https://celerite.readthedocs.io/en/stable/python/gp/)
     best_model, var = gp.predict(y, return_var=True, return_cov=False) # omit time for faster computing time
-    std_res = (y - best_model) / np.sqrt(var) #yerr
 
-    fig, ax = plt.subplots()
-    xrange = np.arange(np.min(std_res), np.max(std_res), 0.05)
-
-    counts, bins = np.histogram(std_res, bins='auto')
-    bin_widths = np.diff(bins)
-    normalized_res = counts / (len(std_res) * bin_widths)
-    print("Plot normalized residuals")
-    plt.bar(bins[:-1], normalized_res, width=bin_widths, edgecolor="black", facecolor="None", label="St residuals")
-    mu, std = norm.fit(std_res, loc=0, scale=1)
-    plt.axvline(mu, label="%.4f$\pm$%.4f" % (mu, std))
-    # ks test
-    gauss = norm(loc=0, scale=1)
-    plt.plot(xrange, gauss.pdf(xrange))
-    kstest_res = kstest(gauss.rvs, std_res[~np.isinf(std_res)], N=1000)
-    plt.text(0.15, 0.8, "p-value = %.3f" %(kstest_res.pvalue),
-             transform=ax.transAxes,fontsize=24)
-
-    try:
-        counts, bins = np.histogram((y - pred_mean) / yerr, bins='auto')
-        bin_widths = np.diff(bins)
-        normed = counts / (len(std_res) * bin_widths)
-        bin_widths = np.diff(bins)
-        plt.bar(bins[:-1], normed, width=bin_widths, edgecolor="blue",
-                facecolor="None", label="Fit")
-    except ValueError as e:
-        print("Predicted mean is nan")
-        print(pred_mean)
-        print(e)
-
-
-    plt.legend()
-    plt.savefig("%s/standarized_res_best.png" % outdir, dpi=100)
-    plt.close(fig)
-    print("Mu and std of the std resduals (%.3f+-%.3f)" % (mu, std))
-    print("P-value (Values <0.05 indicate the fit is bad) for the std residuals: %.5f" % kstest_res.pvalue)
-
-    np.savetxt("%s/std_res.dat" % outdir, std_res, header="res", fmt="%.5f")
-
+    standarized_residuals(y, best_model, np.sqrt(var), "max")
 
     median_parameters = np.median(final_samples, axis=0)
     distances = np.linalg.norm(final_samples - median_parameters, axis=1)
@@ -851,7 +845,7 @@ if __name__ == "__main__":
         for term_i, term in enumerate(gp.kernel.terms):
             psd_components[term_i, index] = term.get_psd(w_frequencies)
 
-    model_figure.savefig("%s/model_fit_celerite_samples.png" % outdir)
+    model_figure.savefig("%s/model_mcmc_samples.png" % outdir)
     plt.close(model_figure)
 
     #psd_ax.set_xlim(min_f * days_to_seconds, max_f * days_to_seconds)
@@ -878,44 +872,12 @@ if __name__ == "__main__":
     model_ax.plot(time_model / days_to_seconds, m[1], color="orange")
     model_ax.fill_between(time_model / days_to_seconds, m[0], m[2], alpha=0.3, color="orange")
     model_ax.errorbar(time / days_to_seconds, y, yerr=yerr, fmt=".k", capsize=0)
-    model_figure.savefig("%s/model_fit_median.png" % outdir, bbox_inches="tight")
+    model_figure.savefig("%s/model_mcmc_median.png" % outdir, bbox_inches="tight")
     plt.close(model_figure)
     outputs = np.array([time_model / days_to_seconds, m[1], m[0], m[2]])
     np.savetxt("%s/model_median.dat" % outdir, outputs.T, header="time(d)\tmodel\tlower\tupper", fmt="%.6f")
 
-    std_res = (y - np.median(mdels_st_res)) / yerr# np.std(mdels_st_res)
-
-    try:
-        fig, ax = plt.subplots()
-        xrange = np.arange(np.min(std_res), np.max(std_res), 0.05)
-        counts, bins = np.histogram(std_res, bins='auto')
-        bin_widths = np.diff(bins)
-        normalized_res = counts / (len(std_res) * bin_widths)
-        gauss = norm(loc=0, scale=1)
-        plt.bar(bins[:-1], normalized_res, width=bin_widths, edgecolor="black",
-                facecolor="None", label="St residuals")
-
-        counts, bins = np.histogram((y - pred_mean) / yerr, bins='auto')
-        bin_widths = np.diff(bins)
-        normed = counts / (len(std_res) * bin_widths)
-        bin_widths = np.diff(bins)
-        plt.bar(bins[:-1], normed, width=bin_widths, edgecolor="blue", facecolor="None", label="Fit")
-        # ks test
-        plt.plot(xrange, gauss.pdf(xrange), color="black")
-        mu, std = norm.fit(std_res, loc=0, scale=1)
-        plt.axvline(mu, label="%.4f$\pm$%.4f" % (mu, std))
-        kstest_res = kstest(gauss.rvs, std_res[~np.isinf(std_res)], N=1000)
-        plt.text(0.15, 0.8, "p-value = %.3f" %(kstest_res.pvalue),
-                 transform=ax.transAxes,fontsize=24)
-
-        plt.legend()
-        plt.savefig("%s/standarized_res_mcmc.png" % outdir, dpi=100)
-        plt.close(fig)
-        print("Mu and std of the std resduals (%.3f+-%.3f)" % (mu, std))
-        print("P-value (Values <0.05 indicate the fit is bad) for the std residuals: %.5f" % kstest_res.pvalue)
-    except ValueError as e:
-        print("Can't compute standardized residuals, some of them were NaN or inf")
-        print(e)
+    standarized_residuals(y, np.median(mdels_st_res), np.std(mdels_st_res), "mcmc_median")
 
     # PSD median
     psd_median_figure, psd_median_ax = plt.subplots()
@@ -974,6 +936,11 @@ if __name__ == "__main__":
     with open("%s/samples.info" % outdir, "w+") as file:
         file.write("#samples\tdiscard\tthin\ttau\n")
         file.write("%d\t%d\t%d\t%.2f\n" % (sampler.iteration, discard, thin, mean_tau))
+
+    python_command = "python %s %s --tmin %.2f --tmax %.2f -c %s -m %s -o %s" % (__file__, args.input_file[0],
+                        args.tmin, args.tmax, args.config_file, args.meanmodel, args.outdir)
+    if args.fit:
+        python_command += " --fit"
 
     with open("%s/python_command.txt" % outdir, "w+") as file:
         file.write(python_command)
