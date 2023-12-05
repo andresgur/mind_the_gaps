@@ -506,7 +506,7 @@ if __name__ == "__main__":
         pred_mean, pred_var = gp.predict(y, time_model, return_var=True)
         pred_std = np.sqrt(pred_var)
 
-        standarized_residuals(y, pred_mean, pred_std, "best_fit")
+
         color = "orange"
         ax1.errorbar(time / days_to_seconds, y, yerr=yerr, fmt=".k", capsize=0)
         if args.log:
@@ -521,6 +521,7 @@ if __name__ == "__main__":
         np.savetxt("%s/best_fit.dat" % outdir, outputs.T, header="time(d)\tmodel\tstd", fmt="%.6f")
         # no need to pass time here as if this is omitted the coordinates will be assumed to be x from GP.compute() and an efficient method will be used to compute the prediction (https://celerite.readthedocs.io/en/stable/python/gp/)
         pred_mean, pred_var = gp.predict(y, time, return_var=True)
+        standarized_residuals(y, pred_mean, np.sqrt(pred_var), "best_fit")
         ax2.errorbar(time / days_to_seconds, (y - pred_mean) / yerr, yerr=1, fmt=".k", capsize=0)
         ax2.axhline(y=0, ls="--", color="#002FA7")
         ax2.set_ylabel("Residuals")
