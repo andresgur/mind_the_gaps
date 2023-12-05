@@ -8,7 +8,7 @@ import warnings
 from lmfit.models import LognormalModel, Model
 from scipy.stats import norm, poisson
 from stingray import Lightcurve
-from utilities.stats import kraft_pdf
+from .stats import kraft_pdf
 import numexpr as ne
 import pyfftw
 from astropy.stats import poisson_conf_interval
