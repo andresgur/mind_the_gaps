@@ -17,7 +17,6 @@ from multiprocessing import Pool
 from mind_the_gaps.celerite_models import Lorentzian, DampedRandomWalk, Cosinus, BendingPowerlaw, LinearModel
 from celerite.modeling import ConstantModel
 import readingutils as ru
-from scipy import stats
 import warnings
 from scipy.stats import norm, kstest
 from astropy.stats import sigma_clip
@@ -727,6 +726,7 @@ if __name__ == "__main__":
     kstest_res = kstest(gauss.rvs, std_res[~np.isinf(std_res)], N=1000)
     plt.text(0.15, 0.8, "p-value = %.3f" %(kstest_res.pvalue),
              transform=ax.transAxes,fontsize=24)
+
     try:
         counts, bins = np.histogram((y - pred_mean) / yerr, bins='auto')
         bin_widths = np.diff(bins)
