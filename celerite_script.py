@@ -26,7 +26,6 @@ def standarized_residuals(data, model, uncer,  ouput):
 
     std_res = (data - model) / uncer
 
-
     counts, bins = np.histogram(std_res, bins='auto')
     bin_widths = np.diff(bins)
     normalized_res = counts / (len(std_res) * bin_widths)
@@ -37,13 +36,13 @@ def standarized_residuals(data, model, uncer,  ouput):
     plt.bar(bins[:-1], normalized_res, width=bin_widths, edgecolor="black",
             facecolor="None", label="(D - M) /$\\sigma_M$ \n (%.4f$\pm$%.4f)" % (mu, std))
 
-    # dividing by the model
+    # dividing by the data
     std_res_data = (data - model) / yerr
     counts, bins = np.histogram(std_res_data, bins='auto')
     bin_widths = np.diff(bins)
     normalized_res_data = counts / (len(std_res_data) * bin_widths)
     mu_data, std_data = norm.fit(std_res_data, loc=0, scale=1)
-    plt.bar(bins[:-1], normalized_res, width=bin_widths, edgecolor="blue",
+    plt.bar(bins[:-1], normalized_res_data, width=bin_widths, edgecolor="blue",
             facecolor="None", label="(D - M) /$\\sigma_D$ \n (%.4f$\pm$%.4f)" % (mu_data, std_data))
 
     # ks test
