@@ -15,10 +15,10 @@ import corner
 import emcee
 import astropy.units as u
 from multiprocessing import Pool
-from mind_the_gaps.celerite_models import Lorentzian, DampedRandomWalk, Cosinus, BendingPowerlaw, LinearModel
+from mind_the_gaps.celerite_models import Lorentzian, DampedRandomWalk, Cosinus, BendingPowerlaw, LinearModel, GaussianModel
 import readingutils as ru
 import warnings
-from scipy.stats import norm, kstest
+from scipy.stats import norm, ks_1samp
 from astropy.stats import sigma_clip
 os.environ["OMP_NUM_THREADS"] = "1" # https://emcee.readthedocs.io/en/stable/tutorials/parallel/
 
@@ -27,22 +27,31 @@ def standarized_residuals(data, model, uncer,  ouput):
     std_res = (data - model) / uncer
 
 
-    xrange = np.arange(np.min(std_res), np.max(std_res), 0.05)
-
     counts, bins = np.histogram(std_res, bins='auto')
     bin_widths = np.diff(bins)
     normalized_res = counts / (len(std_res) * bin_widths)
 
-    fig, ax = plt.subplots()
-    plt.bar(bins[:-1], normalized_res, width=bin_widths, edgecolor="black", facecolor="None", label="St residuals")
+    # dividing by the model
     mu, std = norm.fit(std_res, loc=0, scale=1)
-    plt.axvline(mu, label="%.4f$\pm$%.4f" % (mu, std))
+    fig, ax = plt.subplots()
+    plt.bar(bins[:-1], normalized_res, width=bin_widths, edgecolor="black",
+            facecolor="None", label="(D - M) /$\\sigma_M$ \n (%.4f$\pm$%.4f)" % (mu, std))
+
+    # dividing by the model
+    std_res_data = (data - model) / yerr
+    counts, bins = np.histogram(std_res_data, bins='auto')
+    bin_widths = np.diff(bins)
+    normalized_res_data = counts / (len(std_res_data) * bin_widths)
+    mu_data, std_data = norm.fit(std_res_data, loc=0, scale=1)
+    plt.bar(bins[:-1], normalized_res, width=bin_widths, edgecolor="blue",
+            facecolor="None", label="(D - M) /$\\sigma_D$ \n (%.4f$\pm$%.4f)" % (mu_data, std_data))
 
     # ks test
     gauss = norm(loc=0, scale=1)
+    xrange = np.arange(np.min(std_res), np.max(std_res), 0.05)
     plt.plot(xrange, gauss.pdf(xrange))
-    kstest_res = kstest(gauss.rvs, std_res[~np.isinf(std_res)], N=2000)
-    plt.text(0.15, 0.8, "p-value = %.3f" %(kstest_res.pvalue),
+    kstest_res = ks_1samp(std_res[~np.isinf(std_res)], gauss.cdf)
+    plt.text(0.15, 0.8, "p-value = %.3f %%" % (kstest_res.pvalue * 100),
              transform=ax.transAxes,fontsize=24)
     plt.legend()
     plt.savefig("%s/standarized_res_%s.png" % (outdir, ouput), dpi=100)
@@ -51,7 +60,7 @@ def standarized_residuals(data, model, uncer,  ouput):
     print("Mu and std of the std resduals (%.3f+-%.3f)" % (mu, std))
     print("P-value (Values <0.05 indicate the fit is bad) for the std residuals: %.5f" % kstest_res.pvalue)
     np.savetxt("%s/std_res_%s.dat" % (outdir, ouput), std_res, header="res", fmt="%.5f")
-    return
+    return kstest_res.pvalue
 
 
 
@@ -192,7 +201,7 @@ def check_gaussianity(measurements):
         mu, std = norm.fit(measurements, loc=np.mean(measurements),
                            scale=np.std(measurements))
         rv = norm(loc=mu, scale=std)
-        kstest_res = kstest(rv.rvs, measurements, N=10000)
+        kstest_res = ks_1samp(measurements, rv.cdf)
         plt.text(0.02, 0.8, "p-value = %.3f" % (kstest_res.pvalue),
                  transform=ax.transAxes,fontsize=24)
         x = np.arange(min(measurements), max(measurements), 0.01)
@@ -235,6 +244,7 @@ def read_data2(input_file, tmin=0, tmax=np.inf):
         time = filtered_data[time_column] * days_to_seconds
     else:
         time = filtered_data[time_column]
+
     y = filtered_data[rate_column]
     yerr = filtered_data[err_column]
     return time, y, yerr
@@ -290,7 +300,7 @@ if __name__ == "__main__":
     ap.add_argument("-o", "--outdir", nargs='?', help="Output dir name", type=str, default="celerite")
     ap.add_argument("--fit", help="Whether to fit the data and start MCMC with best fit values. Default False", action="store_true")
     ap.add_argument("-m", "--meanmodel", help="A model for the mean. If provided the mean will be fitted. Default fix constant model (i.e. no fitting)",
-                    choices=["Constant", "Linear"], default=None, nargs="?")
+                    choices=["Constant", "Linear", "Gaussian"], default=None, nargs="?")
     ap.add_argument("--log", help="Whether to take the log of the data. Default False", action="store_true")
     ap.add_argument("input_file", nargs=1, help="Lightcurve '\t' separated file with timestamps, rates, errors", type=str)
     args = ap.parse_args()
@@ -391,7 +401,8 @@ if __name__ == "__main__":
 
     if args.meanmodel=="Constant":
         meanlabels = ["$\mu$"]
-        cols.extend(["mean:mean"])
+        cols.extend(["mean:value"])
+
     elif args.meanmodel=="Linear":
         slope_guess = np.sign(y[-1] - y[0])
         minindex = np.argmin(time)
@@ -407,13 +418,21 @@ if __name__ == "__main__":
         meanmodel = LinearModel(np.mean(min_slope + max_slope), data_mean, bounds=[(-np.inf, np.inf), (-np.inf, np.inf)])
         meanlabels = ["$m$", "$b$"]
         cols.extend(["mean:slope", "mean:intercept"])
+    elif args.meanmodel=="Gaussian":
+        sigma_guess = (duration) / 2
+        amplitude_guess = (np.max(y) - np.min(y)) * np.sqrt(2 * np.pi)* sigma_guess
+        mean_guess = time[len(time)//2]
+        meanmodel = GaussianModel(mean_guess, sigma_guess, amplitude_guess,
+                                  bounds=[(time[0], time[-1]), (dt, duration), (-np.max(y) * np.sqrt(2 * np.pi) * duration, np.max(y) * np.sqrt(2 * np.pi) * duration)])
+        cols.extend(["mean:mean", "mean:sigma", "mean:amplitude"])
+        meanlabels = ["$\mu$", "$\sigma$", "$A$"]
 
     if args.meanmodel:
         print("Fitting for the mean. Initial value %.3f" % np.mean(y))
         fit_mean = True
         if args.log:
             for meanlabel in meanlabels:
-                labels.append("$\log$ " +meanlabel)
+                labels.append("$\log$ " + meanlabel)
         else:
             labels.extend(meanlabels)
 
@@ -513,15 +532,19 @@ if __name__ == "__main__":
             ax1.set_ylabel(" log(Count-rate (ct/s))")
         else:
             ax1.set_ylabel("Count-rate (ct/s)")
-        ax1.plot(time_model / days_to_seconds, pred_mean, color="orange")
+        ax1.plot(time_model / days_to_seconds, pred_mean, color="orange", zorder=100)
         ax1.fill_between(time_model / days_to_seconds, pred_mean + pred_std, pred_mean - pred_std, color="orange", alpha=0.3,
-                         edgecolor="none")
+                         edgecolor="none", zorder=101)
 
         outputs = np.array([time_model / days_to_seconds, pred_mean, pred_std])
         np.savetxt("%s/best_fit.dat" % outdir, outputs.T, header="time(d)\tmodel\tstd", fmt="%.6f")
         # no need to pass time here as if this is omitted the coordinates will be assumed to be x from GP.compute() and an efficient method will be used to compute the prediction (https://celerite.readthedocs.io/en/stable/python/gp/)
         pred_mean, pred_var = gp.predict(y, time, return_var=True)
-        standarized_residuals(y, pred_mean, np.sqrt(pred_var), "best_fit")
+        try:
+            standarized_residuals(y, pred_mean, np.sqrt(pred_var), "best_fit")
+        except ValueError as e:
+            print("Error when computing best_fit standarized residuals")
+            print(e)
         ax2.errorbar(time / days_to_seconds, (y - pred_mean) / yerr, yerr=1, fmt=".k", capsize=0)
         ax2.axhline(y=0, ls="--", color="#002FA7")
         ax2.set_ylabel("Residuals")
@@ -727,22 +750,28 @@ if __name__ == "__main__":
 
     np.savetxt("%s/parameter_max.dat" % outdir, best_pars.T,
                header="\t".join(gp.get_parameter_names()), fmt="%.2f")
+
+    gp.set_parameter_vector(best_pars)
+    gp.compute(time, yerr)
+    # (No need to pass time as it'll be assumed the same datapoints as GP compute (https://celerite.readthedocs.io/en/stable/python/gp/)
+    best_model, var = gp.predict(y, return_var=True, return_cov=False) # omit time for faster computing time
+    try:
+        pvalue = standarized_residuals(y, best_model, np.sqrt(var), "max")
+    except ValueError as e:
+        print("Error when computing max standarized residuals")
+        print(e)
+        pvalue = 0
+
+    # best parameter stats
     max_loglikehood = loglikes[best_loglikehood]
     k = len(gp.get_parameter_dict())
     bic = - 2 * loglikes[best_loglikehood] + k * np.log(len(y))
     aicc = 2 * k - 2 * loglikes[best_loglikehood] + 2 * k * (k + 1) / (len(y) - k - 1)
 
     out_file = open("%s/max_log_likehood.txt" % (outdir), "w+")
-    out_file.write("#loglikehood\tBIC\tAICc\tn\tp\n")
-    out_file.write("%.3f\t%.2f\t%.2f\t%d\t%d" % (max_loglikehood, bic, aicc, len(y), k))
+    out_file.write("#loglikehood\tBIC\tAICc\tp-value\tn\tparams\n")
+    out_file.write("%.3f\t%.2f\t%.2f\t%.5f\t%d\t%d" % (max_loglikehood, bic, aicc, pvalue, len(y), k))
     out_file.close()
-
-    gp.set_parameter_vector(best_pars)
-    gp.compute(time, yerr)
-    # (No need to pass time as it'll be assumed the same datapoints as GP compute (https://celerite.readthedocs.io/en/stable/python/gp/)
-    best_model, var = gp.predict(y, return_var=True, return_cov=False) # omit time for faster computing time
-
-    standarized_residuals(y, best_model, np.sqrt(var), "max")
 
     median_parameters = np.median(final_samples, axis=0)
     distances = np.linalg.norm(final_samples - median_parameters, axis=1)
@@ -815,7 +844,7 @@ if __name__ == "__main__":
     # MODEL
     model_figure, model_ax = plt.subplots()
     model_ax.set_xlabel("Time (days)")
-    model_ax.set_ylabel("Count-rate ct/s [0.3 - 10 keV]")
+    model_ax.set_ylabel("Count-rate ct/s")
     model_ax.errorbar(time / 3600 / 24, y, yerr=yerr, fmt=".k", capsize=0)
     model_figure.savefig("%s/lightcurve.png" % outdir)
     # PSD
@@ -867,7 +896,7 @@ if __name__ == "__main__":
     # model
     model_figure, model_ax = plt.subplots()
     model_ax.set_xlabel("Time (days)")
-    model_ax.set_ylabel("Count-rate ct/s [0.3 - 10 keV]")
+    model_ax.set_ylabel("Count-rate ct/s")
     model_ax.errorbar(time / days_to_seconds, y, yerr=yerr, fmt=".k", capsize=0)
     m = np.nanpercentile(models, [16, 50, 84], axis=0)
     model_ax.plot(time_model / days_to_seconds, m[1], color="orange")
@@ -877,9 +906,11 @@ if __name__ == "__main__":
     plt.close(model_figure)
     outputs = np.array([time_model / days_to_seconds, m[1], m[0], m[2]])
     np.savetxt("%s/model_median.dat" % outdir, outputs.T, header="time(d)\tmodel\tlower\tupper", fmt="%.6f")
-
-    standarized_residuals(y, np.median(mdels_st_res), np.std(mdels_st_res), "mcmc_median")
-
+    try:
+        standarized_residuals(y, np.median(mdels_st_res), np.std(mdels_st_res), "mcmc_median")
+    except ValueError as e:
+        print("Error when computing best_fit standarized residuals")
+        print(e)
     # PSD median
     psd_median_figure, psd_median_ax = plt.subplots()
     psd_median_ax.set_xlabel("Frequency (days$^{-1}$)")
