@@ -175,9 +175,12 @@ class TestSimulator(unittest.TestCase):
         variance = 10
         psd_model = BendingPowerlaw(S_0=variance, w_0=np.exp(-3)) # 126 seconds
         mean  = 1
-        rate = tk95_sim(timestamps, psd_model, mean, dt, 1, dt)
+        vars = []
+        for i in range(25):
+            rate = tk95_sim(timestamps, psd_model, mean, dt, 1, dt) # this is just to get tseg for df
+            vars.append(np.var(rate))
 
-        self.assertAlmostEqual(variance, np.var(rate), delta=0.1)
+        self.assertAlmostEqual(variance, np.mean(vars), delta=0.1)
         self.assertAlmostEqual(mean, np.mean(rate), 2)
 
 
