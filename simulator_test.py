@@ -4,8 +4,8 @@
 # @Last modified by:   agurpide
 # @Last modified time: 28-03-2022
 import unittest
-from lightcurve.psd_models import BendingPowerlaw
-from lightcurve.simulator import *
+from mind_the_gaps.psd_models import BendingPowerlaw, Lorentzian
+from mind_the_gaps.simulator import *
 from lomb_scargle.fitting import fit_psd_powerlaw
 from astropy.modeling.powerlaws import BrokenPowerLaw1D, PowerLaw1D, SmoothlyBrokenPowerLaw1D
 import time
@@ -36,7 +36,7 @@ class TestSimulator(unittest.TestCase):
         psd_model = PowerLaw1D(amplitude=1, alpha=input_beta)
         mean,std  = 0.5, 0.1
         start = time.time()
-        rate = tk95_sim(timestamps, psd_model, mean, std, dt, 1, dt)
+        rate = tk95_sim(timestamps, psd_model, mean, dt, 1, dt)
         end = time.time()
         print("Time to simulate a %d point TK lightcurve: %.2fs" % (len(timestamps), (end - start)))
         frequencies, pow_spec = self.power_spectrum(timestamps, rate)
@@ -44,7 +44,7 @@ class TestSimulator(unittest.TestCase):
         psd_slope, err, psd_norm, psd_norm_err = fit_psd_powerlaw(frequencies, pow_spec)
         self.assertAlmostEqual(-input_beta, psd_slope.value, None, "Slope of the power spectrum is not the same as the input at the 3 sigma level!", 3 * err)
         Nsims = 250
-        rates = [tk95_sim(timestamps, psd_model, mean, std, dt, 1, dt) for n in np.arange(Nsims)]
+        rates = [tk95_sim(timestamps, psd_model, mean, dt, 1, dt) for n in np.arange(Nsims)]
         slopes = np.empty(len(rates))
         for index, rate in enumerate(rates):
             frequencies, pow_spec = self.power_spectrum(timestamps, rate)
@@ -54,7 +54,7 @@ class TestSimulator(unittest.TestCase):
         self.assertAlmostEqual(-input_beta, np.mean(slopes), None, "Average slope of %d lightcurve is not the same as the input!" % Nsims, err)
 
         # Increasing the binning of the simulated lightcurve
-        rates = [tk95_sim(timestamps, psd_model, mean, std, dt, 2, dt) for n in np.arange(Nsims)]
+        rates = [tk95_sim(timestamps, psd_model, mean, dt, 2, dt) for n in np.arange(Nsims)]
         slopes = np.empty(len(rates))
         for index, rate in enumerate(rates):
             frequencies, pow_spec = self.power_spectrum(timestamps, rate)
@@ -93,8 +93,23 @@ class TestSimulator(unittest.TestCase):
                             dt=sim_dt,
                              extension_factor=extension_factor) # this is just to get tseg for df
             vars.append(np.var(lc.countrate))
+        self.assertAlmostEqual(var, np.mean(vars), delta=0.1, msg="Variance is not the same in TK95 method!")
 
-        self.assertAlmostEqual(var, np.mean(vars), 1, msg="Variance is not the same in TK95 method!")
+        var = 10
+        freq = 2 * np.pi / 10 # 1 / 10 in rad
+        psd_model = Lorentzian(S_0=var, w_0=freq, Q=10)
+        sim_dt = 0.05
+        timestamps = np.arange(0, 5000, sim_dt)
+        extension_factor = 10
+        vars = []
+
+        for i in range(25):
+            lc = simulate_lightcurve(timestamps, psd_model,
+                            dt=sim_dt,
+                             extension_factor=extension_factor) # this is just to get tseg for df
+            vars.append(np.var(lc.countrate))
+
+        self.assertAlmostEqual(var, np.mean(vars), delta=0.1, msg="Variance is not the same in TK95 method!")
 
     def test_slope_E13(self):
 
@@ -156,13 +171,13 @@ class TestSimulator(unittest.TestCase):
 
     def test_std_mean_TK95(self):
         dt = 1
-        timestamps = np.arange(0, 7500, dt)
-        input_beta = 1
-        psd_model = PowerLaw1D(amplitude=1, alpha=input_beta)
-        mean,std  = 0.5, 0.1
-        rate = tk95_sim(timestamps, psd_model, mean, std, dt, 1, dt)
+        timestamps = np.arange(0, 8500, dt)
+        variance = 10
+        psd_model = BendingPowerlaw(S_0=variance, w_0=np.exp(-3)) # 126 seconds
+        mean  = 1
+        rate = tk95_sim(timestamps, psd_model, mean, dt, 1, dt)
 
-        self.assertAlmostEqual(std, np.std(rate), 2)
+        self.assertAlmostEqual(variance, np.var(rate), delta=0.1)
         self.assertAlmostEqual(mean, np.mean(rate), 2)
 
 
@@ -286,6 +301,9 @@ class TestSimulator(unittest.TestCase):
                          extension_factor=2, max_iter=1000, bin_exposures=bin_exposures)
         self.assertAlmostEqual(np.mean(erates), mean, delta=sigma, msg="E13 not working with SmoothlyBrokenPowerLaw1D (mean)")
         self.assertAlmostEqual(np.std(erates), sigma, delta=sigma, msg="E13 not working with SmoothlyBrokenPowerLaw1D (sigma)")
+
+
+
 
 if __name__ == '__main__':
     unittest.main()
