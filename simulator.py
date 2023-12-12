@@ -321,16 +321,16 @@ def simulate_lightcurve(timestamps, psd_model, dt, extension_factor=50):
     Parameters
     ----------
     timestamps: array
-        Timestamps in seconds
+        Timestamps
     psd_model: astropy.model
         The model for the PSD. Has to take angular frequencies
     dt: float
-        Binning to which simulate the lightcurve in seconds
+        Binning to which simulate the lightcurve (same units as timestamps)
     extension_factor: int
         How many times longer than original
     """
     if extension_factor < 1:
-        raise ValueError("Extension factor needs to be higher than 1")
+        raise ValueError("Extension factor must be greater than 1")
 
     duration = timestamps[-1] - timestamps[0]
     # generate timesctamps sampled at the median exposure longer than input lightcurve by extending the end
@@ -344,10 +344,9 @@ def simulate_lightcurve(timestamps, psd_model, dt, extension_factor=50):
 
     countrate = pyfftw.interfaces.numpy_fft.irfft(complex_fft, n=n_datapoints) # it does seem faster than numpy although only slightly
 
-    countrate = np.fft.irfft(complex_fft, n=n_datapoints)
     # the power gets diluted due to the sampling, bring it back by applying this factor
     # the sqrt(2pi) factor enters because of celerite
-    countrate *= np.sqrt(n_datapoints) * np.sqrt(dt) * np.sqrt(np.sqrt(2 * np.pi))
+    countrate *= np.sqrt(n_datapoints * dt * np.sqrt(2 * np.pi))
 
     return Lightcurve(sim_timestamps, countrate, input_counts=True, skip_checks=True, dt=dt, err_dist="gauss") # gauss is needed as some counts will be negative
 
@@ -519,10 +518,10 @@ def E13_sim(timestamps, psd_model, pdfs=[norm(0, 1)], weights=[1], sim_dt=None, 
 
     lc_cut = cut_random_segment(lc, duration)
 
-    return E13_sim_TK95(lc_cut, timestamps, pdfs, weights, half_bins, max_iter)
+    return E13_sim_TK95(lc_cut, timestamps, pdfs, weights, bin_exposures, max_iter)
 
 
-def E13_sim_TK95(lc, timestamps, pdfs=[norm(0, 1)], weights=[1], half_bins=None, max_iter=400):
+def E13_sim_TK95(lc, timestamps, pdfs=[norm(0, 1)], weights=[1], exposures=None, max_iter=400):
     """Simulate lightcurve using the method from Emmanolopoulos+2013
     lc: Lightcurve
         Regularly sampled TK95 generated lightcurve with the desired PSD (and taking into account, if desired, rednoise leakage and aliasing effects)
@@ -532,16 +531,16 @@ def E13_sim_TK95(lc, timestamps, pdfs=[norm(0, 1)], weights=[1], half_bins=None,
         Probability density distribution to be matched
     weights: array_like
         Array containing the weights of each of the input distributions
-    half_bins: array
-        Exposures in seconds (so new desired dt, it can be array or scalar)
+    exposures: array
+        Exposures in seconds of the new bins. If not given assumed equal to lc.dt (it can be array or scalar)
      max_iter: int
         Number of iterations for the lightcurve creation if convergence is not reached (Greater beta values requirer larger max_iter e.g. 100 for beta < 1, 200 beta = 1, 500 or more for beta >=2)
     """
 
     check_pdfs(weights, pdfs)
 
-    if half_bins is None:
-        half_bins = lc.dt / 2
+    if exposures is None:
+        exposures = lc.dt
 
     n_datapoints = len(lc)
     # step ii draw from distribution
@@ -590,7 +589,7 @@ def E13_sim_TK95(lc, timestamps, pdfs=[norm(0, 1)], weights=[1], half_bins=None,
     # tesed until here
     lc.countrate = xsim
 
-    downsampled_rates = downsample(lc, timestamps, 2 * half_bins)
+    downsampled_rates = downsample(lc, timestamps, exposures)
 
     return downsampled_rates
 
