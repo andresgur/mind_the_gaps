@@ -1,11 +1,10 @@
 import unittest
-from utilities.stats import *
+from .stats import *
 from scipy.stats import norm, lognorm, rv_continuous
 import numpy as np
-from scipy import stats, special
+from scipy import special
 
 class TestSimulator(unittest.TestCase):
-
 
     def test_create_lognormal(self):
 
@@ -37,7 +36,7 @@ class TestSimulator(unittest.TestCase):
         data_powers = np.array([0, 1, 2])
         model_powers = np.array([0.5, 1.5, 2.5])
 
-        log_like = 2 * (np.log(model_powers[0]) + data_powers[0]/model_powers[0] + np.log(model_powers[1]) + data_powers[1]/model_powers[1] +
+        log_like = 2. * (np.log(model_powers[0]) + data_powers[0]/model_powers[0] + np.log(model_powers[1]) + data_powers[1]/model_powers[1] +
                        np.log(model_powers[2]) + data_powers[2]/model_powers[2])
         self.assertEqual(log_like, chi_log_likehood(data_powers, model_powers), "Log-likehood for odd values gives unexpected results")
 
