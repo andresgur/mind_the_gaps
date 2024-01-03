@@ -1,7 +1,10 @@
 GP time series analysis with focus on period detection on irregularly-sampled stochastically-varying astronomical time series
 
 # Installation
-move the setup.py outside the mind_the_gaps folder and run `pip install .`
+To install the repository, first clone to your compute:
+`git clone https://github.com/andresgur/mind_the_gaps`
+then enter the `mind_the_gaps` main directory and pip install it by running:
+ `pip install .`
 
 
 # Scripts
