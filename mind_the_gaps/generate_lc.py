@@ -25,6 +25,15 @@ import random
 
 
 def read_command_line(args):
+    """ Read command line arguments and builds the input PSD
+
+    Parameters
+    ----------
+    args: argparse object,
+        The dictionary containing the command line arguments
+
+    Returns the input psd, the input parameters and the input command line used.
+    """
     models = []
     outpars = ""
     input_command = ""
@@ -268,7 +277,7 @@ if args.simulator == "E13" or args.simulator=="TK95":
 
         segment = cut_random_segment(lc_mc, duration)
 
-        lc_rates = E13_sim_TK95(segment, timestamps, pdfs, [1], half_bins=half_bins)
+        lc_rates = E13_sim_TK95(segment, timestamps, pdfs, [1], exposures=exposures)
 
     elif args.simulator=="TK95" or pdf == "Gaussian":
         warnings.warn("Using TK95 since PDF is Gaussian")
