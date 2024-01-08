@@ -1,3 +1,4 @@
+#! /usr/bin/env python
 # @Author: Andrés Gúrpide <agurpide>
 # @Date:   01-09-2022
 # @Email:  a.gurpide-lasheras@soton.ac.uk
@@ -19,7 +20,7 @@ from mind_the_gaps.psd_models import BendingPowerlaw, Lorentzian, SHO, Matern32
 from astropy.modeling.powerlaws import PowerLaw1D
 from astropy.modeling.functional_models import Const1D
 from scipy.stats import norm
-from readingutils import read_standard_lightcurve
+from mind_the_gaps.readingutils import read_standard_lightcurve
 import warnings
 import random
 
@@ -187,6 +188,8 @@ ap.add_argument("--noise_std", nargs="?", help="Standard deviation of the noise 
                 required=False, default=None, type=float)
 args = ap.parse_args()
 
+print("generate_lc:Parsed args: ", args)
+
 count_rate_file = args.file
 pdf = args.pdf
 points_remove = args.npoints
@@ -255,6 +258,7 @@ if args.simulator == "E13" or args.simulator=="TK95":
 
     # prepare TK lightcurve with correct normalization
     lc_mc = simulate_lightcurve(timestamps, psd_model, sim_dt, extension_factor=extension_factor)
+
 
     if args.simulator == "E13" and pdf!="Gaussian":
         # obtain the variance and create PDF

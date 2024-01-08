@@ -6,6 +6,16 @@ To install the repository, first clone to your compute:
 then enter the `mind_the_gaps` main directory and pip install it by running:
  `pip install .`
 
+## Prerequisites
+The code has several additional prerequisites that must be installed seperately.
+
+* `pdftex`
+* `cm-super` enhanced fonts package
+* `dvipng` image converter 
+
+On Linux, these are available through your system package manager.
+`cm-super` is available in some LaTeX package managers.
+
 
 # Scripts
 Several scripts exists that allow to perform the main tasks. Each of them has a set of input parameters, for help run

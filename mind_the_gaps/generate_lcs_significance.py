@@ -1,3 +1,4 @@
+#! /usr/bin/env python
 # @Author: Andrés Gúrpide <agurpide>
 # @Date:   01-09-2020
 # @Email:  a.gurpide-lasheras@soton.ac.uk
@@ -16,7 +17,7 @@ from astropy.visualization import quantity_support
 from multiprocessing import Pool
 from functools import partial
 from shutil import copyfile
-from readingutils import read_data, read_data2, readsimplePCCURVE, readPCCURVE
+from mind_the_gaps.readingutils import read_data, read_data2, readsimplePCCURVE, readPCCURVE
 
 
 def parse_model_name(directory):
@@ -51,9 +52,9 @@ def simulate_lcs(command): # don't pass the PDFs otherwise we the same pdf sampl
     """Wrapping function for parallelization. It simply takes the samples and simulates the lightcurve"""
     param_command = command[0]
     sim = int(command[1])
-    cmd = "python %s/scripts/pythonscripts/mind_the_gaps/mind_the_gaps/generate_lc.py %s %s --rootfile _%d_%s_ " % (home, generate_lc_args, param_command, sim, model_names_)
+    cmd = "generate_lc.py %s %s --rootfile _%d_%s_ " % (generate_lc_args, param_command, sim, model_names_)
 
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True, env=os.environ)
 
     # Wait for the process to finish and get its output
     stdout, stderr = proc.communicate()
@@ -199,8 +200,12 @@ if os.path.isfile(count_rate_file):
     if "SLURM_CPUS_PER_TASK" in os.environ:
         cores = int(os.environ['SLURM_CPUS_PER_TASK'])
         warnings.warn("The numbe of cores is being reset to SLURM_CPUS_PER_TASK = %d " % cores )
+
     with Pool(processes=cores, initializer=np.random.seed) as pool:
-        pool.map(simulate_lcs, np.array([commands, np.arange(n_sims)]).T)
+        pool.map(
+            simulate_lcs, np.array([commands, np.arange(n_sims)]).T    
+        )
+
     os.chdir("../")
     # copy the input samples file
     samples_file = os.path.basename(celerite_file)

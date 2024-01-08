@@ -1,5 +1,5 @@
 import unittest
-from .stats import *
+from mind_the_gaps.stats import *
 from scipy.stats import norm, lognorm, rv_continuous
 import numpy as np
 from scipy import special

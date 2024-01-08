@@ -16,7 +16,7 @@ import emcee
 import astropy.units as u
 from multiprocessing import Pool
 from mind_the_gaps.celerite_models import Lorentzian, DampedRandomWalk, Cosinus, BendingPowerlaw, LinearModel, GaussianModel
-import readingutils as ru
+import mind_the_gaps.readingutils as ru
 import warnings
 from scipy.stats import norm, ks_1samp
 from astropy.stats import sigma_clip
