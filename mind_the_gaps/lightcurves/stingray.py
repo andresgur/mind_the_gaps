@@ -204,6 +204,138 @@ class PatchedLightcurve(Lightcurve):
         The full header of the original FITS file, if relevant
 
     """
+    def __init__(
+        self,
+        time,
+        counts,
+        err=None,
+        input_counts=True,
+        gti=None,
+        err_dist="poisson",
+        bg_counts=None,
+        bg_ratio=None,
+        frac_exp=None,
+        mjdref=0,
+        dt=None,
+        skip_checks=False,
+        low_memory=False,
+        mission=None,
+        instr=None,
+        header=None,
+        **other_kw,
+    ):
+        StingrayTimeseries.__init__(self)
+
+        if other_kw != {}:
+            warnings.warn(f"Unrecognized keywords: {list(other_kw.keys())}")
+
+        time, mjdref = interpret_times(time, mjdref=mjdref)
+
+        time = np.asarray(time)
+        counts = np.asarray(counts)
+
+        if err is not None:
+            err = np.asarray(err)
+
+        if not skip_checks:
+            time, counts, err = self.initial_optional_checks(time, counts, err, gti=gti)
+
+        if time.size != counts.size:
+            raise StingrayError("time and counts array are not " "of the same length!")
+
+        # if time.size <= 1:
+        #     raise StingrayError("A single or no data points can not create " "a lightcurve!")
+
+        if err_dist.lower() not in valid_statistics:
+            # err_dist set can be increased with other statistics
+            raise StingrayError(
+                "Statistic not recognized." "Please select one of these: ",
+                "{}".format(valid_statistics),
+            )
+        elif not err_dist.lower() == "poisson":
+            simon(
+                "Stingray only uses poisson err_dist at the moment. "
+                "All analysis in the light curve will assume Poisson "
+                "errors. "
+                "Sorry for the inconvenience."
+            )
+
+        self.mjdref = mjdref
+        self._time = time
+
+        if dt is None:
+            logging.info(
+                "Computing the bin time ``dt``. This can take "
+                "time. If you know the bin time, please specify it"
+                " at light curve creation"
+            )
+            dt = np.median(np.diff(self._time))
+
+        self.dt = dt
+
+        if isinstance(dt, Iterable):
+            warnings.warn(
+                "Some functionalities of Stingray Lightcurve will not work when `dt` is Iterable"
+            )
+
+        self.err_dist = err_dist
+
+        if isinstance(self.dt, Iterable):
+            self.tstart = self._time[0] - 0.5 * self.dt[0]
+            self.tseg = self._time[-1] - self._time[0] + self.dt[-1] / 2 + self.dt[0] / 2
+        else:
+            self.tstart = self._time[0] - 0.5 * self.dt
+            self.tseg = self._time[-1] - self._time[0] + self.dt
+
+        self._gti = None
+        if gti is not None:
+            self._gti = np.asarray(gti)
+
+        self._mask = None
+        self._counts = None
+        self._counts_err = None
+        self._countrate = None
+        self._countrate_err = None
+        self._meanrate = None
+        self._meancounts = None
+        self._bin_lo = None
+        self._bin_hi = None
+        self._n = None
+        self.mission = mission
+        self.instr = instr
+        self.header = header
+
+        self.input_counts = input_counts
+        self.low_memory = low_memory
+        if input_counts:
+            self._counts = np.asarray(counts)
+            self._counts_err = err
+        else:
+            self._countrate = np.asarray(counts)
+            self._countrate_err = err
+
+        if bg_counts is not None:
+            self.bg_counts = np.asarray(bg_counts)
+        else:
+            self.bg_counts = None
+        if bg_ratio is not None:
+            self.bg_ratio = np.asarray(bg_ratio)
+        else:
+            self.bg_ratio = None
+        if frac_exp is not None:
+            self.frac_exp = np.asarray(frac_exp)
+        else:
+            self.frac_exp = None
+
+        if not skip_checks:
+            self.check_lightcurve()
+        if os.name == "nt":
+            warnings.warn(
+                "On Windows, the size of an integer is 32 bits. "
+                "To avoid integer overflow, I'm converting the input array to float"
+            )
+            counts = counts.astype(float)
+
 
     def _operation_with_other_lc(self, other, operation):
         """
