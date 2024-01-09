@@ -94,8 +94,6 @@ quantity_support()
 
 home = os.getenv("HOME")
 
-plt.style.use('%s/.config/matplotlib/stylelib/paper.mplstyle' % home)
-
 tmin = args.tmin
 tmax = args.tmax
 noise_std = args.noise_std
@@ -118,7 +116,7 @@ if os.path.isfile(count_rate_file):
     duration = (timestamps[-1] - timestamps[0]).to(u.s)
     dt = np.median(np.diff(timestamps.to(u.s).value))
     # in seconds
-    sim_dt = (np.min(exposures) / 2)
+    sim_dt = np.min(exposures) / 2
     maximum_frequency = 1 / (sim_dt * u.s)
     minimum_frequency = 1 / (duration)
 

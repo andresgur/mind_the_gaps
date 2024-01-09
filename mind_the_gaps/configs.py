@@ -1,4 +1,8 @@
-
+# @Author: Andrés Gúrpide <agurpide>
+# @Date:   05-02-2022
+# @Email:  agurpidelash@irap.omp.eu
+# @Last modified by:   smangham
+# @Last modified time: 09-01-2024
 import celerite
 import warnings
 import numpy as np

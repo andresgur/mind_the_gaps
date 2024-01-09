@@ -111,7 +111,7 @@ if os.path.isfile(count_rate_file):
         timestamps = np.array([timestamps[i].value for i in range(len(timestamps)) if i not in ints])  << u.s
         rates = np.array([rates[i] for i in range(len(rates)) if i not in ints])
         errors = np.array([errors[i] for i in range(len(errors)) if i not in ints])
-        exposures = np.array([exposures[i].value for i in range(len(exposures)) if i not in ints]) << u.s
+        exposures = np.array([exposures[i].value for i in range(len(exposures)) if i not in ints])
         bkg_counts = np.array([bkg_counts[i] for i in range(len(bkg_counts)) if i not in ints])
         bkg_rate_err = np.array([bkg_rate_err[i] for i in range(len(bkg_rate_err)) if i not in ints])
 

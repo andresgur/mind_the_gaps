@@ -14,7 +14,7 @@ from astropy.visualization import quantity_support
 import time
 from multiprocessing import Pool
 from functools import partial
-from mind_the_gaps.simulator import tk95_sim, cut_random_segment, simulate_lightcurve, E13_sim_TK95, add_kraft_noise, add_poisson_noise, cut_downsample
+from mind_the_gaps.simulator import tk95_sim, cut_random_segment, simulate_lightcurve, E13_sim_TK95, add_kraft_noise, add_poisson_noise, downsample
 from mind_the_gaps.stats import create_log_normal, create_uniform_distribution
 from mind_the_gaps.psd_models import BendingPowerlaw, Lorentzian, SHO, Matern32
 from astropy.modeling.powerlaws import PowerLaw1D
@@ -211,17 +211,18 @@ if points_remove > 0:
     timestamps = np.array([timestamps[i].value for i in range(len(timestamps)) if i not in ints])  << u.s
     rates = np.array([rates[i] for i in range(len(rates)) if i not in ints])
     errors = np.array([errors[i] for i in range(len(rates)) if i not in ints])
-    exposures = np.array([exposures[i].value for i in range(len(exposures)) if i not in ints]) << u.s
+    exposures = np.array([exposures[i].value for i in range(len(exposures)) if i not in ints])
     bkg_counts = np.array([bkg_counts[i] for i in range(len(bkg_counts)) if i not in ints])
     bkg_rate_err = np.array([bkg_rate_err[i] for i in range(len(bkg_rate_err)) if i not in ints])
 
 
 duration = timestamps[-1] - timestamps[0]
-sim_dt = (np.min(exposures) / 2).to(u.s).value
+# in seconds and unitless
+sim_dt = np.min(exposures) / 2
 meanrate = np.mean(rates)
 maximum_frequency = 1 / (sim_dt * u.s)
 minimum_frequency = 1 / (duration)
-livetime = np.sum(exposures)
+livetime = np.sum(exposures) * u.s
 period_range = "%.1f-%.1f" % ((1 / (maximum_frequency.to("d**-1").value)), (1 / (minimum_frequency.to("d**-1").value)))
 print("Duration: %.2f days" % (duration.to(u.d).value))
 print("Period range explored for the integration of the variance: %s (days)" % period_range)
@@ -233,7 +234,6 @@ if not os.path.isdir(outdir):
     os.mkdir(outdir)
 # strip units
 timestamps = timestamps.value
-exposures = exposures.value
 
 if args.simulator == "E13" or args.simulator=="TK95":
 
@@ -251,41 +251,41 @@ if args.simulator == "E13" or args.simulator=="TK95":
     print("PDF model\n--------\n %s\n---------" % pdf)
 
     # the 20 is arbitrary but to make sure we get the variance right for highly peaked components
-    df_int = 1 / (duration.to(u.s).value * extension_factor)
-    dw_int = df_int * 2 * np.pi # frequency differential in angular units
-    fnyq = maximum_frequency.value # already divided by 2
-    #fnyq = 1 / (2 * lc.dt)
+    # eventually remove these things
+    #df_int = 1 / (duration.to(u.s).value * extension_factor)
+    #dw_int = df_int * 2 * np.pi # frequency differential in angular units
+    #fnyq = maximum_frequency.value # already divided by 2
 
     # prepare TK lightcurve with correct normalization
     lc_mc = simulate_lightcurve(timestamps, psd_model, sim_dt, extension_factor=extension_factor)
 
+    half_bins = exposures / 2
+    start_time = timestamps[0] - 2 * half_bins[0]
+    end_time = timestamps[-1] + 3 * half_bins[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
+    duration = end_time - start_time
+
+    segment = cut_random_segment(lc_mc, duration)
+    sample_variance = np.var(segment.countrate)
 
     if args.simulator == "E13" and pdf!="Gaussian":
         # obtain the variance and create PDF
-        int_freq = np.arange(minimum_frequency.to(1 / u.s).value, fnyq, df_int) # frequencies over which to integrate
-        w_int = int_freq * 2 * np.pi
-        normalization_factor =  2 / np.sqrt(2 * np.pi) # this factor accounts for the fact that we only integrate positive frequencies and the 1 / sqrt(2pi) from the Fourier transform
-        var = np.sum(psd_model(w_int)) * dw_int * normalization_factor
-
+        ##int_freq = np.arange(minimum_frequency.to(1 / u.s).value, fnyq, df_int) # frequencies over which to integrate
+        ##w_int = int_freq * 2 * np.pi
+        ##normalization_factor =  2 / np.sqrt(2 * np.pi) # this factor accounts for the fact that we only integrate positive frequencies and the 1 / sqrt(2pi) from the Fourier transform
+        ##var = np.sum(psd_model(w_int)) * dw_int * normalization_factor
         if pdf == "Lognormal":
-            pdfs = [create_log_normal(meanrate, var)]
+            pdfs = [create_log_normal(meanrate, sample_variance)]
         elif pdf== "Uniform":
-            pdfs = [create_uniform_distribution(meanrate, var)]
+            pdfs = [create_uniform_distribution(meanrate, sample_variance)]
         elif pdf=="Gaussian":
-            pdfs = [norm(loc=meanrate, scale=np.sqrt(var))]
+            pdfs = [norm(loc=meanrate, scale=np.sqrt(sample_variance))]
 
-        half_bins = exposures / 2
-        start_time = timestamps[0] - 2 * half_bins[0]
-        end_time = timestamps[-1] + 3 * half_bins[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
-        duration = end_time - start_time
-
-        segment = cut_random_segment(lc_mc, duration)
-
-        lc_rates = E13_sim_TK95(segment, timestamps, pdfs, [1], exposures=exposures)
+        lc_rates = E13_sim_TK95(segment, timestamps, pdfs, [1],
+                                exposures=exposures, max_iter=400)
 
     elif args.simulator=="TK95" or pdf == "Gaussian":
         warnings.warn("Using TK95 since PDF is Gaussian")
-        lc_rates = cut_downsample(lc_mc, timestamps, meanrate, exposures)
+        lc_rates = downsample(segment, timestamps, exposures)
         # add the mean
         lc_rates += meanrate - np.mean(lc_rates)
     # add Gaussian or Poisson noise
@@ -305,12 +305,12 @@ if args.simulator == "E13" or args.simulator=="TK95":
 
 elif args.simulator=="Shuffle":
     outpars = ""
-    var = np.var(rates)
+    sample_variance = np.var(rates)
     ind = np.random.randint(0, len(timestamps), len(timestamps))
     noisy_rates = rates[ind]
     dy = errors[ind]
 
-outfile = "lc%s%sv%.3E_n%d.dat" % (args.rootfile, outpars, var, points_remove)
+outfile = "lc%s%sv%.3E_n%d.dat" % (args.rootfile, outpars, sample_variance, points_remove)
 outputs = np.asarray([timestamps, noisy_rates, dy])
 np.savetxt("%s/%s" % (outdir, outfile), outputs.T, delimiter="\t", fmt="%.6f", header="t\trate\terror")
 print("Simulation completed", flush=True)
