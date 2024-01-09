@@ -14,7 +14,7 @@ from astropy.visualization import quantity_support
 import time
 from multiprocessing import Pool
 from functools import partial
-from mind_the_gaps.simulator import tk95_sim, cut_random_segment, simulate_lightcurve, E13_sim_TK95, add_kraft_noise, add_poisson_noise
+from mind_the_gaps.simulator import tk95_sim, cut_random_segment, simulate_lightcurve, E13_sim_TK95, add_kraft_noise, add_poisson_noise, cut_downsample
 from mind_the_gaps.stats import create_log_normal, create_uniform_distribution
 from mind_the_gaps.psd_models import BendingPowerlaw, Lorentzian, SHO, Matern32
 from astropy.modeling.powerlaws import PowerLaw1D
@@ -145,7 +145,7 @@ def read_config_file(config_file):
                 setattr(model_component, parname, np.exp(parameter_log))
                 outpars += "%s%.3f_" % (parname, parameter_log)
         elif row["model"] =="Powerlaw":
-            model_component = Powerlaw1D()
+            model_component = PowerLaw1D()
             # set the parameters
             for parname in model_component.param_names:
                 parameter_log = float(row["log%s" % parname])

@@ -10,10 +10,14 @@ setup(
         "mind_the_gaps"
     ],
     scripts=[
-        "mind_the_gaps/celerite_script",
-        "mind_the_gaps/generate_lc",
-        "mind_the_gaps/generate_lcs_significance",
-        "mind_the_gaps/fit_lcs",
+        "scripts/celerite_script.py",
+        "scripts/generate_lc.py",
+        "scripts/generate_lcs_significance.py",
+        "scripts/fit_lcs.py",
+        "scripts/generate_lcs_goodness.py",
+        "scripts/generate_lcs_significance.py",
+        "scripts/generate_strategy.py",
+        "scripts/plot_ratio_test.py",
     ],
 
     long_description="see README.md", 

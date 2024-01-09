@@ -138,3 +138,8 @@ def create_uniform_distribution(mean, var):
     #In the standard form, the distribution is uniform on [0, 1]. Using the parameters loc and scale, one obtains the uniform distribution on [loc, loc + scale].
     pdf = uniform(loc=a, scale=b-a)
     return pdf
+
+
+def neg_log_like(params, y, gp):
+    gp.set_parameter_vector(params)
+    return -gp.log_likelihood(y)

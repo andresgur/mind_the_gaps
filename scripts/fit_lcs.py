@@ -15,7 +15,8 @@ from multiprocessing import Pool
 import warnings
 import matplotlib.pyplot as plt
 import time
-from mind_the_gaps.celerite_script import read_config_file, neg_log_like
+from mind_the_gaps.stats import neg_log_like
+from mind_the_gaps.configs import read_config_file
 
 os.environ["OMP_NUM_THREADS"] = "1" # https://emcee.readthedocs.io/en/stable/tutorials/parallel/
 

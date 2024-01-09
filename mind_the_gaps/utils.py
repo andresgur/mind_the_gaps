@@ -6,6 +6,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from lmfit.models import SineModel, ConstantModel
+from scipy.optimize import minimize
 
 
 def phase_fold(timestamps, y, folding_frequency, dy=None, time_0=0, n_bins=10):
