@@ -1,4 +1,5 @@
-from setuptools import setup
+from setuptools import setup, find_packages
+
 
 setup(
     name="mind_the_gaps", 
@@ -6,9 +7,7 @@ setup(
     author_email="andres.gurpide@gmail.com",
     description="Functions to manipulate and simulate lightcurves", 
     version="1.8",
-    packages=[
-        "mind_the_gaps"
-    ],
+    packages=find_packages(),
     scripts=[
         "scripts/celerite_script.py",
         "scripts/generate_lc.py",
@@ -18,6 +17,15 @@ setup(
         "scripts/generate_lcs_significance.py",
         "scripts/generate_strategy.py",
         "scripts/plot_ratio_test.py",
+    ],
+    test_suite='tests',
+    
+    keywords=[
+        "???"
+    ],
+    classifiers=[ 
+        "Programming Language :: Python :: 3",
+        "Topic :: Scientific/Engineering :: Physics"
     ],
 
     long_description="see README.md", 
