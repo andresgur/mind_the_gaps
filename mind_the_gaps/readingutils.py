@@ -36,7 +36,7 @@ def read_data(input_file, tmin=0, tmax=np.inf):
 
     y = filtered_data[rate_column]
     yerr = (-filtered_data["%sneg" % rate_column] + filtered_data["%spos" % rate_column]) / 2
-    exposures = filtered_data[exposure_column] << u.s
+    exposures = filtered_data[exposure_column]
     bkg_rate_err = filtered_data[bkg_rate_err]
     bkg_counts = filtered_data[bkg_counts_column]
     corr_factor = filtered_data[corr_factor_column]
@@ -252,7 +252,7 @@ def read_standard_lightcurve(input_file):
     timestamps = lightcurve["t"] << u.s
     rates = lightcurve["rate"]
     errors = lightcurve["error"]
-    exposures = lightcurve["exposure"] << u.s
+    exposures = lightcurve["exposure"]
     bkg_counts = lightcurve["bkg_counts"]
     bkg_rate_err = lightcurve["bkg_rate_err"]
     return timestamps, rates, errors, exposures, bkg_counts, bkg_rate_err

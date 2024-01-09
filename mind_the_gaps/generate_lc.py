@@ -208,17 +208,18 @@ if points_remove > 0:
     timestamps = np.array([timestamps[i].value for i in range(len(timestamps)) if i not in ints])  << u.s
     rates = np.array([rates[i] for i in range(len(rates)) if i not in ints])
     errors = np.array([errors[i] for i in range(len(rates)) if i not in ints])
-    exposures = np.array([exposures[i].value for i in range(len(exposures)) if i not in ints]) << u.s
+    exposures = np.array([exposures[i].value for i in range(len(exposures)) if i not in ints])
     bkg_counts = np.array([bkg_counts[i] for i in range(len(bkg_counts)) if i not in ints])
     bkg_rate_err = np.array([bkg_rate_err[i] for i in range(len(bkg_rate_err)) if i not in ints])
 
 
 duration = timestamps[-1] - timestamps[0]
-sim_dt = (np.min(exposures) / 2).to(u.s).value
+# in seconds and unitless
+sim_dt = np.min(exposures) / 2
 meanrate = np.mean(rates)
 maximum_frequency = 1 / (sim_dt * u.s)
 minimum_frequency = 1 / (duration)
-livetime = np.sum(exposures)
+livetime = np.sum(exposures) * u.s
 period_range = "%.1f-%.1f" % ((1 / (maximum_frequency.to("d**-1").value)), (1 / (minimum_frequency.to("d**-1").value)))
 print("Duration: %.2f days" % (duration.to(u.d).value))
 print("Period range explored for the integration of the variance: %s (days)" % period_range)
@@ -230,7 +231,6 @@ if not os.path.isdir(outdir):
     os.mkdir(outdir)
 # strip units
 timestamps = timestamps.value
-exposures = exposures.value
 
 if args.simulator == "E13" or args.simulator=="TK95":
 
