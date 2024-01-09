@@ -93,8 +93,6 @@ quantity_support()
 
 home = os.getenv("HOME")
 
-plt.style.use('%s/.config/matplotlib/stylelib/paper.mplstyle' % home)
-
 tmin = args.tmin
 tmax = args.tmax
 noise_std = args.noise_std
