@@ -1,3 +1,4 @@
+#! /usr/bin/env python
 # @Author: Andrés Gúrpide <agurpide>
 # @Date:   01-09-2022
 # @Email:  a.gurpide-lasheras@soton.ac.uk
@@ -19,7 +20,7 @@ from mind_the_gaps.psd_models import BendingPowerlaw, Lorentzian, SHO, Matern32
 from astropy.modeling.powerlaws import PowerLaw1D
 from astropy.modeling.functional_models import Const1D
 from scipy.stats import norm
-from readingutils import read_standard_lightcurve
+from mind_the_gaps.readingutils import read_standard_lightcurve
 import warnings
 import random
 
@@ -144,7 +145,7 @@ def read_config_file(config_file):
                 setattr(model_component, parname, np.exp(parameter_log))
                 outpars += "%s%.3f_" % (parname, parameter_log)
         elif row["model"] =="Powerlaw":
-            model_component = Powerlaw1D()
+            model_component = PowerLaw1D()
             # set the parameters
             for parname in model_component.param_names:
                 parameter_log = float(row["log%s" % parname])
@@ -186,6 +187,8 @@ ap.add_argument("-n", "--npoints", nargs="?", help="Remove any number of datapoi
 ap.add_argument("--noise_std", nargs="?", help="Standard deviation of the noise if Gaussian. Otherwise assume Poisson errors based on the counts. Useful in cases where the input lightcurves is in mag or fluxes",
                 required=False, default=None, type=float)
 args = ap.parse_args()
+
+print("generate_lc:Parsed args: ", args)
 
 count_rate_file = args.file
 pdf = args.pdf

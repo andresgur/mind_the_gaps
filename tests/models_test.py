@@ -4,8 +4,8 @@
 # @Last modified by:   agurpide
 # @Last modified time: 28-03-2022
 import unittest
-from lightcurve.psd_models import BendingPowerlaw, SHO, Matern32
-from celerite_models import DampedRandomWalk as DRW_celerite
+from mind_the_gaps.psd_models import BendingPowerlaw, SHO, Matern32
+from mind_the_gaps.celerite_models import DampedRandomWalk as DRW_celerite
 from celerite.terms import SHOTerm, Matern32Term
 import numpy as np
 import matplotlib.pyplot as plt

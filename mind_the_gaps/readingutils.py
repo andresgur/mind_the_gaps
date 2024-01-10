@@ -8,6 +8,7 @@ from astropy.time import Time
 import os
 from astropy.io import fits
 import astropy.units as u
+import warnings
 
 
 def read_data(input_file, tmin=0, tmax=np.inf):

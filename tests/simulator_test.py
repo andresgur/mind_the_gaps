@@ -6,7 +6,7 @@
 import unittest
 from mind_the_gaps.psd_models import BendingPowerlaw, Lorentzian
 from mind_the_gaps.simulator import *
-from lomb_scargle.fitting import fit_psd_powerlaw
+from mind_the_gaps.fitting import fit_psd_powerlaw
 from astropy.modeling.powerlaws import BrokenPowerLaw1D, PowerLaw1D, SmoothlyBrokenPowerLaw1D
 import time
 import matplotlib.pyplot as plt
@@ -304,8 +304,6 @@ class TestSimulator(unittest.TestCase):
                          extension_factor=2, max_iter=1000, bin_exposures=bin_exposures)
         self.assertAlmostEqual(np.mean(erates), mean, delta=sigma, msg="E13 not working with SmoothlyBrokenPowerLaw1D (mean)")
         self.assertAlmostEqual(np.std(erates), sigma, delta=sigma, msg="E13 not working with SmoothlyBrokenPowerLaw1D (sigma)")
-
-
 
 
 if __name__ == '__main__':

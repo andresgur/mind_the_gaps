@@ -15,7 +15,7 @@ from functools import partial
 from shutil import copyfile
 import warnings
 import subprocess
-from readingutils import read_data, read_data2, readsimplePCCURVE, readPCCURVE
+from mind_the_gaps.readingutils import read_data, read_data2, readsimplePCCURVE, readPCCURVE
 import random
 
 

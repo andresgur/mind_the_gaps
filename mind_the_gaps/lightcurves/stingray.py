@@ -1,11 +1,6 @@
-"""
-Stingray Lightcurves
-
-Contains Lightcurve classes derived from the Stingray lightcurve class.
-"""
-from stingray import Lightcurve
-
-
+# @Author: Stingray collaboration
+# @Last modified by:   smangham
+# @Last modified time: 09-01-2024
 import os
 import copy
 import logging
@@ -17,8 +12,9 @@ from astropy.table import Table
 from astropy.time import TimeDelta
 from astropy import units as u
 
-from stingray.base import StingrayTimeseries
 import stingray.utils as utils
+from stingray.base import StingrayTimeseries
+from stingray import Lightcurve
 from stingray.exceptions import StingrayError
 from stingray.gti import (
     check_gtis,
