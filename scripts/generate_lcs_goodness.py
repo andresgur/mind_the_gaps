@@ -20,7 +20,16 @@ import random
 
 
 def create_data_selection_figure(outdir, tmax, tmin):
-    """Create figure with the data range used"""
+    """Create figure with the data range used
+
+    Parameters
+    outdir: str,
+        Output dir where to store the figure
+    tmin: float,
+        Minimum time to indicate on the figure (in same units as lightcurve timestamps)
+    tmax: float,
+        Maximum time to indicate on the figure (in same units as lightcurve timestamps)
+    """
 
     data_selection_figure, data_selection_ax = plt.subplots(1, 1)
     plt.xlabel("Time (days)")
@@ -41,7 +50,7 @@ def create_data_selection_figure(outdir, tmax, tmin):
 
 
 def simulate_lcs(sim): # don't pass the PDFs otherwise we the same pdf samples all the time!
-    cmd = "python %s/scripts/pythonscripts/mind_the_gaps/mind_the_gaps/generate_lc.py %s --rootfile _%d_" %  (home, generate_lc_args, sim)
+    cmd = "python %s/scripts/pythonscripts/mind_the_gaps/scripts/generate_lc.py %s --rootfile _%d_" %  (home, generate_lc_args, sim)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
 
     # Wait for the process to finish and get its output
@@ -85,9 +94,12 @@ pdf = args.pdf
 base_command = "python %s -n %d -f %s --tmin %.2f --tmax %.2f -c %d -s %s -e %.1f --npoints %d --pdf %s -o %s" % (__file__, args.n_sims, args.file,
                 args.tmin, args.tmax, cores, simulator, extension_factor, points_remove, pdf, args.outdir)
 if args.command is not None:
-    python_command = base_command + "--command %s" % args.command
+    python_command = base_command + " --command %s" % args.command
 if args.config is not None:
-    python_command = base_command + "--config %s" % args.config
+    python_command = base_command + " --config %s" % args.config
+if args.noise_std is not None:
+    python_command = base_command + " --noise_std %.3f" % args.noise_std
+
 quantity_support()
 
 home = os.getenv("HOME")

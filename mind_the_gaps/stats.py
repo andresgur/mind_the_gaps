@@ -55,7 +55,7 @@ def chi_cov(powers_data, model_powers=None, inv_cov=None):
     return np.matmul(np.matmul(data_model, inv_cov), data_model.T)
 
 
-def chi_log_likehood(powers_data, model_pows=None, parity=1):
+def chi_log_likehood(powers_data, model_pows=None, nyquist=False):
     """Statistic from Vaughan et al. 2005 Eq. A.3 / Emmanolopoulos+2013 A 11. The last frequency is assumed to be the Nyquist frequency
     and it is also assumed that the 0 frequency power is not given for the calculation of the parity
 
@@ -63,11 +63,14 @@ def chi_log_likehood(powers_data, model_pows=None, parity=1):
         The spectral powers of the data or the realization for the statistic has to be estimated
     model_pows: array_like
         The model
-    parity: int
-        Odd or even number indicating the parity. Assume odd by default
+    nyquist: bool,
+        Indicates whether the Nyquist frequency is included. Default False
     """
-    if parity % 2 == 0:
-        log_like = 2 * np.sum(np.log(model_pows[:-1]) + powers_data[:-1]/ model_pows[:-1]) + np.log(np.pi * powers_data[-1] * model_pows[-1]) + 2 * powers_data[-1] / model_pows[-1]
+
+    if nyquist:
+        log_like = chi_log_likehood_nonyq(powers_data[:-1], model_pows[:-1])
+        # add nyquist contribution
+        log_like += np.log(np.pi * powers_data[-1] * model_pows[-1]) + 2 * powers_data[-1] / model_pows[-1]
     else:
         log_like = chi_log_likehood_nonyq(powers_data, model_pows)
 
@@ -84,7 +87,7 @@ def chi_log_likehood_nonyq(powers_data, model_pows=None):
         The model
     """
 
-    return 2 * np.sum(np.log(model_pows) + powers_data / model_pows)
+    return 2. * np.sum(np.log(model_pows) + powers_data / model_pows)
 
 
 def chi_square(powers_data, model_powers=None, sigmas=None):
