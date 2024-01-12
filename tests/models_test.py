@@ -34,7 +34,7 @@ class TestSimulator(unittest.TestCase):
             astropy_SHO = SHO(S_0=S_0, w_0=w_0, Q=Q)
             np.testing.assert_array_almost_equal(astropy_SHO(frequencies), cel_SHO.get_psd(frequencies))
 
-    def test_mattern(self):
+    def test_matern(self):
         sigma = 10
         rhos = [1, 10, 20]
         frequencies = np.arange(1, 1000)
