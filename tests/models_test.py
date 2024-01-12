@@ -4,8 +4,9 @@
 # @Last modified by:   agurpide
 # @Last modified time: 28-03-2022
 import unittest
-from mind_the_gaps.psd_models import BendingPowerlaw, SHO, Matern32
+from mind_the_gaps.psd_models import BendingPowerlaw, SHO, Matern32, Lorentzian
 from mind_the_gaps.celerite_models import DampedRandomWalk as DRW_celerite
+from mind_the_gaps.celerite_models import Lorentzian as celerite_Lorentzian
 from celerite.terms import SHOTerm, Matern32Term
 import numpy as np
 import matplotlib.pyplot as plt
@@ -42,6 +43,15 @@ class TestSimulator(unittest.TestCase):
             astropy_mattern = Matern32(sigma=sigma, rho=rho)
             np.testing.assert_array_almost_equal(astropy_mattern(frequencies), cel_mattern.get_psd(frequencies))
 
+    def test_Lorentzian(self):
+        Qs = [10, 1, 1 / np.sqrt(2), 0.1]
+        S_0 = 10
+        w_0 = 5
+        frequencies = np.arange(1, 1000)
+        for Q in Qs:
+            cel_Lorentzian = celerite_Lorentzian(log_S0=np.log(S_0), log_Q=np.log(Q), log_omega0=np.log(w_0))
+            astropy_Lorentzian = Lorentzian(S_0=S_0, w_0=w_0, Q=Q)
+            np.testing.assert_array_almost_equal(astropy_Lorentzian(frequencies), cel_Lorentzian.get_psd(frequencies))
 
 
 if __name__ == '__main__':
