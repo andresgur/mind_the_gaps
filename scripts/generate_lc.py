@@ -80,7 +80,7 @@ def read_command_line(args):
         parameters = args.Matern32
         for set_of_pars in parameters:
             model_component = Matern32()
-            input_command += "--Matern32 %s" % args.Powerlaw
+            input_command += "--Matern32 %s" % args.Matern32
             # set the parameters
             for parname, param in zip(model_component.param_names, set_of_pars):
                 setattr(model_component, parname, np.exp(float(param)))
