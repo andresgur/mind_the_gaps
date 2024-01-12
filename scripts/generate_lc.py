@@ -300,7 +300,7 @@ if args.simulator == "E13" or args.simulator=="TK95":
     else:
         noise_std = args.noise_std
         print("Assuming Gaussian white noise with std: %.5f" % noise_std)
-        noisy_rates = lc_rates + np.random.normal(scale=noise_std)
+        noisy_rates = lc_rates + np.random.normal(scale=noise_std, size=len(lc_rates))
         dy = errors[np.argsort(noisy_rates)]
 
 elif args.simulator=="Shuffle":
