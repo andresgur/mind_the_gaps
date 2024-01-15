@@ -16,7 +16,7 @@ import emcee
 import astropy.units as u
 from multiprocessing import Pool
 from mind_the_gaps.celerite_models import Lorentzian, DampedRandomWalk, Cosinus, BendingPowerlaw, LinearModel, GaussianModel
-from mind_the_gaps.stats import neg_log_like
+from mind_the_gaps.stats import neg_log_like, bic
 from mind_the_gaps.configs import read_config_file
 import mind_the_gaps.readingutils as ru
 import warnings
@@ -366,6 +366,7 @@ if __name__ == "__main__":
     initial_params = gp.get_parameter_vector()
     par_names = list(gp.get_parameter_names())
     bounds = np.array(gp.get_parameter_bounds())
+    k = len(gp.get_parameter_dict())
     # create init model figure
     model_fig, ax = plt.subplots()
     plt.xlabel("Frequency (days$^{-1}$)")
@@ -404,10 +405,9 @@ if __name__ == "__main__":
             raise Exception("The solver did not converge!\n %s" % solution.message)
         # bic information (equation 54 from Foreman et al 2017,
         # see also https://github.com/dfm/celerite/blob/ad3f471f06b18d233f3dab71bb1c20a316173cae/paper/figures/simulated/wrong-qpo.ipynb)
-        k = len(gp.get_parameter_dict())
-        bic = 2 * solution.fun + k * np.log(len(y))
+        BIC =  bic(-solution.fun, len(y), k)
         aicc = 2 * k + 2 * solution.fun + 2 * k * (k + 1) / (len(y) - k - 1)
-        print("BIC (the smaller the better): %.2f" % bic)
+        print("BIC (the smaller the better): %.2f" % BIC)
 
         best_params = gp.get_parameter_dict()
         print("Best-fit params\n -------")
@@ -422,18 +422,6 @@ if __name__ == "__main__":
                 omega_par = "kernel:log_rho"
                 period = np.exp(best_params[omega_par] * days_to_seconds)
                 print("Best fit period\n----------\n %.3f days\n -----" % period)
-
-        header = ""
-        outstring = ''
-        for parname, best_par in zip(par_names, best_params):
-            header += "%s\t" % parname
-            outstring += '%.3f\t' % best_params[best_par]
-
-        header += "BIC\tAICc\tloglikelihood\tparameters\tdatapoints"
-        outstring += "%.1f\t%.1f\t%.2f\t%d\t%d" % (bic, aicc, gp.log_likelihood(y), k, len(y))
-        out_file = open("%s/best_fit_par.dat" % (outdir), "w+")
-        out_file.write("%s\n%s" % (header, outstring))
-        out_file.close()
 
         celerite_figure, (ax1, ax2) = plt.subplots(2, 1, sharex=True, gridspec_kw={'hspace': 0, 'wspace': 0})
         # get model prediction
@@ -457,20 +445,33 @@ if __name__ == "__main__":
 
         outputs = np.array([time_model / days_to_seconds, pred_mean, pred_std])
         np.savetxt("%s/best_fit.dat" % outdir, outputs.T, header="time(d)\tmodel\tstd", fmt="%.6f")
+
         # no need to pass time here as if this is omitted the coordinates will be assumed to be x from GP.compute() and an efficient method will be used to compute the prediction (https://celerite.readthedocs.io/en/stable/python/gp/)
         #gp.compute(time, yerr) no need as we already call compute above
         pred_mean, pred_var = gp.predict(y, time, return_var=True, return_cov=False)
         try:
-            standarized_residuals(y, pred_mean, np.sqrt(pred_var), "best_fit")
+            pvalue = standarized_residuals(y, pred_mean, np.sqrt(pred_var), "best_fit")
         except ValueError as e:
             print("Error when computing best_fit standarized residuals")
             print(e)
+            pvalue = 0
         ax2.errorbar(time / days_to_seconds, (y - pred_mean) / yerr, yerr=1, fmt=".k", capsize=0)
         ax2.axhline(y=0, ls="--", color="#002FA7")
         ax2.set_ylabel("Residuals")
         ax2.set_xlabel("Time (days)")
         celerite_figure.savefig("%s/best_fit.png" % (outdir))
         plt.close(celerite_figure)
+
+        # store best fit parameters and fit statistics
+        header = "#file\tloglikelihood\tBIC\tAICc\tpvalue\tparameters\tdatapoints"
+        outstring = "%s\t%.1f\t%.1f\t%.2f\t%.3f\t%d\t%d" % (os.path.basename(count_rate_file), -solution.fun, BIC, aicc, pvalue, k, len(y))
+        for parname, best_par in zip(par_names, best_params):
+            header += "\t%s" % parname
+            outstring += '\t%.3f' % best_params[best_par]
+
+        out_file = open("%s/parameters_fit.dat" % (outdir), "w+")
+        out_file.write("%s\n%s" % (header, outstring))
+        out_file.close()
 
         # plot PSD from the best fit
         psd_best_fit_figure, psd_best_fit_ax = plt.subplots()
@@ -643,10 +644,10 @@ if __name__ == "__main__":
 
     outputs = np.vstack((samples.T, loglikes))
 
-    header = "\t".join(cols) + "\tloglikehood"
+    header_samples = "\t".join(cols) + "\tloglikehood"
 
     np.savetxt("%s/samples.dat" % outdir, outputs.T, delimiter="\t", fmt="%.5f",
-              header=header)
+              header=header_samples)
 
     best_loglikehood = np.argmax(loglikes)
     # save contours for each param indicating the maximum
@@ -666,11 +667,7 @@ if __name__ == "__main__":
     # ind_omega = par_names.index("kernel:%s" % "log_omega0")
 
     # save max params and standarized residuals
-    best_pars = final_samples[best_loglikehood]
-
-    np.savetxt("%s/parameter_max.dat" % outdir, best_pars.T,
-               header="\t".join(gp.get_parameter_names()), fmt="%.2f")
-
+    best_params = final_samples[best_loglikehood]
     gp.set_parameter_vector(best_pars)
     gp.compute(time, yerr)
     # (No need to pass time as it'll be assumed the same datapoints as GP compute (https://celerite.readthedocs.io/en/stable/python/gp/)
@@ -684,14 +681,19 @@ if __name__ == "__main__":
 
     # best parameter stats
     max_loglikehood = loglikes[best_loglikehood]
-    k = len(gp.get_parameter_dict())
-    bic = - 2 * loglikes[best_loglikehood] + k * np.log(len(y))
-    aicc = 2 * k - 2 * loglikes[best_loglikehood] + 2 * k * (k + 1) / (len(y) - k - 1)
+    BIC = bic(max_loglikehood, len(y), k)
+    aicc = 2 * k - 2 * max_loglikehood + 2 * k * (k + 1) / (len(y) - k - 1)
+    header = "#file\tloglikelihood\tBIC\tAICc\tpvalue\tparameters\tdatapoints"
+    outstring = "%s\t%.1f\t%.1f\t%.2f\t%.3f\t%d\t%d" % (os.path.basename(count_rate_file), max_loglikehood, BIC, aicc, pvalue, k, len(y))
+    for parname, best_par in zip(par_names, best_params):
+        header += "\t%s" % parname
+        outstring += '\t%.3f' % best_params
 
-    out_file = open("%s/max_log_likehood.txt" % (outdir), "w+")
-    out_file.write("#loglikehood\tBIC\tAICc\tp-value\tn\tparams\n")
-    out_file.write("%.3f\t%.2f\t%.2f\t%.5f\t%d\t%d" % (max_loglikehood, bic, aicc, pvalue, len(y), k))
+    out_file = open("%s/parameters_max.dat" % (outdir), "w+")
+    out_file.write("%s\n%s" % (header, outstring))
     out_file.close()
+
+
 
     median_parameters = np.median(final_samples, axis=0)
     distances = np.linalg.norm(final_samples - median_parameters, axis=1)
@@ -706,28 +708,28 @@ if __name__ == "__main__":
         header += "%s\t" % parname
         dx_down, dx_up = q_50-q_16, q_84-q_50
         if "slope" in parname:
-            outstring += '%.2e$_{-%.2e}^{+%.2e}$ & ' % (q_50, dx_down, dx_up)
+            outstring += '%.2e$_{-%.2e}^{+%.2e}$\t' % (q_50, dx_down, dx_up)
         else:
-            outstring += '%.2f$_{-%.2f}^{+%.2f}$ & ' % (q_50, dx_down, dx_up)
+            outstring += '%.2f$_{-%.2f}^{+%.2f}$\t' % (q_50, dx_down, dx_up)
         if "Q" in parname:
             header += "%s & " % parname.replace("log_Q", "Q")
             q_16, q_50, q_84 = np.exp(q_16), np.exp(q_50), np.exp(q_84)
             dx_down, dx_up = q_50-q_16, q_84-q_50
-            outstring += '%.1f$^{+%.1f}_{-%.1f}$ & ' % (q_50, dx_up, dx_down)
+            outstring += '%.1f$^{+%.1f}_{-%.1f}$\t' % (q_50, dx_up, dx_down)
 
         # store also in days
         if "omega" in parname:
-            header += "%s & " % parname.replace("log_omega", "P")
+            header += "%s\t" % parname.replace("log_omega", "P")
             periods = two_pi / (np.exp(samples[:,i]) * days_to_seconds)
             q_16, q_50, q_84 = corner.quantile(periods, [0.16, 0.5, 0.84])
             dx_down, dx_up = q_50-q_16, q_84-q_50
-            outstring += '%.2f$_{-%.2f}^{+%.2f} & ' % (q_50, dx_down, dx_up)
+            outstring += '%.2f$_{-%.2f}^{+%.2f}\t' % (q_50, dx_down, dx_up)
 
             header += "%s\t" % parname.replace("log_omega", "omega")
             freqs = np.exp(samples[:,i]) / 2 / np.pi * days_to_seconds # a factor 2pi was missing
             q_16, q_50, q_84 = corner.quantile(freqs, [0.16, 0.5, 0.84])
             dx_down, dx_up = q_50-q_16, q_84-q_50
-            outstring += '%.4f$_{-%.4f}^{+%.4f} & ' % (q_50, dx_down, dx_up)
+            outstring += '%.4f$_{-%.4f}^{+%.4f}\t' % (q_50, dx_down, dx_up)
 
 
     header += "loglikehood"
