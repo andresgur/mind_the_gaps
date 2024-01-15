@@ -162,3 +162,19 @@ def bic(loglikehood, n, k):
 
     """
     return -2. * loglikehood + k * np.log(n)
+
+
+def aicc(loglikehood, n, k):
+    """Calculate the Akaike Information Criterion
+
+    Parameters
+    ----------
+    loglikehood:float,
+        The loglikehood of the model
+    n:int,
+        Number of datapoints
+    k:int,
+        Number of parameters
+
+    """
+    return 2 * k - 2 * loglikehood + 2 * k * (k + 1) / (n - k - 1)

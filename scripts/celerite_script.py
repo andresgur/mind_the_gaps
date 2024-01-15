@@ -406,7 +406,7 @@ if __name__ == "__main__":
         # bic information (equation 54 from Foreman et al 2017,
         # see also https://github.com/dfm/celerite/blob/ad3f471f06b18d233f3dab71bb1c20a316173cae/paper/figures/simulated/wrong-qpo.ipynb)
         BIC =  bic(-solution.fun, len(y), k)
-        aicc = 2 * k + 2 * solution.fun + 2 * k * (k + 1) / (len(y) - k - 1)
+        AICC = aicc(-solution.fun, len(y), k)
         print("BIC (the smaller the better): %.2f" % BIC)
 
         best_params = gp.get_parameter_dict()
@@ -464,7 +464,7 @@ if __name__ == "__main__":
 
         # store best fit parameters and fit statistics
         header = "#file\tloglikelihood\tBIC\tAICc\tpvalue\tparameters\tdatapoints"
-        outstring = "%s\t%.1f\t%.1f\t%.2f\t%.3f\t%d\t%d" % (os.path.basename(count_rate_file), -solution.fun, BIC, aicc, pvalue, k, len(y))
+        outstring = "%s\t%.1f\t%.1f\t%.2f\t%.3f\t%d\t%d" % (os.path.basename(count_rate_file), -solution.fun, BIC, AICC, pvalue, k, len(y))
         for parname, best_par in zip(par_names, best_params):
             header += "\t%s" % parname
             outstring += '\t%.3f' % best_params[best_par]
@@ -682,9 +682,10 @@ if __name__ == "__main__":
     # best parameter stats
     max_loglikehood = loglikes[best_loglikehood]
     BIC = bic(max_loglikehood, len(y), k)
-    aicc = 2 * k - 2 * max_loglikehood + 2 * k * (k + 1) / (len(y) - k - 1)
+    AICC = aicc(max_loglikehood, len(y), k)
+
     header = "#file\tloglikelihood\tBIC\tAICc\tpvalue\tparameters\tdatapoints"
-    outstring = "%s\t%.1f\t%.1f\t%.2f\t%.3f\t%d\t%d" % (os.path.basename(count_rate_file), max_loglikehood, BIC, aicc, pvalue, k, len(y))
+    outstring = "%s\t%.1f\t%.1f\t%.2f\t%.3f\t%d\t%d" % (os.path.basename(count_rate_file), max_loglikehood, BIC, AICC, pvalue, k, len(y))
     for parname, best_par in zip(par_names, best_params):
         header += "\t%s" % parname
         outstring += '\t%.3f' % best_params
