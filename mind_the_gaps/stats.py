@@ -146,3 +146,19 @@ def create_uniform_distribution(mean, var):
 def neg_log_like(params, y, gp):
     gp.set_parameter_vector(params)
     return -gp.log_likelihood(y)
+
+
+def bic(loglikehood, n, k):
+    """Calculate the Bayesian Information Criterion
+
+    Parameters
+    ----------
+    loglikehood:float,
+        The loglikehood of the model
+    n:int,
+        Number of datapoints
+    k:int,
+        Number of parameters
+
+    """
+    return -2. * loglikehood + k * np.log(n)
