@@ -7,11 +7,12 @@ import numpy as np
 import warnings
 from lmfit.models import LognormalModel, Model
 from scipy.stats import norm, poisson
-from mind_the_gaps.lightcurves.stingray import PatchedLightcurve as Lightcurve
+from stingray import Lightcurve
 from mind_the_gaps.stats import kraft_pdf
 import numexpr as ne
 import pyfftw
 from astropy.stats import poisson_conf_interval
+
 
 
 def add_poisson_noise(rates, exposures, background_counts=None, bkg_rate_err=None):
@@ -40,7 +41,7 @@ def add_kraft_noise(rates, exposures, background_counts=None, bkg_rate_err=None,
     ----------
     rates: array
         The count rates per second
-    bkg_counts: array
+    bkg_counts: float or np.ndarray
         The number of background counts. None will assume 0s
     exposures: array
         In seconds
@@ -48,6 +49,7 @@ def add_kraft_noise(rates, exposures, background_counts=None, bkg_rate_err=None,
         Error on the background rate. None will assume 0s
     kraft_counts: float
         Threshold counts below which to use Kraft+91 posterior probability distribution
+
     This method was tested for speed against a single for loop (instead of three list comprehension) and it was found to be faster using the lists (around 10% reduction in time from the for loop approach))
     """
     if bkg_rate_err is None:
@@ -55,6 +57,7 @@ def add_kraft_noise(rates, exposures, background_counts=None, bkg_rate_err=None,
 
     if background_counts is None:
         background_counts = np.zeros(len(rates), dtype=int)
+
 
     net_rates, dy = add_poisson_noise(rates, exposures, background_counts, bkg_rate_err)
     total_counts = net_rates * exposures + background_counts
@@ -68,7 +71,7 @@ def add_kraft_noise(rates, exposures, background_counts=None, bkg_rate_err=None,
     if np.any(expression):
         # calculate the medians
         pdf = kraft_pdf(a=0, b=35)
-        net_counts[expression] = [pdf(counts, bkg_counts_).median() for counts, bkg_counts_ in zip(np.round(total_counts[expression]), background_counts[expression])]
+        net_counts[expression] = [pdf(counts, bkg_counts_).median() for counts, bkg_counts_ in zip(np.round(total_counts[expression]).astype(int), background_counts[expression])]
         net_rates[expression] = net_counts[expression] / exposures[expression]
 
         # uncertainties (round to nearest integer number of counts)
