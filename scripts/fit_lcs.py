@@ -6,16 +6,14 @@
 import numpy as np
 import os
 import argparse
-from scipy.optimize import minimize
 from shutil import copyfile
 import celerite
-import emcee
-import astropy.units as u
 from multiprocessing import Pool
 import warnings
 import matplotlib.pyplot as plt
 import time
-from mind_the_gaps.stats import neg_log_like
+from mind_the_gaps.lightcurves import SimpleLightcurve
+from mind_the_gaps.gpmodelling import GPModelling
 from mind_the_gaps.configs import read_config_file
 
 os.environ["OMP_NUM_THREADS"] = "1" # https://emcee.readthedocs.io/en/stable/tutorials/parallel/
@@ -23,77 +21,40 @@ os.environ["OMP_NUM_THREADS"] = "1" # https://emcee.readthedocs.io/en/stable/tut
 
 def fit_lightcurve(input_file):
 
-    def log_probability(params):
-        """https://celerite.readthedocs.io/en/stable/tutorials/modeling/"""
-        gp.set_parameter_vector(params)
-
-        lp = gp.log_prior() # this is 0 or -inf
-        if not np.isfinite(lp):
-            return -np.inf
-        return lp + gp.log_likelihood(y)
-
-    data = np.genfromtxt(input_file, names=True, usecols=(0, 1 ,2))
-    y = data["rate"]
-    times = data["t"]
-    yerr = data["error"]
-    gp = celerite.GP(kernel, mean=np.mean(y))
-    gp.compute(times, yerr + 1.123e-12)  # You always need to call compute once.
-    print("Initial log likelihood: {0}".format(gp.log_likelihood(y)))
-    # solution contains the information about the fit. .x is the best fit parameters
-    solution = minimize(neg_log_like, initial_params, method="L-BFGS-B",
-                        bounds=gp.get_parameter_bounds(), args=(y, gp))
-    gp.set_parameter_vector(solution.x)
+    lc = SimpleLightcurve(input_file)
+    gpmodel = GPModelling(lc, kernel)
+    solution = gpmodel.fit(initial_params)
+    gpmodel.gp.set_parameter_vector(solution.x)
     #print(solution)
     print("Best-fit log-likelihood: {0} \n".format(-solution.fun)) # here is neg_log_like
 
-    initial_mcmc = np.empty((nwalkers, ndim))
-
     if solution.success:
-        #initial_samples = solution.x + 1e-2 * np.random.randn(nwalkers, ndim)
-        #reshaped_params = np.resize(solution.x, (nwalkers, ndim))
-        #initial_samples = solution.x + 1e-1 * np.random.randn(nwalkers, ndim)
-        # Gaussian centered around the best params and 1+-sigma of 10%
-
-        for i in range(nwalkers):
-            accepted = False
-
-            while not accepted:
-                # Generate random values centered around the best-fit parameters (normally 10% works fine, but increase a bit just in case to make sure walkers
-                #are independent)
-                perturbed_params = np.random.normal(solution.x, np.abs(solution.x) / 10.0)
-
-                # Check if the perturbed parameters are within the bounds
-                if np.all(np.logical_and(bounds[:, 0] <= perturbed_params, perturbed_params <= bounds[:, 1])):
-                    initial_mcmc[i] = perturbed_params
-                    accepted = True
+        initial_mcmc = gpmodel.spread_walkers(nwalkers, solution.x, bounds, 10.0)
     else:
         warnings.warn("The solver did not converge!\n %s" % solution.message)
         initial_mcmc = initial_samples
-
-    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_probability)
     try:
-        sampler.run_mcmc(initial_mcmc, max_n, progress=False)
+        # Note: Cores always need to be 1 as we are already in "Pool" mode
+        gpmodel.derive_posteriors(initial_mcmc, walkers= nwalkers, converge=True, max_steps=max_n, progress=False, fit=False, cores=1)
     except ValueError:
-        warnings.warn("Large conditional problem, assuming uniform priors")
-        sampler.run_mcmc(initial_samples, max_n, progress=False)
-
-    log_probs = sampler.get_log_prob(flat=True)
-    best_loglikehood_index = np.argmax(log_probs)
-    best_mcmc_pars = sampler.get_chain(flat=True)[best_loglikehood_index]
-
-    best_log = log_probs[best_loglikehood_index]
+        gpmodel.derive_posteriors(initial_samples, walkers= nwalkers, converge=True, max_steps=max_n, progress=False, fit=False, cores=1)
+    if gpmodel.converged:
+        best_log = gpmodel.max_loglikehood
+        best_mcmc_pars = gpmodel.max_parameters
+    else:
+        log_probs = gpmodel.sampler.get_log_prob(flat=True)
+        best_loglikehood_index = np.argmax(log_probs)
+        best_mcmc_pars = gpmodel.sampler.get_chain(flat=True)[best_loglikehood_index]
+        best_log = log_probs[best_loglikehood_index]
 
     print("MCMC chains maximum log-likelihood:\n------------------------------------------- \n {0}\n".format(best_log))
 
-    gp.set_parameter_vector(best_mcmc_pars)
+    gpmodel.gp.set_parameter_vector(best_mcmc_pars)
 
-    best_params = gp.get_parameter_dict()
+    best_params = gpmodel.gp.get_parameter_dict()
 
     for key in best_params.keys():
         best_pars[key].append(best_params[key])
-
-    print("Best-fit params\n -------")
-    print(best_params)
 
     return best_params, best_log
 
@@ -144,10 +105,7 @@ initial_params = dummy_gp.get_parameter_vector()
 bounds = np.array(dummy_gp.get_parameter_bounds())
 par_names = list(dummy_gp.get_parameter_names())
 
-
 best_pars = {key: [ ] for key in par_names} #  dictionary to store all best fit pars
-
-ndim = len(initial_params)
 
 start = time.time()
 
@@ -170,12 +128,12 @@ print("Time taken: %.2fs" % (end-start))
 with open("%s/python_command.txt" % outdir, "w+") as file:
     file.write(python_command)
 
-# get Y
-data = np.genfromtxt(input_files[0], names=True, usecols=(0, 1 ,2))
-y = data["rate"]
+# get number of datapoints
+N = len(np.genfromtxt(input_files[0], names=True, usecols=(0)))
 
+print("Number of datapoints per lightcurve: %d" % N)
 # bic information (equation 54 from Foreman et al 2017, see also https://github.com/dfm/celerite/blob/ad3f471f06b18d233f3dab71bb1c20a316173cae/paper/figures/simulated/wrong-qpo.ipynb)
-bics = -2 * np.array(log_likehoods) + len(dummy_gp.get_parameter_dict()) * np.log(len(y)) # we have now defined L as positive!
+bics = -2 * np.array(log_likehoods) + len(dummy_gp.get_parameter_dict()) * np.log(N) # we have now defined L as positive!
 
 outputs = np.vstack((input_files, log_likehoods, bics, list(best_pars.values())))
 
@@ -183,7 +141,6 @@ header = "sim\tloglikehood\tbic\t" + "\t".join(par_names)
 
 np.savetxt("%s/fits_results.dat" % outdir,
            outputs.T, header=header, fmt="%s") # store all strings as it is hard to do otherwise
-
 
 omega_par= [name for name in par_names if "omega" in name]
 
