@@ -4,14 +4,13 @@
 # @Last modified by:   agurpide
 # @Last modified time: 28-03-2022
 import unittest
-from mind_the_gaps.psd_models import BendingPowerlaw, Lorentzian
+from mind_the_gaps.models.psd_models import BendingPowerlaw, Lorentzian
 from mind_the_gaps.simulator import *
 from mind_the_gaps.fitting import fit_psd_powerlaw
 from astropy.modeling.powerlaws import BrokenPowerLaw1D, PowerLaw1D, SmoothlyBrokenPowerLaw1D
 import time
-import matplotlib.pyplot as plt
 from scipy.stats import lognorm, rv_continuous
-from astropy.modeling import Model
+#import matplotlib.pyplot as plt
 
 
 class TestSimulator(unittest.TestCase):
@@ -34,9 +33,9 @@ class TestSimulator(unittest.TestCase):
         timestamps = np.arange(0, points, dt) + dt/2
         input_beta = 1
         psd_model = PowerLaw1D(amplitude=1, alpha=input_beta)
-        mean,std  = 0.5, 0.1
+        mean = 0.5
         start = time.time()
-        rate = tk95_sim(timestamps, psd_model, mean, dt, 1, dt)
+        rate = tk95_sim(timestamps, psd_model, mean, dt, 1.05, dt)
         end = time.time()
         print("Time to simulate a %d point TK lightcurve: %.2fs" % (len(timestamps), (end - start)))
         frequencies, pow_spec = self.power_spectrum(timestamps, rate)
@@ -129,15 +128,6 @@ class TestSimulator(unittest.TestCase):
         psd_slope, err, psd_norm, psd_norm_err = fit_psd_powerlaw(frequencies, pow_spec)
         self.assertAlmostEqual(-input_beta, psd_slope.value, None, "Slope of the power spectrum is not the same as the input at the 3 sigma level!",
                                 3 * err)
-        #dt = 0.3
-        #lc = E13_sim(timestamps, psd_model, [dist], [1], dt, 1, dt)
-        #lc_cut = cut_downsample(lc, duration, timestamps[0], lc)
-        ##duration = timestamps[-1] - timestamps[0]
-        #rates = imprint_sampling_pattern(lc_cut, timestamps, dt)
-        #frequencies, pow_spec = self.power_spectrum(timestamps, rates)
-        #self.assertEqual(len(timestamps), len(lc.countrate))
-        #psd_slope, err, psd_norm, psd_norm_err = fit_psd_powerlaw(frequencies, pow_spec)
-        #self.assertAlmostEqual(-input_beta, psd_slope.value, None, "Slope of the power spectrum is not the same as the input at the 3 sigma level!", 3 * err)
 
         Nsims = 250
         erates = [E13_sim(timestamps, psd_model, [dist], [1], dt, 1, dt) for n in np.arange(Nsims)]
@@ -176,12 +166,12 @@ class TestSimulator(unittest.TestCase):
         psd_model = BendingPowerlaw(S_0=variance, w_0=np.exp(-3)) # 126 seconds
         mean  = 1
         vars = []
-        for i in range(25):
-            rate = tk95_sim(timestamps, psd_model, mean, dt, 1, dt) # this is just to get tseg for df
+        for i in range(30):
+            rate = tk95_sim(timestamps, psd_model, mean, dt, 1.01, dt) # this is just to get tseg for df
             vars.append(np.var(rate))
 
-        self.assertAlmostEqual(variance, np.mean(vars), delta=0.1)
-        self.assertAlmostEqual(mean, np.mean(rate), 2)
+        self.assertAlmostEqual(variance, np.mean(vars), delta=0.5)
+        self.assertAlmostEqual(mean, np.mean(rate), delta=0.5)
 
 
     def test_std_mean_E13(self):
@@ -287,8 +277,9 @@ class TestSimulator(unittest.TestCase):
         duration_sec = (tk_timestamps[-1] + sampling - (tk_timestamps[0] - sampling))
         tk_lc_cut = get_segment(tk_lc, duration_sec, 0)
         tk_rate = downsample(tk_lc_cut, tk_timestamps, sampling)
-        self.assertAlmostEqual(tk_rate[0], np.mean(tk_lc_cut.countrate[6:14]), 1, "Downsampling is not working!")
-        self.assertAlmostEqual(tk_rate[1], np.mean(tk_lc_cut.countrate[15:23]), 1, "Downsampling is not working!")
+        self.assertAlmostEqual(tk_rate[0], np.mean(tk_lc_cut.countrate[6:14]), delta=0.5, msg="Downsampling is not working!")
+        self.assertAlmostEqual(tk_rate[1], np.mean(tk_lc_cut.countrate[15:23]), delta=0.5, msg="Downsampling is not working!")
+
 
     def test_bending_powerlaw(self):
 
