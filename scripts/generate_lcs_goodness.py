@@ -15,7 +15,7 @@ from functools import partial
 from shutil import copyfile
 import warnings
 import subprocess
-from mind_the_gaps.readingutils import read_data, read_data2, readsimplePCCURVE, readPCCURVE
+from mind_the_gaps.lightcurves import SwiftLightcurve, SimpleLightcurve
 import random
 
 
@@ -34,15 +34,16 @@ def create_data_selection_figure(outdir, tmax, tmin):
     data_selection_figure, data_selection_ax = plt.subplots(1, 1)
     plt.xlabel("Time (days)")
     plt.ylabel("Count rates (ct/s)")
-    data_selection_ax.errorbar(timestamps.to(u.d).value, rates, yerr=errors, color="black", ls="None", marker=".")
+    data_selection_ax.errorbar(lc.times / 3600 / 24, lc.y, yerr=lc.dy, color="black", ls="None", marker=".")
 
-    data_selection_ax.axvline(((tmax * timestamps.unit).to(u.d)).value, ls="--", color="blue")
-    data_selection_ax.axvline(((tmin  * timestamps.unit).to(u.d)).value, ls="--", color="blue")
+    data_selection_ax.axvline(tmax  / 3600 / 24, ls="--", color="blue")
+    data_selection_ax.axvline(tmin   / 3600 / 24, ls="--", color="blue")
     ##data_selection_ax.set_xlim(left=0)
     plt.savefig("%s/data_selection.png" % outdir)
     plt.close(data_selection_figure)
+
     fig = plt.figure()
-    plt.errorbar(timestamps.to(u.d).value , rates, yerr=errors, color="black", ls="None", marker=".")
+    plt.errorbar(lc.times / 3600 / 24, lc.y, yerr=lc.dy, color="black", ls="None", marker=".")
     plt.xlabel("Time (days)")
     plt.ylabel("Count rates (ct/s)")
     plt.savefig("%s/lc_segment.png" % outdir)
@@ -60,15 +61,15 @@ def simulate_lcs(sim): # don't pass the PDFs otherwise we the same pdf samples a
 
 
 ap = argparse.ArgumentParser(description='Generate lightcurve from a PCCURVE.qdp and celerite samples')
-ap.add_argument("--tmin", nargs='?', help="Minimum time in MJD swift days (as in the original Swift file)", type=float,
+ap.add_argument("--tmin", nargs='?', help="Minimum time in seconds to truncate the lightcurve", type=float,
                 default=0)
-ap.add_argument("--tmax", nargs='?', help="Maximum time in MJD swift days (as in the original Swift file)",
+ap.add_argument("--tmax", nargs='?', help="Maximum time in seconds to truncate the lightcurve",
                 type=float, default=np.Infinity)
 ap.add_argument("-o", "--outdir", nargs='?', help="Output dir", type=str, default="lightcurves_goodness")
 ap.add_argument("--command", nargs="?", help="Command for the lightcurve simulation e.g. --Lorentzian X Y Z --DampedRandomWalk X Y. (For several model components, just give the parameters as ln_S0 ln_w0 ln_S1 ln_w1 for model component0, component1, etc)", type=str)
 ap.add_argument("--config", nargs="?", help="Config file with the simulation models. Will be used over command argument.", type=str)
 ap.add_argument("-n", "--n_sims", nargs='?', help="Number of simulations to perform", type=int, default=1000)
-ap.add_argument("-f", '--file', nargs='?', help="File with lightcurve count rates, background rates, etc", type=str, default='PCCURVE.qdp')
+ap.add_argument("-f", '--file', nargs=1, help="File with lightcurve count rates, background rates, etc", type=str)
 ap.add_argument("-c", '--cores', nargs='?', help="Number of CPUs for parallelization", type=int, default=11)
 ap.add_argument("-up", '--upfile', nargs='?', help="Upper limits file. Default PCUL.qdp", type=str, default='PCUL.qdp')
 ap.add_argument("-e", '--extension_factor', nargs='?', help="Generate lightcurves initially e times longer than input lightcurve to introduce red noise leakage.", type=float, default=5)
@@ -82,7 +83,7 @@ ap.add_argument("--noise_std", nargs="?", help="Standard deviation of the noise 
                 required=False, default=None, type=float)
 args = ap.parse_args()
 
-count_rate_file = args.file
+count_rate_file = args.file[0]
 n_sims = args.n_sims
 cores = args.cores
 extension_factor = args.extension_factor
@@ -91,7 +92,7 @@ noise_std = args.noise_std
 simulator = args.simulator
 pdf = args.pdf
 
-base_command = "python %s -n %d -f %s --tmin %.2f --tmax %.2f -c %d -s %s -e %.1f --npoints %d --pdf %s -o %s" % (__file__, args.n_sims, args.file,
+base_command = "python %s -n %d -f %s --tmin %.2f --tmax %.2f -c %d -s %s -e %.1f --npoints %d --pdf %s -o %s" % (__file__, args.n_sims, args.file[0],
                 args.tmin, args.tmax, cores, simulator, extension_factor, points_remove, pdf, args.outdir)
 if args.command is not None:
     python_command = base_command + " --command %s" % args.command
@@ -113,32 +114,30 @@ if tmin > tmax:
 
 if os.path.isfile(count_rate_file):
     try:
-        timestamps, rates, errors, exposures, bkg_counts, bkg_rate_err = read_data(count_rate_file, tmin, tmax)
+        lc = SwiftLightcurve(count_rate_file)
+        print("Read as Swift lightcurve...")
     except:
-        timestamps, rates, errors, exposures, bkg_counts, bkg_rate_err = read_data2(count_rate_file, tmin, tmax)
+
+        lc = SimpleLightcurve(count_rate_file)
+        print("Read as SimpleLightcurve")
+
+    lc = lc.truncate(tmin, tmax)
     # remove any random number of points
     if points_remove > 0:
         print("%d random datapoints will be removed from the lightcurve" % points_remove)
-        ints = random.sample(range(len(timestamps)), points_remove)
-        timestamps = np.array([timestamps[i].value for i in range(len(timestamps)) if i not in ints])  << u.s
-        rates = np.array([rates[i] for i in range(len(rates)) if i not in ints])
-        errors = np.array([errors[i] for i in range(len(errors)) if i not in ints])
-        exposures = np.array([exposures[i].value for i in range(len(exposures)) if i not in ints])
-        bkg_counts = np.array([bkg_counts[i] for i in range(len(bkg_counts)) if i not in ints])
-        bkg_rate_err = np.array([bkg_rate_err[i] for i in range(len(bkg_rate_err)) if i not in ints])
+        lc = lc.rand_remove(points_remove)
 
-    duration = (timestamps[-1] - timestamps[0]).to(u.s)
-    dt = np.median(np.diff(timestamps.to(u.s).value))
+    duration = lc.duration * u.s
+    dt = np.median(np.diff(lc.times))
     # in seconds
-    sim_dt = np.min(exposures) / 2
+    sim_dt = np.min(lc.exposures) / 2
     maximum_frequency = 1 / (sim_dt * u.s)
     minimum_frequency = 1 / (duration)
 
-    period_range = "%.1f-%.1f" % ((1 / (maximum_frequency.to("d**-1").value)), (1 / (minimum_frequency.to("d**-1").value)))
-    time_range = "{:0.3f}-{:0.3f}{:s}".format(timestamps[0].value, timestamps[-1].value, timestamps.unit)
+    time_range = "{:0.3f}-{:0.3f}{:s}".format(lc.times[0], lc.times[-1], "s")
     print("Time range considered: %s" % time_range)
     print("Duration: %.2f days" % (duration.to(u.d).value))
-    print("Period range explored for the integration of the variance: %s (days)" % period_range)
+    print("Extension factor: %.1f" % extension_factor)
 
     # create folder name
     model_str = "m"
@@ -156,7 +155,8 @@ if os.path.isfile(count_rate_file):
     else:
         model_str += "_config"
 
-    outdirname = "%s_%s_p%st%s_N%d_n%d" % (args.outdir, model_str, period_range, time_range, n_sims, points_remove)
+    outdirname = "%s_%s_%s_e%.1ft%s_N%d_n%d" % (args.outdir, model_str, pdf, extension_factor,
+                                                time_range, n_sims, points_remove)
     if args.outdir == "lightcurves_goodness":
         outdir = outdirname
     else:
@@ -167,13 +167,12 @@ if os.path.isfile(count_rate_file):
         os.mkdir("%s/lightcurves" % outdir)
 
     # write data out
-    outputs = np.array([timestamps.to(u.s).value, rates, errors, exposures, bkg_counts, bkg_rate_err])
-    np.savetxt("%s/lc_data.dat" % outdir, outputs.T, fmt="%.6f", header="t\trate\terror\texposure\tbkg_counts\tbkg_rate_err")
+    lc.to_csv("%s/lc_data.dat" % outdir)
     # just for the plot
     if tmin==0:
-        tmin = timestamps[0].value
+        tmin = lc.times[0]
     if tmax==np.inf:
-        tmax = timestamps[-1].value
+        tmax = lc.times[-1]
 
     create_data_selection_figure(outdir, tmin, tmax)
 
@@ -190,7 +189,7 @@ if os.path.isfile(count_rate_file):
         generate_lc_args += " --config %s" % args.config
     # command option
     else:
-        generate_lc_args += " %s" %args.command
+        generate_lc_args += " %s" % args.command
 
     # if on the cluster switch to the set number of tasks
     if "SLURM_CPUS_PER_TASK" in os.environ:
