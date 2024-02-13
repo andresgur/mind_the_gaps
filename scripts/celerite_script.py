@@ -16,7 +16,7 @@ import emcee
 import astropy.units as u
 from multiprocessing import Pool
 from mind_the_gaps.celerite_models import Lorentzian, DampedRandomWalk, Cosinus, BendingPowerlaw, LinearModel, GaussianModel
-from mind_the_gaps.stats import neg_log_like, bic
+from mind_the_gaps.stats import neg_log_like, bic, aicc
 from mind_the_gaps.configs import read_config_file
 import mind_the_gaps.readingutils as ru
 import warnings
