@@ -10,20 +10,18 @@ import argparse
 from scipy.optimize import minimize
 from shutil import copyfile
 import celerite
-from celerite.modeling import ConstantModel
 import corner
-import emcee
 import astropy.units as u
 from multiprocessing import Pool
-from mind_the_gaps.celerite_models import Lorentzian, DampedRandomWalk, Cosinus, BendingPowerlaw, LinearModel, GaussianModel
-from mind_the_gaps.stats import neg_log_like, bic, aicc
+from mind_the_gaps.stats import bic, aicc
 from mind_the_gaps.configs import read_config_file
-import mind_the_gaps.readingutils as ru
+from mind_the_gaps.lightcurves import FermiLightcurve, SwiftLightcurve, SimpleLightcurve
+from mind_the_gaps.gpmodelling import GPModelling
 import warnings
 from scipy.stats import norm, ks_1samp
 from astropy.stats import sigma_clip
-os.environ["OMP_NUM_THREADS"] = "1" # https://emcee.readthedocs.io/en/stable/tutorials/parallel/
 
+os.environ["OMP_NUM_THREADS"] = "1" # https://emcee.readthedocs.io/en/stable/tutorials/parallel/
 
 def standarized_residuals(data, model, uncer,  ouput):
     """Computes the standarized residuals and performs a KS test, testing for Gaussianity (mu=0, sigma=1)
@@ -66,41 +64,30 @@ def standarized_residuals(data, model, uncer,  ouput):
     # ks test
     gauss = norm(loc=0, scale=1)
     xrange = np.arange(np.min(std_res), np.max(std_res), 0.05)
-    plt.plot(xrange, gauss.pdf(xrange))
+    plt.plot(xrange, gauss.pdf(xrange), color="black")
     kstest_res = ks_1samp(std_res[~np.isinf(std_res)], gauss.cdf)
     plt.text(0.1, 0.7, "p-value = %.3f %%" % (kstest_res.pvalue * 100),
-             transform=ax.transAxes,fontsize=24)
+             transform=ax.transAxes, fontsize=24)
     plt.legend()
     plt.savefig("%s/standarized_res_%s.png" % (outdir, ouput), dpi=100)
+    plt.close(fig)
+
+    # plot aucorr
+    fig = plt.figure()
+    lags, acf, _, __ = plt.acorr(std_res, maxlags=None)
+    plt.axhspan(-1 / np.sqrt(len(std_res)), 1 / np.sqrt(len(std_res)), alpha=0.3, color="black")
+    plt.xlim(left=0)
+    plt.ylim(top=np.max(acf[acf < 0.99]) + 0.05) # the max after the 1.0 at the 0 lag
+    plt.xlabel("Time lag")
+    plt.ylabel("Residuals ACF")
+    plt.savefig("%s/res_acf_%s.png" % (outdir, ouput))
+    np.savetxt("%s/res_acf_%s.dat" % (outdir, ouput), np.array([lags, acf]).T, header="lags\tacf", fmt="%.5f")
     plt.close(fig)
 
     print("Mu and std of the std resduals (%.3f+-%.3f)" % (mu, std))
     print("P-value (Values <0.05 indicate the fit is bad) for the std residuals: %.5f" % kstest_res.pvalue)
     np.savetxt("%s/std_res_%s.dat" % (outdir, ouput), std_res, header="res", fmt="%.5f")
     return kstest_res.pvalue
-
-
-def log_probability(params, y, gp):
-    """Logarithm of the posteriors of the Gaussian process
-
-    Parameters
-    ----------
-    params: list
-        List of parameters of the GP at which to calculate the posteriors
-    y: array_like
-        The dataset (count rates, lightcurves, etc)
-    gp: celerite.GP
-        An instance of the Gaussian Process solver
-
-    Returns the log of the posterior (float)
-    https://celerite.readthedocs.io/en/stable/tutorials/modeling/"""
-
-    gp.set_parameter_vector(params)
-
-    lp = gp.log_prior()
-    if not np.isfinite(lp):
-        return -np.inf
-    return lp + gp.log_likelihood(y)
 
 
 def check_gaussianity(measurements):
@@ -127,80 +114,6 @@ def check_gaussianity(measurements):
     plt.savefig("%s/pdf.png" % outdir)
     plt.close(fig)
 
-
-def read_XRT_data(input_file, tmin=0, tmax=np.inf):
-    """Modify this function to read your data and filter it by time"""
-    try:
-        data = ru.readPCCURVE("%s" % input_file, minSNR=0, minSigma=0, minCts=0)
-    except ValueError:
-        data = ru.readsimplePCCURVE("%s" % input_file, minSigma=0)
-    time_column = data.dtype.names[0]
-    rate_column = data.dtype.names[3]
-
-    filtered_data = data[np.where((data["%s" % time_column] >= tmin) & (data["%s" % time_column] <=tmax))]
-
-    time = filtered_data[time_column]
-    y = filtered_data[rate_column]
-    yerr = (-filtered_data["%sneg" % rate_column] + filtered_data["%spos" % rate_column]) / 2
-    return time, y, yerr
-
-
-def read_data2(input_file, tmin=0, tmax=np.inf):
-    """Modify this function to read your data and filter it by time"""
-
-    data = np.genfromtxt("%s" % input_file, names=True)
-    time_column = data.dtype.names[0]
-    rate_column = data.dtype.names[1]
-    err_column = data.dtype.names[2]
-
-    filtered_data = data[np.where((data["%s" % time_column] >= tmin) & (data["%s" % time_column] <=tmax))]
-    if time_column.lower() in ["mjd", "jd", "day"]:
-        print("Time in days")
-        time = filtered_data[time_column] * days_to_seconds
-    else:
-        time = filtered_data[time_column]
-
-    y = filtered_data[rate_column]
-    yerr = filtered_data[err_column]
-    return time, y, yerr
-
-
-def read_rxte_data(input_file, tmin=0, tmax=np.inf):
-    """Modify this function to read your data and filter it by time"""
-    data = np.genfromtxt("%s" % input_file, names=True, skip_header=8)
-    time_column = data.dtype.names[0]
-    rate_column = data.dtype.names[1]
-    err_column = data.dtype.names[2]
-
-    filtered_data = data[np.where((data["%s" % time_column] >= tmin) & (data["%s" % time_column] <=tmax))]
-    if time_column in ["mjd", "jd", "day"]:
-        print("Time in days")
-        time = filtered_data[time_column] * days_to_seconds
-    else:
-        time = filtered_data[time_column]
-
-    y = filtered_data[rate_column]
-    yerr = filtered_data[err_column]
-    return time, y, yerr
-
-
-def read_fermi_lat(input_file, tmin=0, tmax=np.inf):
-    """Modify this function to read your data and filter it by time"""
-
-    data = np.genfromtxt("%s" % input_file, names=True, delimiter=",")
-    time_column = data.dtype.names[0]
-    rate_column = data.dtype.names[1]
-
-    filtered_data = data[np.where((data["%s" % time_column] >= tmin) & (data["%s" % time_column] <=tmax))]
-
-    if "MJD" in time_column:
-        time = filtered_data[time_column] * days_to_seconds
-    else:
-        time = filtered_data[time_column]
-
-    y = filtered_data[rate_column]
-    yerr = (np.abs(filtered_data["%s_err_neg" % rate_column]) + filtered_data["%s_err_pos" % rate_column]) / 2
-    return time, y, yerr
 
 two_pi = 2 * np.pi
 days_to_seconds = 24 * 3600
@@ -240,19 +153,21 @@ if __name__ == "__main__":
     tmin = args.tmin
     tmax = args.tmax
 
-    if tmin >= tmax:
-        raise ValueError("Minimum time (%.2es) is greater than or equal to maximum time (%.3es)!" %(tmin.value, tmax.value))
-
     try:
-        time, y, yerr = read_data2(count_rate_file, tmin, tmax)
+        lc = SimpleLightcurve(count_rate_file, skip_header=0)
     except:
         try:
-            time, y, yerr = read_XRT_data(count_rate_file, tmin, tmax)
+            # Swift xrt
+            lc = SwiftLightcurve(count_rate_file, minCts=0)
         except:
-            try:
-                time, y, yerr = read_fermi_lat(count_rate_file, tmin, tmax)
-            except:
-                time, y, yerr = read_rxte_data(count_rate_file, tmin, tmax)
+            # fermi
+            lc = FermiLightcurve(count_rate_file)
+    if "rxte" in count_rate_file:
+        lc = lc.truncate((tmin *u.d).to(u.s).value, (tmax *u.d).to(u.s).value)
+    else:
+        lc = lc.truncate(tmin, tmax)
+
+    time,y, yerr = lc.times, lc.y, lc.dy
 
     # get only positive measurements
     time, y, yerr = time[y>0], y[y>0], yerr[y>0]
@@ -261,25 +176,25 @@ if __name__ == "__main__":
         yerr = yerr / y
         y = np.log(y)
 
-    duration = time[-1] - time[0] # seconds
+    duration = lc.duration # seconds
     print("Duration: %.2fd" % (duration / days_to_seconds))
     # filter data according to input parameters
     time_range = "%.3f-%.3f" % (time[0], time[-1])
     dt = np.mean(np.diff(time))
     print("Mean sampling: %.2ed" % (dt / days_to_seconds))
-    print("Number of datapoints: %d" % len(time))
+    print("Number of datapoints: %d" % lc.n)
     # see https://dx.doi.org/10.3847/1538-4357/acbe37 see Vaughan 2003 Eq 9 and Appendix
     psd_noise_level = 2 * dt * np.mean(yerr**2)
     clipped_time_diff = sigma_clip(np.diff(time), sigma=2.5, maxiters=10, masked=False)
     psd_noise_level_median = 2 * np.median(np.diff(clipped_time_diff)) * np.mean(yerr**2)
     # timestamps to plot the model
-    t_samples = 20 * len(time) if len(time) < 5000 else 6 * len(time)
+    t_samples = 20 * lc.n if lc.n < 5000 else 6 * lc.n
     time_model = np.linspace(np.min(time), np.max(time), t_samples) # seconds
     # for plotting the PSD (if less than 500d extend a bit)
-    if duration / days_to_seconds < 800 and len(time) < 5000:
+    if duration / days_to_seconds < 800 and lc.n < 5000:
         df = 0.5 / duration
         frequencies = np.arange(1 / (5 * duration), 1 / (0.1 * dt), df) #* two_pi 0.1 / duration)
-    elif len(time) < 5000:
+    elif lc.n < 5000:
         df = 1 / duration
         frequencies = np.arange(1 / (duration), 1 / (0.1 * dt), df) #* two_pi 0.1 / duration)
     else:
@@ -310,73 +225,27 @@ if __name__ == "__main__":
     time_range_file.write("%.5f-%.5f s" % (time[0], time[-1]))
     time_range_file.close()
 
-    initial_samples = initial_samples.T
-    data_mean = np.mean(y)
-    meanmodel = ConstantModel(data_mean, bounds=[(np.min(y), np.max(y))])
+    gpmodel = GPModelling(lc, kernel, args.meanmodel)
 
-    if args.meanmodel=="Constant":
-        meanlabels = ["$\mu$"]
-        cols.extend(["mean:value"])
+    print("parameter_dict:\n{0}\n".format(gpmodel.gp.get_parameter_dict()))
+    print("parameter_names:\n{0}\n".format(gpmodel.gp.get_parameter_names()))
+    print("parameter_vector:\n{0}\n".format(gpmodel.gp.get_parameter_vector()))
+    print("parameter_bounds:\n{0}\n".format(gpmodel.gp.get_parameter_bounds()))
+    gpmodel.gp.compute(time, yerr)
+    print("Initial log likelihood: {0}".format(gpmodel.gp.log_likelihood(y)))
+    par_names = list(gpmodel.gp.get_parameter_names())
+    bounds = np.array(gpmodel.gp.get_parameter_bounds())
 
-    elif args.meanmodel=="Linear":
-        slope_guess = np.sign(y[-1] - y[0])
-        minindex = np.argmin(time)
-        maxindex = np.argmax(time)
-        slope_bound = (y[maxindex] - y[minindex]) / (time[maxindex] - time[minindex])
-        if slope_guess > 0 :
-            min_slope = slope_bound
-            max_slope = -slope_bound
-        else:
-            min_slope = -slope_bound
-            max_slope = slope_bound
-
-        meanmodel = LinearModel(np.mean(min_slope + max_slope), data_mean, bounds=[(-np.inf, np.inf), (-np.inf, np.inf)])
-        meanlabels = ["$m$", "$b$"]
-        cols.extend(["mean:slope", "mean:intercept"])
-    elif args.meanmodel=="Gaussian":
-        sigma_guess = (duration) / 2
-        amplitude_guess = (np.max(y) - np.min(y)) * np.sqrt(2 * np.pi)* sigma_guess
-        mean_guess = time[len(time)//2]
-        meanmodel = GaussianModel(mean_guess, sigma_guess, amplitude_guess,
-                                  bounds=[(time[0], time[-1]), (dt, duration), (-np.max(y) * np.sqrt(2 * np.pi) * duration, 50 * np.max(y) * np.sqrt(2 * np.pi) * duration)])
-        cols.extend(["mean:mean", "mean:sigma", "mean:amplitude"])
-        meanlabels = ["$\mu$", "$\sigma$", "$A$"]
-
-    if args.meanmodel:
-        print("Fitting for the mean. Initial value %.3f" % np.mean(y))
-        fit_mean = True
-        if args.log:
-            for meanlabel in meanlabels:
-                labels.append("$\log$ " + meanlabel)
-        else:
-            labels.extend(meanlabels)
-
-    else:
-        print("Mean will be kept fixed at %.3f" % data_mean)
-        fit_mean = False
-
-    gp = celerite.GP(kernel, mean=meanmodel, fit_mean=fit_mean)
-
-    print("parameter_dict:\n{0}\n".format(gp.get_parameter_dict()))
-    print("parameter_names:\n{0}\n".format(gp.get_parameter_names()))
-    print("parameter_vector:\n{0}\n".format(gp.get_parameter_vector()))
-    print("parameter_bounds:\n{0}\n".format(gp.get_parameter_bounds()))
-    gp.compute(time, yerr)  # You always need to call compute once.
-    print("Initial log likelihood: {0}".format(gp.log_likelihood(y)))
-    initial_params = gp.get_parameter_vector()
-    par_names = list(gp.get_parameter_names())
-    bounds = np.array(gp.get_parameter_bounds())
-    k = len(gp.get_parameter_dict())
     # create init model figure
     model_fig, ax = plt.subplots()
     plt.xlabel("Frequency (days$^{-1}$)")
     plt.ylabel("Power")
     # plot model components
-    for term, model_name in zip(gp.kernel.terms, outmodels):
+    for term, model_name in zip(gpmodel.gp.kernel.terms, outmodels):
         ax.plot(days_freqs, term.get_psd(w_frequencies), ls="--",
                              label="%s" % model_name)
     # plot total model
-    plt.plot(days_freqs, gp.kernel.get_psd(w_frequencies), ls="--", label="Total")
+    plt.plot(days_freqs, gpmodel.gp.kernel.get_psd(w_frequencies), ls="--", label="Total")
     # twin axis
     plt.legend()
     ax2 = ax.twiny()
@@ -393,27 +262,25 @@ if __name__ == "__main__":
                       dpi=100)
     plt.close(model_fig)
 
-    ndim = len(initial_params)
-
     if args.fit:
         # solution contains the information about the fit. .x is the best fit parameters
-        solution = minimize(neg_log_like, initial_params, method="L-BFGS-B", bounds=gp.get_parameter_bounds(), args=(y, gp))
-        gp.set_parameter_vector(solution.x)
+        solution = gpmodel.fit()
+
         print("Final log-likelihood (it is maximized so higher better): {0}".format(-solution.fun))
         print(solution)
         if not solution.success:
             raise Exception("The solver did not converge!\n %s" % solution.message)
         # bic information (equation 54 from Foreman et al 2017,
         # see also https://github.com/dfm/celerite/blob/ad3f471f06b18d233f3dab71bb1c20a316173cae/paper/figures/simulated/wrong-qpo.ipynb)
-        BIC =  bic(-solution.fun, len(y), k)
-        AICC = aicc(-solution.fun, len(y), k)
+        BIC =  bic(-solution.fun, lc.n, gpmodel.k)
+        AICC = aicc(-solution.fun, lc.n, gpmodel.k)
         print("BIC (the smaller the better): %.2f" % BIC)
-
-        best_params = gp.get_parameter_dict()
+        gpmodel.gp.set_parameter_vector(solution.x)
+        best_params = gpmodel.gp.get_parameter_dict()
         print("Best-fit params\n -------")
         print(best_params)
 
-        for term in gp.kernel.terms:
+        for term in gpmodel.gp.kernel.terms:
             if "kernel:log_omega0" in term.get_parameter_names():
                 omega_par = "kernel:log_omega0"
                 period = (two_pi / (np.exp(best_params[omega_par]) * days_to_seconds))
@@ -425,8 +292,8 @@ if __name__ == "__main__":
 
         celerite_figure, (ax1, ax2) = plt.subplots(2, 1, sharex=True, gridspec_kw={'hspace': 0, 'wspace': 0})
         # get model prediction
-        gp.compute(time, yerr)
-        pred_mean, pred_var = gp.predict(y, time_model, return_var=True)
+        ####gp.compute(time, yerr) --> check the tutorial compute is only called once
+        pred_mean, pred_var = gpmodel.gp.predict(y, time_model, return_var=True)
         pred_std = np.sqrt(pred_var)
 
         color = "orange"
@@ -438,23 +305,24 @@ if __name__ == "__main__":
         ax1.plot(time_model / days_to_seconds, pred_mean, color="orange", zorder=100)
         # plot mean model if given
 
-        ax1.plot(time_model / days_to_seconds, gp.mean.get_value(time_model), color="orange",
+        ax1.plot(time_model / days_to_seconds, gpmodel.gp.mean.get_value(time_model), color="orange",
                  ls="--", zorder=100)
         ax1.fill_between(time_model / days_to_seconds, pred_mean + pred_std, pred_mean - pred_std, color="orange", alpha=0.3,
                          edgecolor="none", zorder=101)
 
         outputs = np.array([time_model / days_to_seconds, pred_mean, pred_std])
-        np.savetxt("%s/best_fit.dat" % outdir, outputs.T, header="time(d)\tmodel\tstd", fmt="%.6f")
+        np.savetxt("%s/model_fit.dat" % outdir, outputs.T, header="time(d)\tmodel\tstd", fmt="%.6f")
 
         # no need to pass time here as if this is omitted the coordinates will be assumed to be x from GP.compute() and an efficient method will be used to compute the prediction (https://celerite.readthedocs.io/en/stable/python/gp/)
         #gp.compute(time, yerr) no need as we already call compute above
-        pred_mean, pred_var = gp.predict(y, time, return_var=True, return_cov=False)
+        pred_mean, pred_var = gpmodel.gp.predict(y, time, return_var=True, return_cov=False)
         try:
             pvalue = standarized_residuals(y, pred_mean, np.sqrt(pred_var), "best_fit")
         except ValueError as e:
             print("Error when computing best_fit standarized residuals")
             print(e)
             pvalue = 0
+
         ax2.errorbar(time / days_to_seconds, (y - pred_mean) / yerr, yerr=1, fmt=".k", capsize=0)
         ax2.axhline(y=0, ls="--", color="#002FA7")
         ax2.set_ylabel("Residuals")
@@ -464,7 +332,8 @@ if __name__ == "__main__":
 
         # store best fit parameters and fit statistics
         header = "#file\tloglikelihood\tBIC\tAICc\tpvalue\tparameters\tdatapoints"
-        outstring = "%s\t%.1f\t%.1f\t%.2f\t%.3f\t%d\t%d" % (os.path.basename(count_rate_file), -solution.fun, BIC, AICC, pvalue, k, len(y))
+        outstring = "%s\t%.3f\t%.2f\t%.2f\t%.3f\t%d\t%d" % (os.path.basename(count_rate_file), -solution.fun,
+                                                            BIC, AICC, pvalue, gpmodel.k, lc.n)
         for parname, best_par in zip(par_names, best_params):
             header += "\t%s" % parname
             outstring += '\t%.3f' % best_params[best_par]
@@ -478,7 +347,7 @@ if __name__ == "__main__":
         psd_best_fit_ax.set_xlabel("Frequency [days$^{-1}$]")
         psd_best_fit_ax.set_ylabel("Power")
         psd_best_fit_ax.set_yscale("log")
-        psd = gp.kernel.get_psd(w_frequencies)
+        psd = gpmodel.gp.kernel.get_psd(w_frequencies)
         psd_best_fit_ax.plot(days_freqs, psd, color=color, label="Total model")
         psd_best_fit_ax.axhline(psd_noise_level_median, ls="solid", color="black", zorder=-10)
         psd_best_fit_ax.axhline(psd_noise_level, ls="solid", color="black", zorder=-10)
@@ -493,7 +362,7 @@ if __name__ == "__main__":
         ax2.set_xlim(psd_best_fit_ax.get_xlim())
         psd_best_fit_figure.savefig("%s/psd_best_fit.png" % outdir, bbox_inches="tight")
 
-        for term in gp.kernel.terms:
+        for term in gpmodel.gp.kernel.terms:
             psd = term.get_psd(w_frequencies)
             psd_best_fit_ax.plot(days_freqs, psd, ls="--")
 
@@ -515,127 +384,70 @@ if __name__ == "__main__":
 
         # reinitialize best fit parameters
         warnings.warn("Initial samples reset based on best-fit parameters")
-        initial_samples = np.empty((nwalkers, ndim))
-        #initial_samples = solution.x + 1e-2 * np.random.randn(nwalkers, ndim)
-        #reshaped_params = np.resize(solution.x, (nwalkers, ndim))
-        #initial_samples = solution.x + 1e-1 * np.random.randn(nwalkers, ndim)
-        # Gaussian centered around the best params and 1+-sigma of 10%
-        for i in range(nwalkers):
-            accepted = False
+        initial_samples = gpmodel.spread_walkers(nwalkers, solution.x, bounds, 10.0)
 
-            while not accepted:
-                # Generate random values centered around the best-fit parameters
-                perturbed_params = np.random.normal(solution.x, np.abs(solution.x) / 10.0)
-
-                # Check if the perturbed parameters are within the bounds
-                if np.all(np.logical_and(bounds[:, 0] <= perturbed_params, perturbed_params <= bounds[:, 1])):
-                    initial_samples[i] = perturbed_params
-                    accepted = True
-    # set from the example, https://celerite.readthedocs.io/en/stable/tutorials/modeling/
-
-    # start from the best fit values
-    #initial_params * np.abs(np.random.randn(nwalkers, ndim)) # only positive values from the Gaussian
-
-    #max_n = 100000
-    max_n = 250000
-    #max_n = 3000
-    # We'll track how the average autocorrelation time estimate changes
-    index = 0
-    autocorr = np.empty(max_n)
-    every_samples = 800
-    # This will be useful to testing convergence
-    old_tau = np.inf
-
-    print("Running chain for a maximum of %d samples with %d walkers until the chain has a length 100xtau using %d cores" % (max_n, nwalkers, cores))
+    max_steps = 250000
+    print("Running chain for a maximum of %d samples with %d walkers until the chain has a length 100xtau using %d cores" % (max_steps, nwalkers, cores))
     print("Initial samples\n----------")
     print(initial_samples)
+    every_samples = 500
+    gpmodel.derive_posteriors(initial_samples, fit=False, walkers=nwalkers, max_steps=max_steps, cores=cores)
 
-    with Pool(cores) as pool:
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_probability, pool=pool, args=(y, gp))
-
-        # Now we'll sample for up to max_n steps
-        for sample in sampler.sample(initial_samples, iterations=max_n, progress=True):
-            # Only check convergence every 100 steps
-            if sampler.iteration % every_samples:
-                continue
-
-            # Compute the autocorrelation time so far
-            # Using tol=0 means that we'll always get an estimate even
-            # if it isn't trustworthy
-            tau = sampler.get_autocorr_time(tol=0)
-            autocorr[index] = np.mean(tau)
-            index += 1
-
-            # Check convergence
-            converged = np.all(tau * 100 < sampler.iteration)
-            converged &= np.all(np.abs(old_tau - tau) / tau < 0.01)
-            if converged:
-                print("Convergence reached after %d samples!" % sampler.iteration)
-                break
-            old_tau = tau
-
-    acceptance_ratio = sampler.acceptance_fraction
-    print("Acceptance ratio: (%)")
-    print(acceptance_ratio)
+    acceptance_fraction = gpmodel.sampler.acceptance_fraction
+    autocorr = gpmodel.autocorr
+    print("Acceptance fraction: (%)")
+    print(acceptance_fraction)
     print("Correlation parameters:")
+    tau = gpmodel.tau
     print(tau)
     mean_tau = np.mean(tau)
     print("Mean correlation time:")
     print(mean_tau)
 
-    if not converged:
-        warnings.warn("The chains did not converge!")
+    if not gpmodel.converged:
         # tau will be very large here, so let's reduce the numbers
         thin = int(mean_tau / 4)
         discard = int(mean_tau) * 10 # avoid blowing up if discard is larger than the number of samples, this happens if the fit has not converged
 
     else:
         discard = int(mean_tau * 40)
-        if discard > max_n:
+        if discard > max_steps:
             discard = int(mean_tau * 10)
         thin = int(mean_tau / 2)
 
     fig = plt.figure()
-    autocorr_index = autocorr[:index]
+    index = len(autocorr)
     n = every_samples * np.arange(1, index + 1)
-    plt.plot(n, autocorr_index, "-o")
+    plt.plot(n, autocorr, "-o")
     plt.ylabel("Mean $\\tau$")
     plt.xlabel("Number of steps")
     plt.savefig("%s/autocorr.png" % outdir, dpi=100)
     plt.close(fig)
 
     # plot the entire chain
-    chain = sampler.get_chain(flat=True)
+    chain = gpmodel.sampler.get_chain(flat=True)
     median_values = np.median(chain, axis=0)
-    chain_fig, axes = plt.subplots(ndim, sharex=True, gridspec_kw={'hspace': 0.05, 'wspace': 0})
+    chain_fig, axes = plt.subplots(gpmodel.k, sharex=True, gridspec_kw={'hspace': 0.05, 'wspace': 0})
     if len(np.atleast_1d(axes))==1:
         axes = [axes]
     for param, parname, ax, median in zip(chain.T, par_names, axes, median_values):
         ax.plot(param, linestyle="None", marker="+", color="black")
         ax.set_ylabel(parname.replace("kernel:", "").replace("log_", ""))
         ax.axhline(y=median)
-
-    print("Discarding the first %d samples" % discard)
-    for ax in axes:
         ax.axvline(discard * nwalkers, ls="--", color="red")
 
+    axes[-1].set_xlabel("Step Number")
+    chain_fig.savefig("%s/chain_samples.png" % outdir, bbox_inches="tight",
+                      dpi=100)
+    plt.close(chain_fig)
     # calculate R stat
-    samples = sampler.get_chain(discard=discard)
-
-    whithin_chain_variances = np.var(samples, axis=0) # this has nwalkers, ndim (one per chain and param)
-
-    samples = sampler.get_chain(flat=True, discard=discard)
-    between_chain_variances = np.var(samples, axis=0)
+    rstat = gpmodel.get_rstat(discard)
 
     print("R-stat (values close to 1 indicate convergence)")
-    print(whithin_chain_variances / between_chain_variances[np.newaxis, :]) # https://stackoverflow.com/questions/7140738/numpy-divide-along-axis
+    print(rstat) # https://stackoverflow.com/questions/7140738/numpy-divide-along-axis
 
-    final_samples = sampler.get_chain(discard=discard, thin=thin, flat=True)
-    loglikes = sampler.get_log_prob(discard=discard, thin=thin, flat=True)
-
-    axes[-1].set_xlabel("Step Number")
-    chain_fig.savefig("%s/chain_samples.png" % outdir, bbox_inches="tight", dpi=100)
-    plt.close(chain_fig)
+    final_samples = gpmodel.mcmc_samples
+    loglikes = gpmodel.loglikehoods
 
     # save samples
     inds = [par_names.index("%s" % c) for c in cols]
@@ -650,28 +462,13 @@ if __name__ == "__main__":
               header=header_samples)
 
     best_loglikehood = np.argmax(loglikes)
-    # save contours for each param indicating the maximum
-    for i, parname in enumerate(cols):
-        plt.figure()
-        par_vals = samples[:,i]
-        plt.scatter(par_vals, loglikes)
-        plt.scatter(par_vals[best_loglikehood], loglikes[best_loglikehood],
-                    label="%.2f, L = %.2f" % (par_vals[best_loglikehood], loglikes[best_loglikehood]))
-        plt.legend()
-        plt.xlabel("%s" % parname)
-        plt.ylabel("$L$")
-        plt.savefig("%s/%s.png" % (outdir, parname), dpi=100)
-        plt.close()
-    # remove the log dependency in the parameters
-    #samples[:, :] = np.exp(samples[:, :])
-    # ind_omega = par_names.index("kernel:%s" % "log_omega0")
 
     # save max params and standarized residuals
-    best_params = final_samples[best_loglikehood]
-    gp.set_parameter_vector(best_pars)
-    gp.compute(time, yerr)
+    best_params = gpmodel.max_parameters
+    gpmodel.gp.set_parameter_vector(best_params)
+    ###gp.compute(time, yerr) --> check the tutorial compute is only called once
     # (No need to pass time as it'll be assumed the same datapoints as GP compute (https://celerite.readthedocs.io/en/stable/python/gp/)
-    best_model, var = gp.predict(y, return_var=True) # omit time for faster computing time
+    best_model, var = gpmodel.gp.predict(y, return_var=True) # omit time for faster computing time
     try:
         pvalue = standarized_residuals(y, best_model, np.sqrt(var), "max")
     except ValueError as e:
@@ -679,24 +476,24 @@ if __name__ == "__main__":
         print(e)
         pvalue = 0
 
+    np.savetxt("%s/model_max.dat" % outdir, np.array([time / days_to_seconds, best_model, np.sqrt(var)]).T, header="time(d)\tmodel\tstd", fmt="%.6f")
+
     # best parameter stats
-    max_loglikehood = loglikes[best_loglikehood]
-    BIC = bic(max_loglikehood, len(y), k)
-    AICC = aicc(max_loglikehood, len(y), k)
+    max_loglikehood = gpmodel.max_loglikehood
+    BIC = bic(max_loglikehood, lc.n, gpmodel.k)
+    AICC = aicc(max_loglikehood, lc.n, gpmodel.k)
 
     header = "#file\tloglikelihood\tBIC\tAICc\tpvalue\tparameters\tdatapoints"
-    outstring = "%s\t%.1f\t%.1f\t%.2f\t%.3f\t%d\t%d" % (os.path.basename(count_rate_file), max_loglikehood, BIC, AICC, pvalue, k, len(y))
+    outstring = "%s\t%.3f\t%.2f\t%.2f\t%.3f\t%d\t%d" % (os.path.basename(count_rate_file), max_loglikehood, BIC, AICC, pvalue, gpmodel.k, lc.n)
     for parname, best_par in zip(par_names, best_params):
         header += "\t%s" % parname
-        outstring += '\t%.3f' % best_params
+        outstring += '\t%.3f' % best_par
 
     out_file = open("%s/parameters_max.dat" % (outdir), "w+")
     out_file.write("%s\n%s" % (header, outstring))
     out_file.close()
 
-
-
-    median_parameters = np.median(final_samples, axis=0)
+    median_parameters = gpmodel.median_parameters
     distances = np.linalg.norm(final_samples - median_parameters, axis=1)
     closest_index = np.argmin(distances)
     median_log_likelihood = loglikes[closest_index]
@@ -732,17 +529,29 @@ if __name__ == "__main__":
             dx_down, dx_up = q_50-q_16, q_84-q_50
             outstring += '%.4f$_{-%.4f}^{+%.4f}\t' % (q_50, dx_down, dx_up)
 
+        # save contours for each param indicating the maximum
+        fig = plt.figure()
+        par_vals = samples[:,i]
+        plt.scatter(par_vals, loglikes)
+        plt.scatter(par_vals[best_loglikehood], loglikes[best_loglikehood],
+                    label="%.2f, L = %.2f" % (par_vals[best_loglikehood], loglikes[best_loglikehood]))
+        plt.legend()
+        plt.xlabel("%s" % parname)
+        plt.ylabel("$L$")
+        plt.savefig("%s/%s.png" % (outdir, parname), dpi=100)
+        plt.close(fig)
+
 
     header += "loglikehood"
     outstring += "%.3f" % median_log_likelihood
-    out_file = open("%s/parameter_medians.dat" % (outdir), "w+")
+    out_file = open("%s/parameters_median.dat" % (outdir), "w+")
     out_file.write("%s\n%s" % (header, outstring))
     out_file.close()
 
     # Convert the frequency into period of the oscillator to period for plotting purposes
     #omegas = ("omega" in gp.get_parameter_names()).sum()
-    Qs = np.count_nonzero(["log_Q" in param for param in gp.get_parameter_names()])
-    omegas = np.count_nonzero(["omega" in param for param in gp.get_parameter_names()])
+    Qs = np.count_nonzero(["log_Q" in param for param in gpmodel.gp.get_parameter_names()])
+    omegas = np.count_nonzero(["omega" in param for param in gpmodel.gp.get_parameter_names()])
 
     # if there is oscillator component convert it to Period (days)
     if Qs>=1:
@@ -755,12 +564,12 @@ if __name__ == "__main__":
     #figsize=(20, 16))
     # for the levels, see this https://corner.readthedocs.io/en/latest/pages/sigmas.html we plot 1,2,3 sigma contours
     print("Generating corner plot...")
-    ranges = np.ones(ndim) * 0.95
+    ranges = np.ones(gpmodel.k) * 0.95
     corner_fig = corner.corner(samples, labels=labels, title_fmt='.1f', range=ranges,
                                quantiles=[0.16, 0.5, 0.84], show_titles=True,
                                title_kwargs={"fontsize": 18}, max_n_ticks=3, labelpad=0.08,
                                levels=(1 - np.exp(-0.5), 1 - np.exp(-0.5 * 2 ** 2))) # plots 1 and 2 sigma levels
-    corner_fig.savefig("%s/corner_fig.pdf" % outdir)
+    corner_fig.savefig("%s/corner_fig.png" % outdir)
     plt.close(corner_fig)
 
     # finally plot final PSD and Model
@@ -781,24 +590,24 @@ if __name__ == "__main__":
     # draw 1000 samples from the final distributions and create plots
     n_samples = 1500
     psds = np.empty((n_samples, len(frequencies)))
-    psd_components = np.empty((len(gp.kernel.terms), n_samples, len(frequencies)))
+    psd_components = np.empty((len(gpmodel.gp.kernel.terms), n_samples, len(frequencies)))
 
     models = np.ones((n_samples, t_samples))
     means = np.ones((n_samples, t_samples))
-    mdels_st_res = np.ones((n_samples, len(time)))
+    models_st_res = np.ones((n_samples, lc.n))
     print("Generating %d samples for model and PSD plots" % n_samples)
     for index, sample in enumerate(final_samples[np.random.randint(len(samples), size=n_samples)]):
-        gp.set_parameter_vector(sample)
-        psd = gp.kernel.get_psd(w_frequencies)
-        gp.compute(time, yerr)
-        model = gp.predict(y, time_model, return_cov=False)
-        mdels_st_res = gp.predict(y, time, return_cov=False)
+        gpmodel.gp.set_parameter_vector(sample)
+        psd = gpmodel.gp.kernel.get_psd(w_frequencies)
+        # omit time for faster computing time
+        models_st_res[index] = gpmodel.gp.predict(y, return_cov=False)
+        model = gpmodel.gp.predict(y, time_model, return_cov=False)
         model_ax.plot(time_model / days_to_seconds, model, color="orange", alpha=0.3)
         psd_ax.plot(frequencies * days_to_seconds, psd, color=color, alpha=0.3)
-        means[index] = gp.mean.get_value(time_model)
+        means[index] = gpmodel.gp.mean.get_value(time_model)
         models[index] = model
         psds[index] = psd
-        for term_i, term in enumerate(gp.kernel.terms):
+        for term_i, term in enumerate(gpmodel.gp.kernel.terms):
             psd_components[term_i, index] = term.get_psd(w_frequencies)
 
     model_figure.savefig("%s/model_mcmc_samples.png" % outdir)
@@ -834,7 +643,7 @@ if __name__ == "__main__":
     outputs = np.array([time_model / days_to_seconds, m[1], m[0], m[2]])
     np.savetxt("%s/model_median.dat" % outdir, outputs.T, header="time(d)\tmodel\tlower\tupper", fmt="%.6f")
     try:
-        standarized_residuals(y, np.median(mdels_st_res, axis=0), np.std(mdels_st_res, axis=0), "mcmc_median")
+        standarized_residuals(y, np.mean(models_st_res, axis=0), np.std(models_st_res, axis=0), "mcmc_median")
     except ValueError as e:
         print("Error when computing best_fit standarized residuals")
         print(e)
@@ -873,7 +682,7 @@ if __name__ == "__main__":
 
     # add components
     colors = ["green", "red", "indigo"]
-    for term_i, term in enumerate(gp.kernel.terms):
+    for term_i, term in enumerate(gpmodel.gp.kernel.terms):
         p = np.percentile(psd_components[term_i], [16, 50, 84], axis=0)
         psd_median_ax.plot(frequencies * days_to_seconds, p[1], color=colors[term_i], ls="--")
         psd_median_ax.fill_between(frequencies * days_to_seconds, p[0], p[2], alpha=0.3, color=colors[term_i])
@@ -894,7 +703,7 @@ if __name__ == "__main__":
 
     with open("%s/samples.info" % outdir, "w+") as file:
         file.write("#samples\tdiscard\tthin\ttau\n")
-        file.write("%d\t%d\t%d\t%.2f\n" % (sampler.iteration, discard, thin, mean_tau))
+        file.write("%d\t%d\t%d\t%.2f\n" % (gpmodel.sampler.iteration, discard, thin, mean_tau))
 
     python_command = "python %s %s --tmin %.2f --tmax %.2f -c %s -m %s -o %s" % (__file__, args.input_file[0],
                         args.tmin, args.tmax, args.config_file, args.meanmodel, args.outdir)
