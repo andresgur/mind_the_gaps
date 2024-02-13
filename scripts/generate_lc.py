@@ -12,15 +12,13 @@ import argparse
 import astropy.units as u
 from astropy.visualization import quantity_support
 import time
-from multiprocessing import Pool
-from functools import partial
 from mind_the_gaps.simulator import tk95_sim, cut_random_segment, simulate_lightcurve, E13_sim_TK95, add_kraft_noise, add_poisson_noise, downsample
 from mind_the_gaps.stats import create_log_normal, create_uniform_distribution
-from mind_the_gaps.psd_models import BendingPowerlaw, Lorentzian, SHO, Matern32
+from mind_the_gaps.models.psd_models import BendingPowerlaw, Lorentzian, SHO, Matern32
 from astropy.modeling.powerlaws import PowerLaw1D
 from astropy.modeling.functional_models import Const1D
 from scipy.stats import norm
-from mind_the_gaps.readingutils import read_standard_lightcurve
+from mind_the_gaps.lightcurves import SimpleLightcurve
 import warnings
 import random
 
@@ -202,38 +200,30 @@ extension_factor = args.extension_factor
 
 file_extension = ".png"
 #
-timestamps, rates, errors, exposures, bkg_counts, bkg_rate_err = read_standard_lightcurve(count_rate_file)
+lc = SimpleLightcurve(count_rate_file)
 
 # remove any random number of points
 if points_remove > 0:
     print("%d random datapoints will be removed from the lightcurve")
-    ints = random.sample(range(len(timestamps)), points_remove)
-    timestamps = np.array([timestamps[i].value for i in range(len(timestamps)) if i not in ints])  << u.s
-    rates = np.array([rates[i] for i in range(len(rates)) if i not in ints])
-    errors = np.array([errors[i] for i in range(len(rates)) if i not in ints])
-    exposures = np.array([exposures[i].value for i in range(len(exposures)) if i not in ints])
-    bkg_counts = np.array([bkg_counts[i] for i in range(len(bkg_counts)) if i not in ints])
-    bkg_rate_err = np.array([bkg_rate_err[i] for i in range(len(bkg_rate_err)) if i not in ints])
+    lc = lc.rand_remove(points_remove)
 
 
-duration = timestamps[-1] - timestamps[0]
+rates = lc.y
+duration = lc.duration << u.s
 # in seconds and unitless
-sim_dt = np.min(exposures) / 2
-meanrate = np.mean(rates)
-maximum_frequency = 1 / (sim_dt * u.s)
-minimum_frequency = 1 / (duration)
-livetime = np.sum(exposures) * u.s
-period_range = "%.1f-%.1f" % ((1 / (maximum_frequency.to("d**-1").value)), (1 / (minimum_frequency.to("d**-1").value)))
+sim_dt = np.min(lc.exposures) / 2
+meanrate = lc.mean
+livetime = np.sum(lc.exposures) * u.s
 print("Duration: %.2f days" % (duration.to(u.d).value))
-print("Period range explored for the integration of the variance: %s (days)" % period_range)
 print("Live time %.2f days" % (livetime.to(u.d).value))
 
 outdir = args.outdir
 
 if not os.path.isdir(outdir):
     os.mkdir(outdir)
+
 # strip units
-timestamps = timestamps.value
+timestamps = lc.times
 
 if args.simulator == "E13" or args.simulator=="TK95":
 
@@ -259,7 +249,7 @@ if args.simulator == "E13" or args.simulator=="TK95":
     # prepare TK lightcurve with correct normalization
     lc_mc = simulate_lightcurve(timestamps, psd_model, sim_dt, extension_factor=extension_factor)
 
-    half_bins = exposures / 2
+    half_bins = lc.exposures / 2
     start_time = timestamps[0] - 2 * half_bins[0]
     end_time = timestamps[-1] + 3 * half_bins[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
     duration = end_time - start_time
@@ -281,22 +271,22 @@ if args.simulator == "E13" or args.simulator=="TK95":
             pdfs = [norm(loc=meanrate, scale=np.sqrt(sample_variance))]
 
         lc_rates = E13_sim_TK95(segment, timestamps, pdfs, [1],
-                                exposures=exposures, max_iter=400)
+                                exposures=lc.exposures, max_iter=400)
 
     elif args.simulator=="TK95" or pdf == "Gaussian":
         warnings.warn("Using TK95 since PDF is Gaussian")
-        lc_rates = downsample(segment, timestamps, exposures)
+        lc_rates = downsample(segment, timestamps, lc.exposures)
         # add the mean
         lc_rates += meanrate - np.mean(lc_rates)
     # add Gaussian or Poisson noise
     if args.noise_std is None:
-        if np.all(bkg_counts==0):
+        if np.all(lc.bkg_rate==0):
             print("Assuming Poisson errors based on count rates")
             # the source is bright enough
-            noisy_rates, dy = add_poisson_noise(lc_rates, exposures)
+            noisy_rates, dy = add_poisson_noise(lc_rates, lc.exposures)
         else:
             print("Assuming Kraft errors based on count rates and background rates")
-            noisy_rates, dy, upp_lims = add_kraft_noise(lc_rates, exposures, bkg_counts, bkg_rate_err)
+            noisy_rates, dy, upp_lims = add_kraft_noise(lc_rates, lc.exposures, lc.bkg_rate * lc.exposures, lc.bkg_rate_err)
     else:
         noise_std = args.noise_std
         print("Assuming Gaussian white noise with std: %.5f" % noise_std)
