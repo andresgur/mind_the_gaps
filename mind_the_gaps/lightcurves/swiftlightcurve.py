@@ -52,10 +52,9 @@ class SwiftLightcurve(GappyLightcurve):
         corr_factor = data[corr_factor_column]
         # apply correction factor to exposures
         exposures = data[exposure_column] / corr_factor
-        bkg_rate_err = data[bkg_rate_err]
         # NOTE: the background rate and err are divided by the corr factor so that bkg* (exposure / corrfactor)
         # when added to the source counts gives the correct bkg contribution
-        super().__init__(time.to(u.s).value, y, yerr, exposures, bkg_rate * corr_factor, bkg_rate_err * corr_factor)
+        super().__init__(time.to(u.s).value, y, yerr, exposures, data[bkg_rate] * corr_factor, data[bkg_rate_err] * corr_factor)
 
 
     def readPCCURVE(self, file="PCCURVE.qdp", minExposure=0, minSigma=0, minSNR=0, minCts=0):
