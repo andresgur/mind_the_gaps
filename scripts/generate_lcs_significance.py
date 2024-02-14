@@ -17,7 +17,7 @@ from astropy.visualization import quantity_support
 from multiprocessing import Pool
 from functools import partial
 from shutil import copyfile
-from mind_the_gaps.readingutils import read_data, read_data2, readsimplePCCURVE, readPCCURVE
+from mind_the_gaps.lightcurves import SwiftLightcurve, SimpleLightcurve
 
 
 def parse_model_name(directory):
@@ -28,20 +28,30 @@ def parse_model_name(directory):
 
 
 def create_data_selection_figure(outdir, tmax, tmin):
-    """Create figure with the data range used"""
+    """Create figure with the data range used
+
+    Parameters
+    outdir: str,
+        Output dir where to store the figure
+    tmin: float,
+        Minimum time to indicate on the figure (in same units as lightcurve timestamps)
+    tmax: float,
+        Maximum time to indicate on the figure (in same units as lightcurve timestamps)
+    """
 
     data_selection_figure, data_selection_ax = plt.subplots(1, 1)
     plt.xlabel("Time (days)")
     plt.ylabel("Count rates (ct/s)")
-    data_selection_ax.errorbar(timestamps.to(u.d).value, rates, yerr=errors, color="black", ls="None", marker=".")
+    data_selection_ax.errorbar(lc.times / 3600 / 24, lc.y, yerr=lc.dy, color="black", ls="None", marker=".")
 
-    data_selection_ax.axvline(((tmax * timestamps.unit).to(u.d)).value, ls="--", color="blue")
-    data_selection_ax.axvline(((tmin  * timestamps.unit).to(u.d)).value, ls="--", color="blue")
+    data_selection_ax.axvline(tmax  / 3600 / 24, ls="--", color="blue")
+    data_selection_ax.axvline(tmin   / 3600 / 24, ls="--", color="blue")
     ##data_selection_ax.set_xlim(left=0)
     plt.savefig("%s/data_selection.png" % outdir)
     plt.close(data_selection_figure)
+
     fig = plt.figure()
-    plt.errorbar(timestamps.to(u.d).value , rates, yerr=errors, color="black", ls="None", marker=".")
+    plt.errorbar(lc.times / 3600 / 24, lc.y, yerr=lc.dy, color="black", ls="None", marker=".")
     plt.xlabel("Time (days)")
     plt.ylabel("Count rates (ct/s)")
     plt.savefig("%s/lc_segment.png" % outdir)
@@ -69,7 +79,7 @@ ap.add_argument("-o", "--outdir", nargs='?', help="Output dir", type=str, defaul
 ap.add_argument("--input_dir", nargs="?", help="Input directory from a celerite run, with the samples in samples.dat",
                 type=str, required=False)
 ap.add_argument("-n", "--n_sims", nargs='?', help="Number of simulations to perform", type=int, default=1000)
-ap.add_argument("-f", '--file', nargs='?', help="Lightcurve file with count rates. Default PCCURVE.qdp", type=str, default='PCCURVE.qdp')
+ap.add_argument("-f", '--file', nargs=1, help="Lightcurve file with count rates", type=str)
 ap.add_argument("-c", '--cores', nargs='?', help="Number of CPUs for parallelization", type=int, default=10)
 ap.add_argument("-s", "--simulator", nargs="?", help="Light curve simulator to use.", type=str, default="E13",
                 choices=["E13", "TK95"])
@@ -81,13 +91,13 @@ ap.add_argument("--noise_std", nargs="?", help="Standard deviation of the noise 
                 required=False, default=None, type=float)
 args = ap.parse_args()
 
-count_rate_file = args.file
+count_rate_file = args.file[0]
 n_sims = args.n_sims
 cores = args.cores
 pdf = args.pdf
 extension_factor = args.extension_factor
 simulator = args.simulator
-python_command = "python %s -n %d -f %s --tmin %.2f --tmax %.2f -c %d -s %s --input_dir %s --pdf %s -e %.2f -o %s" % (__file__, args.n_sims, args.file,
+python_command = "python %s -n %d -f %s --tmin %.2f --tmax %.2f -c %d -s %s --input_dir %s --pdf %s -e %.2f -o %s" % (__file__, args.n_sims, args.file[0],
                     args.tmin, args.tmax, cores, simulator, args.input_dir, args.pdf, extension_factor, args.outdir)
 
 quantity_support()
@@ -109,24 +119,25 @@ if tmin > tmax:
 
 if os.path.isfile(count_rate_file):
     try:
-        timestamps, rates, errors, exposures, bkg_counts, bkg_rate_err = read_data(count_rate_file, tmin, tmax)
+        lc = SwiftLightcurve(count_rate_file)
+        print("Read as Swift lightcurve...")
     except:
-        timestamps, rates, errors, exposures, bkg_counts, bkg_rate_err = read_data2(count_rate_file, tmin, tmax)
 
-    duration = (timestamps[-1] - timestamps[0]).to(u.s)
-    dt = np.median(np.diff(timestamps.to(u.s).value))
+        lc = SimpleLightcurve(count_rate_file)
+        print("Read as SimpleLightcurve")
+
+    lc = lc.truncate(tmin, tmax)
+
+    duration = lc.duration * u.s
+    dt = np.median(np.diff(lc.times))
     # in seconds
-    sim_dt = np.min(exposures) / 2
-    maximum_frequency = 1 / (sim_dt * u.s)
-    minimum_frequency = 1 / (duration)
+    sim_dt = np.min(lc.exposures) / 2
 
-    period_range = "%.1f-%.1f" % ((1 / (maximum_frequency.to("d**-1").value)), (1 / (minimum_frequency.to("d**-1").value)))
-    time_range = "{:0.3f}-{:0.3f}{:s}".format(timestamps[0].value, timestamps[-1].value, timestamps.unit)
+    time_range = "{:0.3f}-{:0.3f}{:s}".format(lc.times[0], lc.times[-1], "s")
     print("Time range considered: %s" % time_range)
     print("Duration: %.2f days" % (duration.to(u.d).value))
-    print("Period range explored for the integration of the variance: %s (days)" % period_range)
 
-    end_dir = "%s_p%st%s_N%d_s%s_pdf%s" % (args.outdir, period_range, time_range, n_sims, simulator, pdf)
+    end_dir = "%s_t%s_N%d_s%s_pdf%s" % (args.outdir, time_range, n_sims, simulator, pdf)
 
     if args.outdir == "lightcurves_significance":
         outdir = end_dir
@@ -137,16 +148,13 @@ if os.path.isfile(count_rate_file):
         os.mkdir(outdir)
 
     # write data out
-    outputs = np.array([timestamps.to(u.s).value, rates, errors, exposures, bkg_counts, bkg_rate_err])
-
-    np.savetxt("%s/lc_data.dat" % outdir, outputs.T, fmt="%.6f",
-               header="t\trate\terror\texposure\tbkg_counts\tbkg_rate_err")
+    lc.to_csv("%s/lc_data.dat" % outdir)
 
     # just for the plot
     if tmin==0:
-        tmin = timestamps[0].value
+        tmin = lc.times[0]
     if tmax==np.inf:
-        tmax = timestamps[-1].value
+        tmax = lc.times[-1]
     create_data_selection_figure(outdir, tmin, tmax)
 
     if not os.path.isdir("%s/lightcurves" % outdir):
@@ -169,10 +177,10 @@ if os.path.isfile(count_rate_file):
     random_samples = samples_data[rand_ints]
 
     #if there is more than one kernel we skip the first one (the periodic component)
-    if (model_names[0]=="Lorentzian" or  model_names[0]=="Cosinus") and n_kernels>1:
-        warnings.warn("Skipping the first model (%s component)" % model_names[0])
-        model_names = model_names[1:]
-        kernel_names = kernel_names[1:]
+    #if (model_names[0]=="Lorentzian" or  model_names[0]=="Cosinus") and n_kernels>1:
+    #    warnings.warn("Skipping the first model (%s component)" % model_names[0])
+    #    model_names = model_names[1:]
+    #    kernel_names = kernel_names[1:]
 
 
     commands = []
@@ -201,7 +209,7 @@ if os.path.isfile(count_rate_file):
 
     with Pool(processes=cores, initializer=np.random.seed) as pool:
         pool.map(
-            simulate_lcs, np.array([commands, np.arange(n_sims)]).T    
+            simulate_lcs, np.array([commands, np.arange(n_sims)]).T
         )
 
     os.chdir("../")
