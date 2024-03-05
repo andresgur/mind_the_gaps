@@ -167,7 +167,7 @@ if __name__ == "__main__":
     # get only positive measurements
     if np.count_nonzero(y<0):
         warnings.warn("Lightcurve has some negative bins!")
-    time, y, yerr = time[y>0], y[y>0], yerr[y>0]
+
     if args.log:
         # this follows from error propagation
         yerr = yerr / y
