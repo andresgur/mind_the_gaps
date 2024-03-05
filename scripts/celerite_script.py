@@ -165,7 +165,7 @@ if __name__ == "__main__":
     time,y, yerr = lc.times, lc.y, lc.dy
 
     # get only positive measurements
-    if np.count_nonzero(y>0):
+    if np.count_nonzero(y<0):
         warnings.warn("Lightcurve has some negative bins!")
     time, y, yerr = time[y>0], y[y>0], yerr[y>0]
     if args.log:
@@ -456,13 +456,9 @@ if __name__ == "__main__":
     loglikes = gpmodel.loglikehoods
 
     # save samples
-    inds = [par_names.index("%s" % c) for c in cols]
+    outputs = np.vstack((final_samples.T, loglikes))
 
-    samples = final_samples[:, inds]
-
-    outputs = np.vstack((samples.T, loglikes))
-
-    header_samples = "\t".join(cols) + "\tloglikehood"
+    header_samples = "\t".join(par_names) + "\tloglikehood"
 
     np.savetxt("%s/samples.dat" % outdir, outputs.T, delimiter="\t", fmt="%.5f",
               header=header_samples)
@@ -508,8 +504,8 @@ if __name__ == "__main__":
     header = ""
     outstring = ''
 
-    for i, parname in enumerate(cols):
-        q_16, q_50, q_84 = corner.quantile(samples[:,i], [0.16, 0.5, 0.84]) # your x is q_50
+    for i, parname in enumerate(par_names):
+        q_16, q_50, q_84 = corner.quantile(final_samples[:,i], [0.16, 0.5, 0.84]) # your x is q_50
         header += "%s\t" % parname
         dx_down, dx_up = q_50-q_16, q_84-q_50
         decimals = int(np.abs(np.floor(np.log10(np.abs(dx_down))))) + 1
@@ -526,20 +522,20 @@ if __name__ == "__main__":
         # store also in days
         if "omega" in parname:
             header += "%s\t" % parname.replace("log_omega", "P")
-            periods = two_pi / (np.exp(samples[:,i]) * days_to_seconds)
+            periods = two_pi / (np.exp(final_samples[:,i]) * days_to_seconds)
             q_16, q_50, q_84 = corner.quantile(periods, [0.16, 0.5, 0.84])
             dx_down, dx_up = q_50-q_16, q_84-q_50
             outstring += '%.2f$_{-%.2f}^{+%.2f}\t' % (q_50, dx_down, dx_up)
 
             header += "%s\t" % parname.replace("log_omega", "omega")
-            freqs = np.exp(samples[:,i]) / 2 / np.pi * days_to_seconds # a factor 2pi was missing
+            freqs = np.exp(final_samples[:,i]) / 2 / np.pi * days_to_seconds # a factor 2pi was missing
             q_16, q_50, q_84 = corner.quantile(freqs, [0.16, 0.5, 0.84])
             dx_down, dx_up = q_50-q_16, q_84-q_50
             outstring += '%.4f$_{-%.4f}^{+%.4f}\t' % (q_50, dx_down, dx_up)
 
         # save contours for each param indicating the maximum
         fig = plt.figure()
-        par_vals = samples[:,i]
+        par_vals = final_samples[:,i]
         plt.scatter(par_vals, loglikes)
         plt.scatter(par_vals[best_loglikehood], loglikes[best_loglikehood],
                     label="%.2f, L = %.2f" % (par_vals[best_loglikehood], loglikes[best_loglikehood]))
@@ -561,6 +557,9 @@ if __name__ == "__main__":
     Qs = np.count_nonzero(["log_Q" in param for param in gpmodel.gp.get_parameter_names()])
     omegas = np.count_nonzero(["omega" in param for param in gpmodel.gp.get_parameter_names()])
 
+    # this just puts the period first
+    inds = [par_names.index("%s" % c) for c in cols]
+    samples = final_samples[:, inds]
     # if there is oscillator component convert it to Period (days)
     if Qs>=1:
         omega_index = 0
