@@ -19,7 +19,7 @@ class GPModelling:
     """
     The interface for Gaussian Process (GP) modeling. Currently uses celerite.
     """
-    meamodels = ["Linear", "Constant", "Gaussian"]
+    meanmodels = ["linear", "constant", "gaussian"]
 
     def __init__(self, lightcurve, kernel, mean_model: str =None):
         """
@@ -40,6 +40,7 @@ class GPModelling:
         meanmodel, fit_mean = self._build_mean_model(mean_model)
 
         self.gp = celerite.GP(kernel, mean=meanmodel, fit_mean=fit_mean)
+        # self.gp = GaussianProcess(kernel, self._lightcurve.times, diag=self._lightcurve.dy**2) --> Tiny GP
         # initialize GP ( # You always need to call compute once.)
         self.gp.compute(self._lightcurve.times, self._lightcurve.dy)
         self.initial_params = self.gp.get_parameter_vector()
@@ -65,12 +66,11 @@ class GPModelling:
                         bounds=[(np.min(self._lightcurve.y), maxy)])
             return meanmodel, False
 
-        elif meanmodel.lower() not in meanmodels:
-            raise ValueError("Input mean model %s not implemented! Only %s are available" % (meanmodel, "\n".join(meanmodels)))
+        elif meanmodel.lower() not in GPModelling.meanmodels:
+            raise ValueError("Input mean model %s not implemented! Only \n %s \n are available" % (meanmodel, "\t".join(GPModelling.meanmodels)))
 
         elif meanmodel.lower()=="constant":
             meanlabels = ["$\mu$"]
-            cols.extend(["mean:value"])
 
         elif meanmodel.lower()=="linear":
             slope_guess = np.sign(self._lightcurve.y[-1] - self._lightcurve.y[0])
@@ -83,11 +83,11 @@ class GPModelling:
             else:
                 min_slope = -slope_bound
                 max_slope = slope_bound
-
-            meanmodel = LinearModel(slope_bound, self._lightcurve.mean,
+            slope = np.cov(self._lightcurve.times, self._lightcurve.y)[0, 1] / np.var(self._lightcurve.times)
+            meanmodel = LinearModel(0, 1.5,
                                     bounds=[(-np.inf, np.inf), (-np.inf, np.inf)])
             meanlabels = ["$m$", "$b$"]
-            cols.extend(["mean:slope", "mean:intercept"])
+
         elif meanmodel.lower()=="gaussian":
             sigma_guess = (self._lightcurve.duration) / 2
             amplitude_guess = (maxy - np.min(y)) * np.sqrt(2 * np.pi)* sigma_guess
@@ -95,7 +95,7 @@ class GPModelling:
             meanmodel = GaussianModel(mean_guess, sigma_guess, amplitude_guess,
                                       bounds=[(time[0], time[-1]), (dt, duration),
                                       (maxy * np.sqrt(2 * np.pi) * self._lightcurve.duration, 50 * maxy * np.sqrt(2 * np.pi) * self._lightcurve.duration)])
-            cols.extend(["mean:mean", "mean:sigma", "mean:amplitude"])
+
             meanlabels = ["$\mu$", "$\sigma$", "$A$"]
 
         return meanmodel, True
@@ -169,7 +169,7 @@ class GPModelling:
 
         if fit:
             solution = self.fit(initial_params)
-            initial_params = spread_walkers(walkers, solution.x, bounds)
+            initial_params = self.spread_walkers(walkers, solution.x, np.array(self.gp.get_parameter_bounds()))
 
         index = 0
         autocorr = np.zeros(max_steps)

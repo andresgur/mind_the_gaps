@@ -7,12 +7,9 @@ import numpy as np
 import os
 import matplotlib.pyplot as plt
 import argparse
-from scipy.optimize import minimize
 from shutil import copyfile
-import celerite
 import corner
 import astropy.units as u
-from multiprocessing import Pool
 from mind_the_gaps.stats import bic, aicc
 from mind_the_gaps.configs import read_config_file
 from mind_the_gaps.lightcurves import FermiLightcurve, SwiftLightcurve, SimpleLightcurve
@@ -162,10 +159,8 @@ if __name__ == "__main__":
         except:
             # fermi
             lc = FermiLightcurve(count_rate_file)
-    if "rxte" in count_rate_file:
-        lc = lc.truncate((tmin *u.d).to(u.s).value, (tmax *u.d).to(u.s).value)
-    else:
-        lc = lc.truncate(tmin, tmax)
+
+    lc = lc.truncate(tmin, tmax)
 
     time,y, yerr = lc.times, lc.y, lc.dy
 
@@ -215,6 +210,16 @@ if __name__ == "__main__":
         outdir += "_log"
     if args.meanmodel:
         outdir += "_mean_%s" % args.meanmodel
+        if args.meanmodel.lower()=="constant":
+            cols.extend(["mean:value"])
+            meanlabels = ["$\mu$"]
+        elif args.meanmodel.lower()=="linear":
+            cols.extend(["mean:slope", "mean:intercept"])
+            meanlabels = ["$m$", "$b$"]
+        elif args.meanmodel.lower()=="gaussian":
+            cols.extend(["mean:mean", "mean:sigma", "mean:amplitude"])
+            meanlabels = ["$\mu$", "$\sigma$", "$A$"]
+        labels.extend(meanlabels)
 
     if not os.path.isdir(outdir):
         os.mkdir(outdir)
@@ -224,14 +229,13 @@ if __name__ == "__main__":
     time_range_file = open("%s/time_range.txt" % (outdir), "w+")
     time_range_file.write("%.5f-%.5f s" % (time[0], time[-1]))
     time_range_file.close()
-
+    # gp compute is called inside this class so no need to call it
     gpmodel = GPModelling(lc, kernel, args.meanmodel)
 
     print("parameter_dict:\n{0}\n".format(gpmodel.gp.get_parameter_dict()))
     print("parameter_names:\n{0}\n".format(gpmodel.gp.get_parameter_names()))
     print("parameter_vector:\n{0}\n".format(gpmodel.gp.get_parameter_vector()))
     print("parameter_bounds:\n{0}\n".format(gpmodel.gp.get_parameter_bounds()))
-    gpmodel.gp.compute(time, yerr)
     print("Initial log likelihood: {0}".format(gpmodel.gp.log_likelihood(y)))
     par_names = list(gpmodel.gp.get_parameter_names())
     bounds = np.array(gpmodel.gp.get_parameter_bounds())
@@ -487,7 +491,8 @@ if __name__ == "__main__":
     outstring = "%s\t%.3f\t%.2f\t%.2f\t%.3f\t%d\t%d" % (os.path.basename(count_rate_file), max_loglikehood, BIC, AICC, pvalue, gpmodel.k, lc.n)
     for parname, best_par in zip(par_names, best_params):
         header += "\t%s" % parname
-        outstring += '\t%.3f' % best_par
+        decimals = int(np.abs(np.floor(np.log10(np.abs(best_par))))) + 1
+        outstring += '\t%.*f' % (decimals, best_par)
 
     out_file = open("%s/parameters_max.dat" % (outdir), "w+")
     out_file.write("%s\n%s" % (header, outstring))
@@ -505,10 +510,11 @@ if __name__ == "__main__":
         q_16, q_50, q_84 = corner.quantile(samples[:,i], [0.16, 0.5, 0.84]) # your x is q_50
         header += "%s\t" % parname
         dx_down, dx_up = q_50-q_16, q_84-q_50
-        if "slope" in parname:
-            outstring += '%.2e$_{-%.2e}^{+%.2e}$\t' % (q_50, dx_down, dx_up)
-        else:
-            outstring += '%.2f$_{-%.2f}^{+%.2f}$\t' % (q_50, dx_down, dx_up)
+        decimals = int(np.abs(np.floor(np.log10(np.abs(dx_down))))) + 1
+        #if "intercept" in parname:
+        #    outstring += '%.*e$_{-%.*e}^{+%.*e}$\t' % (q_50, dx_down, dx_up)
+        #else:
+        outstring += '%.*f$_{-%.*f}^{+%.*f}$\t' % (decimals, q_50, decimals, dx_down, decimals, dx_up)
         if "Q" in parname:
             header += "%s & " % parname.replace("log_Q", "Q")
             q_16, q_50, q_84 = np.exp(q_16), np.exp(q_50), np.exp(q_84)
