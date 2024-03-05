@@ -4,14 +4,14 @@ import numpy as np
 from scipy.special import gamma
 
 @custom_model
-def SHO(x, S_0=1, w_0=1, Q=10):
+def SHO(x, S_0=1, Q=10, w_0=1):
     """Equation 20 from Foreman-Mackey+2017 (tested)
     x and w_0 need to be given in the same units"""
     return np.sqrt(2 / np.pi) * S_0 * w_0**4 / ((x**2 - w_0**2)**2 + (x**2) * (w_0**2)/Q**2)
 
 
 @custom_model
-def Lorentzian(x, S_0=1, w_0=1, Q=10):
+def Lorentzian(x, S_0=1, Q=10, w_0=1):
     """Equation 11 from Foreman-Mackey+2017 (tested)
     x and w_0 need to be given in the same units
     """
@@ -34,3 +34,9 @@ def Matern32(x, sigma=1, rho=1):
     n = 1
     nu = 3 / 2
     return 1 / np.sqrt(2 * np.pi) * sigma**2 * 2**n * np.pi ** (n/2) * gamma(nu + n /2) * (2 *nu)**nu / (gamma(nu) * rho**(2*nu)) * (2 * nu / rho**2 + x**2) ** -(nu + n/2)
+
+
+@custom_model
+def Jitter(x, sigma=1):
+    N = len(x)
+    return np.ones(N) * sigma**2 / np.sqrt(2 * np.pi)
