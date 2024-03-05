@@ -161,11 +161,11 @@ def read_config_file(config_file):
 
 
 ap = argparse.ArgumentParser(description='Generate lightcurve from an input file and input model (either through the command line or through a config file). For the command line only one model component of each kind is allowed')
-ap.add_argument('--Lorentzian', metavar="PARAM", nargs=3, help='Lorentzian model parameters.3 parameters: ln_S0, ln_w0 and ln_Q', action="append")
+ap.add_argument('--Lorentzian', metavar="PARAM", nargs=3, help='Lorentzian model parameters.3 parameters: ln_S0, ln_Q and ln_w0', action="append")
 ap.add_argument('--DampedRandomWalk', metavar="PARAM", nargs=2, help='DampedRandomWalk model parameters. 2 parameters: ln_S0 and ln_w0. For several model components, just give the parameters as ln_S0 ln_w0 ln_S1 ln_w1 for model component0, component1, etc',
                 action="append")
 ap.add_argument('--Matern32', nargs=2, metavar="PARAM", help='Mattern-3/2 model parameters. 2 parameters: ln_S0, ln_rho', action="append")
-ap.add_argument('--SHO', nargs=3, metavar="PARAM", help='SHO model parameters. 2 parameters: ln_S0, ln_w0 and ln_Q', action="append")
+ap.add_argument('--SHO', nargs=3, metavar="PARAM", help='SHO model parameters. 2 parameters: ln_S0, ln_Q and ln_w0', action="append")
 ap.add_argument('--Granulation', nargs=2, metavar="PARAM", help='Just a SHO model with Q=1/sqrt(2). 2 parameters: ln_S0 and ln_w0', action="append")
 ap.add_argument('--Powerlaw', nargs=3, metavar="PARAM", help='Powerlaw (f(x)=S_0 (x/x_0)^-alpha) model parameters (https://docs.astropy.org/en/stable/api/astropy.modeling.powerlaws.PowerLaw1D.html). ln_S0 and ln_x0 and ln_alpha', action="append")
 ap.add_argument("-o", "--outdir", nargs='?', help="Output dir", type=str, default="lightcurves")
@@ -206,7 +206,6 @@ lc = SimpleLightcurve(count_rate_file)
 if points_remove > 0:
     print("%d random datapoints will be removed from the lightcurve")
     lc = lc.rand_remove(points_remove)
-
 
 rates = lc.y
 duration = lc.duration << u.s

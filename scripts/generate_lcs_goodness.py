@@ -66,7 +66,7 @@ ap.add_argument("--tmin", nargs='?', help="Minimum time in seconds to truncate t
 ap.add_argument("--tmax", nargs='?', help="Maximum time in seconds to truncate the lightcurve",
                 type=float, default=np.Infinity)
 ap.add_argument("-o", "--outdir", nargs='?', help="Output dir", type=str, default="lightcurves_goodness")
-ap.add_argument("--command", nargs="?", help="Command for the lightcurve simulation e.g. --Lorentzian X Y Z --DampedRandomWalk X Y. (For several model components, just give the parameters as ln_S0 ln_w0 ln_S1 ln_w1 for model component0, component1, etc)", type=str)
+ap.add_argument("--command", nargs="?", help="Command for the lightcurve simulation e.g. --Lorentzian X Y Z --DampedRandomWalk X Y. (For several model components with the same name, just give the parameters as ln_S0 ln_w0 ln_S1 ln_w1 for model component0, component1, etc)", type=str)
 ap.add_argument("--config", nargs="?", help="Config file with the simulation models. Will be used over command argument.", type=str)
 ap.add_argument("-n", "--n_sims", nargs='?', help="Number of simulations to perform", type=int, default=1000)
 ap.add_argument("-f", '--file', nargs=1, help="File with lightcurve count rates, background rates, etc", type=str)
@@ -131,8 +131,6 @@ if os.path.isfile(count_rate_file):
     dt = np.median(np.diff(lc.times))
     # in seconds
     sim_dt = np.min(lc.exposures) / 2
-    maximum_frequency = 1 / (sim_dt * u.s)
-    minimum_frequency = 1 / (duration)
 
     time_range = "{:0.3f}-{:0.3f}{:s}".format(lc.times[0], lc.times[-1], "s")
     print("Time range considered: %s" % time_range)
