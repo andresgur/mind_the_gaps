@@ -36,7 +36,15 @@ def Matern32(x, sigma=1, rho=1):
     return 1 / np.sqrt(2 * np.pi) * sigma**2 * 2**n * np.pi ** (n/2) * gamma(nu + n /2) * (2 *nu)**nu / (gamma(nu) * rho**(2*nu)) * (2 * nu / rho**2 + x**2) ** -(nu + n/2)
 
 
+
 @custom_model
 def Jitter(x, sigma=1):
+    """A jitter (white noise) kernel"""
+    # the 2 is so when integrating the positive frequencies we get the right variance
+    # the sqrt(2pi) enters because of celerite
+    # the N so when integrating this tends to sigma^2 as opposed to sigma^2 x N
+    # the df enters because we need to "dilute" the power
     N = len(x)
-    return np.ones(N) * sigma**2 / np.sqrt(2 * np.pi)
+    df = np.diff(x)[0] # this is angular frequencies
+    normalization_factor =  2 / np.sqrt(2 * np.pi)
+    return np.ones(N) * sigma**2 / normalization_factor / (df) / N
