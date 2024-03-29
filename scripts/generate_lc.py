@@ -14,7 +14,7 @@ from astropy.visualization import quantity_support
 import time
 from mind_the_gaps.simulator import tk95_sim, cut_random_segment, simulate_lightcurve, E13_sim_TK95, add_kraft_noise, add_poisson_noise, downsample
 from mind_the_gaps.stats import create_log_normal, create_uniform_distribution
-from mind_the_gaps.models.psd_models import BendingPowerlaw, Lorentzian, SHO, Matern32
+from mind_the_gaps.models.psd_models import BendingPowerlaw, Lorentzian, SHO, Matern32, Jitter
 from astropy.modeling.powerlaws import PowerLaw1D
 from astropy.modeling.functional_models import Const1D
 from scipy.stats import norm
@@ -97,6 +97,17 @@ def read_command_line(args):
                 outpars += "%s%.3f_" % (parname, float(param))
 
             models.append(model_component)
+    if args.Jitter:
+        parameters = args.Jitter
+        for set_of_pars in parameters:
+            model_component = Jitter()
+            input_command += "--Jitter %s" % args.Jitter
+            # set the parameters
+            for parname, param in zip(model_component.param_names, set_of_pars):
+                setattr(model_component, parname, np.exp(float(param)))
+                outpars += "%s%.3f_" % (parname, float(param))
+
+            models.append(model_component)
 
     psd_model = np.sum(models)
 
@@ -149,6 +160,12 @@ def read_config_file(config_file):
                 parameter_log = float(row["log%s" % parname])
                 setattr(model_component, parname, np.exp(parameter_log))
                 outpars += "%s%.3f_" % (parname, parameter_log)
+        elif row["model"]=="Jitter":
+            model_component = Jitter()
+            for parname in model_component.param_names:
+                parameter_log = float(row["log%s" % parname])
+                setattr(model_component, parname, np.exp(parameter_log))
+                outpars += "%s%.3f_" % (parname, parameter_log)
         else:
             warnings.warn("Model component %s not implemented! Skipping" % model_component)
             continue
@@ -168,6 +185,7 @@ ap.add_argument('--Matern32', nargs=2, metavar="PARAM", help='Mattern-3/2 model 
 ap.add_argument('--SHO', nargs=3, metavar="PARAM", help='SHO model parameters. 2 parameters: ln_S0, ln_Q and ln_w0', action="append")
 ap.add_argument('--Granulation', nargs=2, metavar="PARAM", help='Just a SHO model with Q=1/sqrt(2). 2 parameters: ln_S0 and ln_w0', action="append")
 ap.add_argument('--Powerlaw', nargs=3, metavar="PARAM", help='Powerlaw (f(x)=S_0 (x/x_0)^-alpha) model parameters (https://docs.astropy.org/en/stable/api/astropy.modeling.powerlaws.PowerLaw1D.html). ln_S0 and ln_x0 and ln_alpha', action="append")
+ap.add_argument('--Jitter', nargs=1, metavar="PARAM", help='Jitter (white noise) model parameters: ln_sigma (log of the standard deviation of the noise)', action="append")
 ap.add_argument("-o", "--outdir", nargs='?', help="Output dir", type=str, default="lightcurves")
 ap.add_argument("--config", nargs='?', help="Config file with simulation models and parameters", type=str)
 ap.add_argument("--rootfile", nargs='?', help="Any characters to append to the output file", type=str,
@@ -207,7 +225,6 @@ if points_remove > 0:
     print("%d random datapoints will be removed from the lightcurve")
     lc = lc.rand_remove(points_remove)
 
-rates = lc.y
 duration = lc.duration << u.s
 # in seconds and unitless
 sim_dt = np.min(lc.exposures) / 2
@@ -275,8 +292,9 @@ if args.simulator == "E13" or args.simulator=="TK95":
     elif args.simulator=="TK95" or pdf == "Gaussian":
         warnings.warn("Using TK95 since PDF is Gaussian")
         lc_rates = downsample(segment, timestamps, lc.exposures)
-        # add the mean
+        # adjust the mean
         lc_rates += meanrate - np.mean(lc_rates)
+
     # add Gaussian or Poisson noise
     if args.noise_std is None:
         if np.all(lc.bkg_rate==0):
@@ -285,19 +303,21 @@ if args.simulator == "E13" or args.simulator=="TK95":
             noisy_rates, dy = add_poisson_noise(lc_rates, lc.exposures)
         else:
             print("Assuming Kraft errors based on count rates and background rates")
-            noisy_rates, dy, upp_lims = add_kraft_noise(lc_rates, lc.exposures, lc.bkg_rate * lc.exposures, lc.bkg_rate_err)
+            noisy_rates, dy, upp_lims = add_kraft_noise(lc_rates, lc.exposures,
+                                                        lc.bkg_rate * lc.exposures,
+                                                        lc.bkg_rate_err)
     else:
         noise_std = args.noise_std
         print("Assuming Gaussian white noise with std: %.5f" % noise_std)
         noisy_rates = lc_rates + np.random.normal(scale=noise_std, size=len(lc_rates))
         dy = errors[np.argsort(noisy_rates)]
 
-elif args.simulator=="Shuffle":
+elif args.simulator.lower()=="shuffle":
     outpars = ""
-    sample_variance = np.var(rates)
+    sample_variance = np.var(lc.y)
     ind = np.random.randint(0, len(timestamps), len(timestamps))
-    noisy_rates = rates[ind]
-    dy = errors[ind]
+    noisy_rates = lc.y[ind]
+    dy = lc.dy[ind]
 
 outfile = "lc%s%sv%.3E_n%d.dat" % (args.rootfile, outpars, sample_variance, points_remove)
 outputs = np.asarray([timestamps, noisy_rates, dy])

@@ -62,7 +62,7 @@ def simulate_lcs(command): # don't pass the PDFs otherwise we the same pdf sampl
     """Wrapping function for parallelization. It simply takes the samples and simulates the lightcurve"""
     param_command = command[0]
     sim = int(command[1])
-    cmd = "generate_lc.py %s %s --rootfile _%d_%s_ " % (generate_lc_args, param_command, sim, model_names_)
+    cmd = "python %s/scripts/pythonscripts/mind_the_gaps/scripts/generate_lc.py %s %s --rootfile _%d_%s_ " % (home, generate_lc_args, param_command, sim, model_names_)
 
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True, env=os.environ)
 
@@ -122,7 +122,6 @@ if os.path.isfile(count_rate_file):
         lc = SwiftLightcurve(count_rate_file)
         print("Read as Swift lightcurve...")
     except:
-
         lc = SimpleLightcurve(count_rate_file)
         print("Read as SimpleLightcurve")
 
@@ -181,7 +180,6 @@ if os.path.isfile(count_rate_file):
     #    warnings.warn("Skipping the first model (%s component)" % model_names[0])
     #    model_names = model_names[1:]
     #    kernel_names = kernel_names[1:]
-
 
     commands = []
     for row in random_samples:
