@@ -41,9 +41,12 @@ class SimpleLightcurve(GappyLightcurve):
             time = data[time_column] << u.d
         else:
             time = data[time_column] << u.s
+
         if len(data.dtype) > 3:
+            print("Reading exposures")
             exposures = data[data.dtype.names[3]]
-            if len(data.dtype)==6:
+            if len(data.dtype) >= 6:
+                print("Reading background rates")
                 bkg_rate = data[data.dtype.names[4]]
                 bkg_err = data[data.dtype.names[5]]
             else:
