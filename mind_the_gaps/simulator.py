@@ -5,7 +5,7 @@
 # @Last modified time: 28-03-2022
 import numpy as np
 import warnings
-from lmfit.models import LognormalModel, Model
+from lmfit.models import LognormalModel
 from scipy.stats import norm, poisson
 from stingray import Lightcurve
 from mind_the_gaps.stats import kraft_pdf
@@ -129,28 +129,6 @@ def add_kraft_noise_old_delete(rates, exposures, background_counts=None, bkg_rat
     dy[expression] = [(dist.ppf(0.84) - dist.ppf(0.16)) / 2 for dist in dists] # if subtract the two is equivalent to subtract the 50% value and doing the mean, this is faster than using "interval" / 2
     dy[expression] /=  exposures[expression]
     return net_counts / exposures, dy
-
-
-def cut_downsample(lc, timestamps,bin_exposures, N=None):
-    """Cut and downsample input lightcurve based on the input timestamps and exposures"""
-
-    if np.isscalar(bin_exposures):
-        start_time = timestamps[0] - bin_exposures
-        end_time = timestamps[-1] + 1.5 * bin_exposures
-    else:
-        start_time = timestamps[0] - bin_exposures[0]
-        end_time = timestamps[-1] + 1.5 * bin_exposures[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
-
-    duration = end_time - start_time
-
-    if N is not None:
-        lc_cut = get_segment(lc, duration, N)
-    else:
-        lc_cut = cut_random_segment(lc, duration)
-
-    downsampled_rates = downsample(lc_cut, timestamps, bin_exposures)
-
-    return downsampled_rates
 
 
 def draw_positive(pdf):
@@ -282,7 +260,7 @@ def get_fft(N, dt, model):
     return complex_fft
 
 
-def simulate_lightcurve_numpy(timestamps, psd_model, dt, extension_factor=50):
+def simulate_lightcurve_numpy(timestamps, psd_model, dt, extension_factor=25):
     """Simulate a lightcurve regularly sampled N times longer than original using the algorithm of Timmer & Koenig+95
 
     Parameters
@@ -317,8 +295,7 @@ def simulate_lightcurve_numpy(timestamps, psd_model, dt, extension_factor=50):
     return Lightcurve(sim_timestamps, countrate, input_counts=True, skip_checks=True, dt=dt, err_dist="gauss")
 
 
-
-def simulate_lightcurve(timestamps, psd_model, dt, extension_factor=50):
+def simulate_lightcurve(timestamps, psd_model, dt, extension_factor=25):
     """Simulate a lightcurve regularly sampled N times longer than original using the algorithm of Timmer & Koenig+95
 
     Parameters
@@ -355,7 +332,10 @@ def simulate_lightcurve(timestamps, psd_model, dt, extension_factor=50):
 
 
 def get_segment(lc, duration, N):
-    """Get N segment of the input lightcurve. Starts at 0"""
+    """Get N segment of the input lightcurve.
+    N: int,
+        Integer indicating the segment to get (starting at N = 0 for ti=N * duration and tf=N * duration + duration)
+    """
     start = lc.time[0] + duration * (N)
     return lc.truncate(start=start, stop=start + duration, method="time")
 
@@ -405,6 +385,7 @@ def downsample(lc, timestamps, bin_exposures):
         Exposure times of each new bin
     Returns the downsampled count rates
     """
+    # return the lightcurve as it is
     if len(lc.time) == len(timestamps):
         return lc.countrate
 
@@ -412,13 +393,15 @@ def downsample(lc, timestamps, bin_exposures):
         start_time = timestamps[0] - bin_exposures
     else:
         start_time = timestamps[0] - bin_exposures[0]
-    # return the lightcurve as it is
+    # shif the starting time to match the input timestamps
     shifted = lc.shift(-lc.time[0] + start_time)
+
     downsampled_rates = imprint_sampling_pattern(shifted, timestamps, bin_exposures)
+
     return downsampled_rates
 
 
-def tk95_sim(timestamps, psd_model, mean, sim_dt=None, extension_factor=50, bin_exposures=None):
+def tk95_sim(timestamps, psd_model, mean, sim_dt=None, extension_factor=20, bin_exposures=None):
     """Simulate one lightcurve using the method from Timmer and Koenig+95 with the input sampling (timestamps) and using a red-noise powerlaw model.
 
     Parameters
@@ -429,11 +412,11 @@ def tk95_sim(timestamps, psd_model, mean, sim_dt=None, extension_factor=50, bin_
         Model for the PSD
     mean: float or Quantity
         Desired mean for the final lightcurve
-    std: float or Quanity
-        Desierd standard deviation of the final lightcurve
     sim_dt: float
         Binning to use for the simulated lightcurve (desired final dt is given by bin_exposures).
         If not given it is computed from the mean difference of the input timestamps
+    extension_factor: int,
+        How many times longer the initial lightcurve needs to be simulated (to introduce red noise leakage)
     bin_exposures: float or array-like
         Exposure time of each bin in the final lightcurve (float for constant, array for irregular bins)
     """
@@ -457,11 +440,22 @@ def tk95_sim(timestamps, psd_model, mean, sim_dt=None, extension_factor=50, bin_
 
     lc = simulate_lightcurve(timestamps, psd_model, sim_dt, extension_factor)
 
-    rates = cut_downsample(lc, timestamps, mean, bin_exposures)
-    # adjust the mean, the variance is set on the PSD
-    rates += mean - np.mean(rates)
+    if np.isscalar(bin_exposures):
+        start_time = timestamps[0] - bin_exposures
+        end_time = timestamps[-1] + 1.5 * bin_exposures
+    else:
+        start_time = timestamps[0] - bin_exposures[0]
+        end_time = timestamps[-1] + 1.5 * bin_exposures[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
 
-    return rates
+    duration = end_time - start_time
+
+    lc_cut = cut_random_segment(lc, duration)
+
+    downsampled_rates = downsample(lc_cut, timestamps, bin_exposures)
+    # adjust the mean, the variance is set on the PSD
+    downsampled_rates += mean - np.mean(downsampled_rates)
+
+    return downsampled_rates
 
 
 def check_pdfs(weights, pdfs):
