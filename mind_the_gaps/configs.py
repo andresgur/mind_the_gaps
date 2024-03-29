@@ -7,7 +7,7 @@ import celerite
 import warnings
 import numpy as np
 
-from mind_the_gaps.celerite_models import Lorentzian, DampedRandomWalk, Cosinus, BendingPowerlaw
+from mind_the_gaps.models.celerite_models import Lorentzian, DampedRandomWalk, Cosinus, BendingPowerlaw
 
 two_pi = 2 * np.pi
 days_to_seconds = 24 * 3600
@@ -127,4 +127,4 @@ def read_config_file(config_file, walkers=32):
         kernel_string = "terms[%d]:" % (kernel_counter + 1)
 
     total_kernel = np.sum(kernels)
-    return total_kernel, initial_params, labels, columns, outmodels
+    return total_kernel, initial_params.T, labels, columns, outmodels
