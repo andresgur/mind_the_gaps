@@ -26,7 +26,7 @@ def fit_lightcurve(input_file):
     solution = gpmodel.fit(initial_params)
     gpmodel.gp.set_parameter_vector(solution.x)
     #print(solution)
-    print("Best-fit log-likelihood: {0} \n".format(-solution.fun)) # here is neg_log_like
+    print("Best-fit log-likelihood: {:.3f} \n".format(-solution.fun)) # here is neg_log_like
 
     if solution.success:
         initial_mcmc = gpmodel.spread_walkers(nwalkers, solution.x, bounds, 10.0)
@@ -35,9 +35,12 @@ def fit_lightcurve(input_file):
         initial_mcmc = initial_samples
     try:
         # Note: Cores always need to be 1 as we are already in "Pool" mode
-        gpmodel.derive_posteriors(initial_mcmc, walkers= nwalkers, converge=True, max_steps=max_n, progress=False, fit=False, cores=1)
+        gpmodel.derive_posteriors(initial_mcmc, walkers= nwalkers, converge=True,
+                                  max_steps=max_n, progress=False, fit=False, cores=1)
     except ValueError:
-        gpmodel.derive_posteriors(initial_samples, walkers= nwalkers, converge=True, max_steps=max_n, progress=False, fit=False, cores=1)
+        gpmodel.derive_posteriors(initial_samples.T, walkers= nwalkers, converge=True,
+                                  max_steps=max_n, progress=False, fit=False, cores=1)
+
     if gpmodel.converged:
         best_log = gpmodel.max_loglikehood
         best_mcmc_pars = gpmodel.max_parameters
@@ -47,7 +50,7 @@ def fit_lightcurve(input_file):
         best_mcmc_pars = gpmodel.sampler.get_chain(flat=True)[best_loglikehood_index]
         best_log = log_probs[best_loglikehood_index]
 
-    print("MCMC chains maximum log-likelihood:\n------------------------------------------- \n {0}\n".format(best_log))
+    print("MCMC chains maximum log-likelihood:\n------------------------------------- \n {:.3f}\n".format(best_log))
 
     gpmodel.gp.set_parameter_vector(best_mcmc_pars)
 
@@ -137,7 +140,7 @@ bics = -2 * np.array(log_likehoods) + len(dummy_gp.get_parameter_dict()) * np.lo
 
 outputs = np.vstack((input_files, log_likehoods, bics, list(best_pars.values())))
 
-header = "sim\tloglikehood\tbic\t" + "\t".join(par_names)
+header = "sim\tloglikelihood\tbic\t" + "\t".join(par_names)
 
 np.savetxt("%s/fits_results.dat" % outdir,
            outputs.T, header=header, fmt="%s") # store all strings as it is hard to do otherwise
@@ -148,17 +151,15 @@ omega_par= [name for name in par_names if "omega" in name]
 if not omega_par:
 
     for i, omega in omega_par:
-
         periods = [(2 * np.pi / (np.exp(best_pars[omega]) * days_to_seconds)) for best_pars in best_params]
 
         np.savetxt("%s/periods_%d.dat" % (outdir, i), periods, header="P", fmt="%.3f")
 else:
-    periods = None
 
+    periods = None
 
 config_file_name = os.path.basename(args.config_file)
 copyfile(args.config_file, "%s/%s" % (outdir, config_file_name))
-
 
 if len(args.input_files) >1:
 
