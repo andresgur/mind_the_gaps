@@ -11,7 +11,6 @@ import astropy.units as u
 from astropy.visualization import quantity_support
 import time
 from multiprocessing import Pool
-from functools import partial
 from shutil import copyfile
 import warnings
 import subprocess
@@ -74,7 +73,7 @@ ap.add_argument("-c", '--cores', nargs='?', help="Number of CPUs for paralleliza
 ap.add_argument("-up", '--upfile', nargs='?', help="Upper limits file. Default PCUL.qdp", type=str, default='PCUL.qdp')
 ap.add_argument("-e", '--extension_factor', nargs='?', help="Generate lightcurves initially e times longer than input lightcurve to introduce red noise leakage.", type=float, default=5)
 ap.add_argument("-s", "--simulator", nargs="?", help="Light curve simulator to use", type=str, default="E13",
-                choices=["E13", "TK95"])
+                choices=["E13", "TK95", "Shuffle"])
 ap.add_argument("--pdf", nargs="?", help="PDF of the fluxes (For E13 method). Lognormal by default, ignore if simulator is Shuffle",
                 type=str, default="Lognormal", choices=["Gaussian", "Lognormal", "Uniform"])
 ap.add_argument("--npoints", nargs="?", help="Remove any number of datapoints from the input lightcurve before generating the new one. Default is 0. This is useful to degrade the quality of your lightcurve",
@@ -94,8 +93,10 @@ pdf = args.pdf
 
 base_command = "python %s -n %d -f %s --tmin %.2f --tmax %.2f -c %d -s %s -e %.1f --npoints %d --pdf %s -o %s" % (__file__, args.n_sims, args.file[0],
                 args.tmin, args.tmax, cores, simulator, extension_factor, points_remove, pdf, args.outdir)
-if args.command is not None:
+if args.command is not None and args.simulator.lower()!="shuffle":
     python_command = base_command + " --command %s" % args.command
+elif args.simulator.lower()=="shuffle":
+    python_command = base_command
 if args.config is not None:
     python_command = base_command + " --config %s" % args.config
 if args.noise_std is not None:
@@ -139,21 +140,25 @@ if os.path.isfile(count_rate_file):
 
     # create folder name
     model_str = "m"
-    if args.config is None:
-        if "--Lorentzian" in args.command:
-            model_str += "_Lorentzian"
-        if "--DampedRandomWalk" in args.command:
-            model_str += "_DampedRandomWalk"
-        if "--Granulation" in args.command:
-            model_str += "_Granulation"
-        if "--Powerlaw" in args.command:
-            model_str += "_Powerlaw"
-        if "--Matern32" in args.command:
-            model_str += "_Matern32"
-    else:
-        model_str += "_config"
+    # note for shuffle we do not read the command line
+    if args.simulator.lower()!="shuffle":
+        if args.config is None:
+            if "--Lorentzian" in args.command:
+                model_str += "_Lorentzian"
+            if "--DampedRandomWalk" in args.command:
+                model_str += "_DampedRandomWalk"
+            if "--Granulation" in args.command:
+                model_str += "_Granulation"
+            if "--Powerlaw" in args.command:
+                model_str += "_Powerlaw"
+            if "--Matern32" in args.command:
+                model_str += "_Matern32"
+            if "--Jitter" in args.command:
+                model_str += "_Jitter"
+        else:
+            model_str += "_config"
 
-    outdirname = "%s_%s_%s_e%.1ft%s_N%d_n%d" % (args.outdir, model_str, pdf, extension_factor,
+    outdirname = "%s_%s_%s_%s_e%.1ft%s_N%d_n%d" % (args.outdir, args.simulator, model_str, pdf, extension_factor,
                                                 time_range, n_sims, points_remove)
     if args.outdir == "lightcurves_goodness":
         outdir = outdirname
@@ -187,7 +192,8 @@ if os.path.isfile(count_rate_file):
         generate_lc_args += " --config %s" % args.config
     # command option
     else:
-        generate_lc_args += " %s" % args.command
+        if args.simulator.lower()!="shuffle":
+            generate_lc_args += " %s" % args.command
 
     # if on the cluster switch to the set number of tasks
     if "SLURM_CPUS_PER_TASK" in os.environ:

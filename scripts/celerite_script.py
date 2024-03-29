@@ -181,9 +181,8 @@ if __name__ == "__main__":
     print("Mean sampling: %.2ed" % (dt / days_to_seconds))
     print("Number of datapoints: %d" % lc.n)
     # see https://dx.doi.org/10.3847/1538-4357/acbe37 see Vaughan 2003 Eq 9 and Appendix
-    psd_noise_level = 2 * dt * np.mean(yerr**2)
-    clipped_time_diff = sigma_clip(np.diff(time), sigma=2.5, maxiters=10, masked=False)
-    psd_noise_level_median = 2 * np.median(np.diff(clipped_time_diff)) * np.mean(yerr**2)
+    normalization_factor =  2 / np.sqrt(2 * np.pi) # this factor accounts for the fact that we only integrate positive frequencies and the 1 / sqrt(2pi) from the Fourier transform
+    psd_noise_level = 2 * dt * np.mean(yerr**2) / (2 * np.pi * normalization_factor)
     # timestamps to plot the model
     t_samples = 20 * lc.n if lc.n < 5000 else 6 * lc.n
     time_model = np.linspace(np.min(time), np.max(time), t_samples) # seconds
@@ -321,7 +320,7 @@ if __name__ == "__main__":
 
         # no need to pass time here as if this is omitted the coordinates will be assumed to be x from GP.compute() and an efficient method will be used to compute the prediction (https://celerite.readthedocs.io/en/stable/python/gp/)
         #gp.compute(time, yerr) no need as we already call compute above
-        pred_mean, pred_var = gpmodel.gp.predict(y, time, return_var=True, return_cov=False)
+        pred_mean, pred_var = gpmodel.gp.predict(y, return_var=True, return_cov=False)
         try:
             pvalue = standarized_residuals(y, pred_mean, np.sqrt(pred_var), "best_fit")
         except ValueError as e:
@@ -355,8 +354,7 @@ if __name__ == "__main__":
         psd_best_fit_ax.set_yscale("log")
         psd = gpmodel.gp.kernel.get_psd(w_frequencies)
         psd_best_fit_ax.plot(days_freqs, psd, color=color, label="Total model")
-        psd_best_fit_ax.axhline(psd_noise_level_median, ls="solid", color="black", zorder=-10)
-        psd_best_fit_ax.axhline(psd_noise_level, ls="solid", color="black", zorder=-10)
+        psd_best_fit_ax.axhline(psd_noise_level, ls="--", color="black", zorder=-10)
         ax2 = psd_best_fit_ax.twiny()
         psd_best_fit_ax.set_xscale("log")
         ax2.set_xscale("log")
@@ -467,6 +465,7 @@ if __name__ == "__main__":
 
     # save max params and standarized residuals
     best_params = gpmodel.max_parameters
+    
     gpmodel.gp.set_parameter_vector(best_params)
     ###gp.compute(time, yerr) --> check the tutorial compute is only called once
     # (No need to pass time as it'll be assumed the same datapoints as GP compute (https://celerite.readthedocs.io/en/stable/python/gp/)
@@ -591,7 +590,7 @@ if __name__ == "__main__":
     psd_ax.set_xlabel("Frequency (days$^{-1}$)")
     psd_ax.set_ylabel("Power")
     psd_ax.set_yscale("log")
-    #psd_ax.axhline(psd_noise_level, ls="--", color="black")
+    psd_ax.axhline(psd_noise_level, ls="--", color="black")
 
     color = "black"
     # draw 1000 samples from the final distributions and create plots
@@ -601,13 +600,11 @@ if __name__ == "__main__":
 
     models = np.ones((n_samples, t_samples))
     means = np.ones((n_samples, t_samples))
-    models_st_res = np.ones((n_samples, lc.n))
     print("Generating %d samples for model and PSD plots" % n_samples)
     for index, sample in enumerate(final_samples[np.random.randint(len(samples), size=n_samples)]):
         gpmodel.gp.set_parameter_vector(sample)
         psd = gpmodel.gp.kernel.get_psd(w_frequencies)
         # omit time for faster computing time
-        models_st_res[index] = gpmodel.gp.predict(y, return_cov=False)
         model = gpmodel.gp.predict(y, time_model, return_cov=False)
         model_ax.plot(time_model / days_to_seconds, model, color="orange", alpha=0.3)
         psd_ax.plot(frequencies * days_to_seconds, psd, color=color, alpha=0.3)
@@ -649,11 +646,7 @@ if __name__ == "__main__":
     plt.close(model_figure)
     outputs = np.array([time_model / days_to_seconds, m[1], m[0], m[2]])
     np.savetxt("%s/model_median.dat" % outdir, outputs.T, header="time(d)\tmodel\tlower\tupper", fmt="%.6f")
-    try:
-        standarized_residuals(y, np.mean(models_st_res, axis=0), np.std(models_st_res, axis=0), "mcmc_median")
-    except ValueError as e:
-        print("Error when computing best_fit standarized residuals")
-        print(e)
+
     # PSD median
     psd_median_figure, psd_median_ax = plt.subplots()
     psd_median_ax.set_xlabel("Frequency (days$^{-1}$)")
@@ -700,7 +693,6 @@ if __name__ == "__main__":
     ax2.set_xticks(xticks)
     ax2.set_xticklabels(x2labels)
     # add noise level
-    psd_median_ax.axhline(psd_noise_level_median, ls="solid", color="black", zorder=-10)
     psd_median_ax.axhline(psd_noise_level, ls="--", color="black")
     psd_median_figure.savefig("%s/psd_median_comps.png" % outdir, bbox_inches="tight")
 
