@@ -1,5 +1,4 @@
 from astropy.modeling.models import custom_model
-from astropy.modeling import Model
 import numpy as np
 from scipy.special import gamma
 
