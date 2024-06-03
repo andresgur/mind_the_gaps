@@ -1,5 +1,8 @@
 GP time series analysis with focus on period detection on irregularly-sampled stochastically-varying astronomical time series
 
+![Mind The Gaps](https://github.com/andresgur/mind_the_gaps/docs/image.jpg?raw=true)
+
+
 # Installation
 To install the repository, first clone to your compute:
 `git clone https://github.com/andresgur/mind_the_gaps`
