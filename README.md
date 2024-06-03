@@ -1,6 +1,6 @@
 GP time series analysis with focus on period detection on irregularly-sampled stochastically-varying astronomical time series
 
-![Mind The Gaps](https://github.com/andresgur/mind_the_gaps/docs/mind_the_gaps.jpg)
+![Mind The Gaps](https://github.com/andresgur/mind_the_gaps/blob/main/docs/mind_the_gaps.jpg)
 
 
 # Installation
