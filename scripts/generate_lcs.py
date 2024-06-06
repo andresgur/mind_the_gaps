@@ -15,7 +15,6 @@ from astropy.visualization import quantity_support
 import time
 from mind_the_gaps.models.psd_models import BendingPowerlaw, Lorentzian, SHO, Matern32, Jitter
 from astropy.modeling.powerlaws import PowerLaw1D
-from astropy.modeling.functional_models import Const1D
 from mind_the_gaps.lightcurves import SimpleLightcurve, SwiftLightcurve
 import warnings
 from multiprocessing import Pool
@@ -224,14 +223,22 @@ def read_config_file(config_file):
     return psd_model, outpars, model_str
 
 def simulate_lcs(sim):
-    """Create lightcurves"""
+    """Function to parallelize the lightcurve simulation
+
+    sim: int,
+        The simulation number (just for output file naming)
+    """
     rates = simulator.generate_lightcurve(extension_factor)
     noisy_rates, dy = simulator.add_noise(rates)
     save_lc(lc.times, noisy_rates, dy, sim)
     return
 
 def shuffle_lcs(sim):
-    """Create lightcurves by randomly shuffling the measurements"""
+    """Function to parallelize the generation of lightcurves by randomly shuffling the measurements
+
+    sim: int,
+        The simulation number (just for output file naming)
+    """
     ind = np.random.randint(0, lc.n, lc.n)
     noisy_rates = lc.y[ind]
     dy = lc.dy[ind]
@@ -240,7 +247,17 @@ def shuffle_lcs(sim):
 
 
 def save_lc(times, rates, dy, sim):
-    """Dummy function to store the generated lightcurve"""
+    """Function to store the generated lightcurve
+
+    times: array_like,
+        Sampling times of the lightcurve
+    rates: array_like
+        Rates of the lightcurve
+    dy: array_like
+        Uncertainties on each datapoint
+    sim: int,
+        Simulation number (just for output file naming)
+    """
     name = "%s%s" % (rootname, outpars)
     sample_variance = np.var(rates)
     outfile = "lc%d_%s_v%.3E_n%d.dat" % (sim, name, sample_variance, points_remove)

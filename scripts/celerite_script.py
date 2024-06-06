@@ -72,6 +72,7 @@ def standarized_residuals(data, model, uncer,  ouput):
     # plot aucorr
     fig = plt.figure()
     lags, acf, _, __ = plt.acorr(std_res, maxlags=None)
+    # sigma
     plt.axhspan(-1 / np.sqrt(len(std_res)), 1 / np.sqrt(len(std_res)), alpha=0.3, color="black")
     plt.xlim(left=0)
     plt.ylim(top=np.max(acf[acf < 0.99]) + 0.05) # the max after the 1.0 at the 0 lag
@@ -162,7 +163,7 @@ if __name__ == "__main__":
 
     lc = lc.truncate(tmin, tmax)
 
-    time,y, yerr = lc.times, lc.y, lc.dy
+    time, y, yerr = lc.times, lc.y, lc.dy
 
     # get only positive measurements
     if np.count_nonzero(y<0):
@@ -184,7 +185,7 @@ if __name__ == "__main__":
     normalization_factor =  2 / np.sqrt(2 * np.pi) # this factor accounts for the fact that we only integrate positive frequencies and the 1 / sqrt(2pi) from the Fourier transform
     psd_noise_level = 2 * dt * np.mean(yerr**2) / (2 * np.pi * normalization_factor)
     # timestamps to plot the model
-    t_samples = 20 * lc.n if lc.n < 5000 else 6 * lc.n
+    t_samples = 18 * lc.n if lc.n < 5000 else 7 * lc.n
     time_model = np.linspace(np.min(time), np.max(time), t_samples) # seconds
     # for plotting the PSD (if less than 500d extend a bit)
     if duration / days_to_seconds < 800 and lc.n < 5000:
@@ -390,7 +391,7 @@ if __name__ == "__main__":
         warnings.warn("Initial samples reset based on best-fit parameters")
         initial_samples = gpmodel.spread_walkers(nwalkers, solution.x, bounds, 10.0)
 
-    max_steps = 250000
+    max_steps = 300000
     print("Running chain for a maximum of %d samples with %d walkers until the chain has a length 100xtau using %d cores" % (max_steps, nwalkers, cores))
     print("Initial samples\n----------")
     print(initial_samples)
@@ -465,7 +466,7 @@ if __name__ == "__main__":
 
     # save max params and standarized residuals
     best_params = gpmodel.max_parameters
-    
+
     gpmodel.gp.set_parameter_vector(best_params)
     ###gp.compute(time, yerr) --> check the tutorial compute is only called once
     # (No need to pass time as it'll be assumed the same datapoints as GP compute (https://celerite.readthedocs.io/en/stable/python/gp/)
@@ -477,15 +478,18 @@ if __name__ == "__main__":
         print(e)
         pvalue = 0
 
-    np.savetxt("%s/model_max.dat" % outdir, np.array([time / days_to_seconds, best_model, np.sqrt(var)]).T, header="time(d)\tmodel\tstd", fmt="%.6f")
+    np.savetxt("%s/model_max.dat" % outdir, np.array([time / days_to_seconds,
+               best_model, np.sqrt(var)]).T,
+               header="time(d)\tmodel\tstd",
+               fmt="%.6f")
 
     # best parameter stats
-    max_loglikehood = gpmodel.max_loglikehood
-    BIC = bic(max_loglikehood, lc.n, gpmodel.k)
-    AICC = aicc(max_loglikehood, lc.n, gpmodel.k)
+    BIC = bic(gpmodel.max_loglikehood, lc.n, gpmodel.k)
+    AICC = aicc(gpmodel.max_loglikehood, lc.n, gpmodel.k)
 
     header = "#file\tloglikelihood\tBIC\tAICc\tpvalue\tparameters\tdatapoints"
-    outstring = "%s\t%.3f\t%.2f\t%.2f\t%.3f\t%d\t%d" % (os.path.basename(count_rate_file), max_loglikehood, BIC, AICC, pvalue, gpmodel.k, lc.n)
+    outstring = "%s\t%.3f\t%.2f\t%.2f\t%.3f\t%d\t%d" % (os.path.basename(count_rate_file), gpmodel.max_loglikehood,
+                                                        BIC, AICC, pvalue, gpmodel.k, lc.n)
     for parname, best_par in zip(par_names, best_params):
         header += "\t%s" % parname
         decimals = int(np.abs(np.floor(np.log10(np.abs(best_par))))) + 1
@@ -513,7 +517,7 @@ if __name__ == "__main__":
         #else:
         outstring += '%.*f$_{-%.*f}^{+%.*f}$\t' % (decimals, q_50, decimals, dx_down, decimals, dx_up)
         if "Q" in parname:
-            header += "%s & " % parname.replace("log_Q", "Q")
+            header += "%s\t" % parname.replace("log_Q", "Q")
             q_16, q_50, q_84 = np.exp(q_16), np.exp(q_50), np.exp(q_84)
             dx_down, dx_up = q_50-q_16, q_84-q_50
             outstring += '%.1f$^{+%.1f}_{-%.1f}$\t' % (q_50, dx_up, dx_down)
@@ -606,8 +610,8 @@ if __name__ == "__main__":
         psd = gpmodel.gp.kernel.get_psd(w_frequencies)
         # omit time for faster computing time
         model = gpmodel.gp.predict(y, time_model, return_cov=False)
-        model_ax.plot(time_model / days_to_seconds, model, color="orange", alpha=0.3)
-        psd_ax.plot(frequencies * days_to_seconds, psd, color=color, alpha=0.3)
+        model_ax.plot(time_model / days_to_seconds, model, color="orange", alpha=0.25)
+        psd_ax.plot(frequencies * days_to_seconds, psd, color=color, alpha=0.25)
         means[index] = gpmodel.gp.mean.get_value(time_model)
         models[index] = model
         psds[index] = psd
@@ -641,22 +645,21 @@ if __name__ == "__main__":
     model_ax.plot(time_model / days_to_seconds, m[1], color="orange")
     model_ax.fill_between(time_model / days_to_seconds, m[0], m[2], alpha=0.3, color="orange")
     model_ax.plot(time_model / days_to_seconds, np.mean(means, axis=0), ls="--", color="orange")
-    model_ax.errorbar(time / days_to_seconds, y, yerr=yerr, fmt=".k", capsize=0)
     model_figure.savefig("%s/model_mcmc_median.png" % outdir, bbox_inches="tight")
     plt.close(model_figure)
     outputs = np.array([time_model / days_to_seconds, m[1], m[0], m[2]])
     np.savetxt("%s/model_median.dat" % outdir, outputs.T, header="time(d)\tmodel\tlower\tupper", fmt="%.6f")
 
     # PSD median
-    psd_median_figure, psd_median_ax = plt.subplots()
-    psd_median_ax.set_xlabel("Frequency (days$^{-1}$)")
-    psd_median_ax.set_ylabel("Power")
-    psd_median_ax.set_yscale("log")
-
     p = np.percentile(psds, [16, 50, 84], axis=0)
     psd_output = np.array([frequencies, p[0], p[1], p[2], psd_noise_level * np.ones(len(frequencies))])
     np.savetxt("%s/psds.dat" % outdir, psd_output.T, delimiter="\t",
               fmt="%.8f", header="f\t16%\t50%\t84%\tnoise")
+    # figure
+    psd_median_figure, psd_median_ax = plt.subplots()
+    psd_median_ax.set_xlabel("Frequency (days$^{-1}$)")
+    psd_median_ax.set_ylabel("Power")
+    psd_median_ax.set_yscale("log")
 
     psd_median_ax.plot(frequencies * days_to_seconds, p[1], color="orange")
     psd_median_ax.fill_between(frequencies * days_to_seconds, p[0], p[2], color=color, alpha=0.3)
@@ -677,11 +680,10 @@ if __name__ == "__main__":
     ax2.set_xticklabels(x2labels)
     ax2.set_xlabel('Period (days)')
     ax2.set_xlim(psd_median_ax.get_xlim())
-
     psd_median_figure.savefig("%s/psd_median.png" % outdir, bbox_inches="tight")
 
     # add components
-    colors = ["green", "red", "indigo"]
+    colors = ["green", "red", "indigo", "brown"]
     for term_i, term in enumerate(gpmodel.gp.kernel.terms):
         p = np.percentile(psd_components[term_i], [16, 50, 84], axis=0)
         psd_median_ax.plot(frequencies * days_to_seconds, p[1], color=colors[term_i], ls="--")

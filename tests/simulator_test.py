@@ -81,7 +81,7 @@ class TestSimulator(unittest.TestCase):
     def test_variance_celerite(self):
         var = 10
         freq = 2 * np.pi / 10 # 1 / 10 in rad
-        psd_model = BendingPowerlaw(S_0=10, w_0=freq)
+        psd_model = BendingPowerlaw(S0=10, omega0=freq)
         sim_dt = 0.05
         timestamps = np.arange(0, 5000, sim_dt)
         extension_factor = 10
@@ -96,7 +96,7 @@ class TestSimulator(unittest.TestCase):
 
         var = 10
         freq = 2 * np.pi / 10 # 1 / 10 in rad
-        psd_model = Lorentzian(S_0=var, w_0=freq, Q=10)
+        psd_model = Lorentzian(S0=var, omega0=freq, Q=10)
         sim_dt = 0.05
         timestamps = np.arange(0, 5000, sim_dt)
         extension_factor = 10
@@ -163,7 +163,7 @@ class TestSimulator(unittest.TestCase):
         dt = 1
         timestamps = np.arange(0, 8500, dt)
         variance = 10
-        psd_model = BendingPowerlaw(S_0=variance, w_0=np.exp(-3)) # 126 seconds
+        psd_model = BendingPowerlaw(S0=variance, omega0=np.exp(-3)) # 126 seconds
         mean  = 1
         vars = []
         for i in range(30):
