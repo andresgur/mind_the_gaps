@@ -47,7 +47,8 @@ def standarized_residuals(data, model, uncer,  ouput):
     mu, std = norm.fit(std_res, loc=0, scale=1)
     fig, ax = plt.subplots()
     plt.bar(bins[:-1], normalized_res, width=bin_widths, edgecolor="black",
-            facecolor="None", label="(D - M) /$\\sigma_M$ \n (%.4f$\pm$%.4f)" % (mu, std))
+            facecolor="None",
+            label="(D - M) /$\\sigma_M$ \n (%.4f$\pm$%.4f)" % (mu, std))
 
     # dividing by the data
     std_res_data = (data - model) / yerr
@@ -61,7 +62,7 @@ def standarized_residuals(data, model, uncer,  ouput):
     # ks test
     gauss = norm(loc=0, scale=1)
     xrange = np.arange(np.min(std_res), np.max(std_res), 0.05)
-    plt.plot(xrange, gauss.pdf(xrange), color="black")
+    plt.plot(xrange, gauss.pdf(xrange), color="black", label="Normal distribution ($\mu =0, \sigma =1$)")
     kstest_res = ks_1samp(std_res[~np.isinf(std_res)], gauss.cdf)
     plt.text(0.1, 0.7, "p-value = %.3f %%" % (kstest_res.pvalue * 100),
              transform=ax.transAxes, fontsize=24)
@@ -153,11 +154,11 @@ if __name__ == "__main__":
 
     try:
         lc = SimpleLightcurve(count_rate_file, skip_header=0)
-    except:
+    except ValueError:
         try:
             # Swift xrt
             lc = SwiftLightcurve(count_rate_file, minCts=0)
-        except:
+        except ValueError:
             # fermi
             lc = FermiLightcurve(count_rate_file)
 
@@ -165,7 +166,7 @@ if __name__ == "__main__":
 
     time, y, yerr = lc.times, lc.y, lc.dy
 
-    # get only positive measurements
+    # warn the user of negative bins
     if np.count_nonzero(y<0):
         warnings.warn("Lightcurve has some negative bins!")
 
@@ -251,7 +252,8 @@ if __name__ == "__main__":
         ax.plot(days_freqs, term.get_psd(w_frequencies), ls="--",
                              label="%s" % model_name)
     # plot total model
-    plt.plot(days_freqs, gpmodel.gp.kernel.get_psd(w_frequencies), ls="--", label="Total")
+    plt.plot(days_freqs, gpmodel.gp.kernel.get_psd(w_frequencies), ls="--",
+             label="Total")
     # twin axis
     plt.legend()
     ax2 = ax.twiny()
