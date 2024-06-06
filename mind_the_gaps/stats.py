@@ -144,6 +144,7 @@ def create_uniform_distribution(mean, var):
 
 
 def neg_log_like(params, y, gp):
+    """Remove eventually"""
     gp.set_parameter_vector(params)
     return -gp.log_likelihood(y)
 
@@ -163,9 +164,11 @@ def bic(loglikehood, n, k):
     """
     return -2. * loglikehood + k * np.log(n)
 
+def aic(loglikehood, k):
+    return 2 * k - 2 * loglikehood
 
 def aicc(loglikehood, n, k):
-    """Calculate the Akaike Information Criterion
+    """Calculate the Akaike Information Criterion corrected for finite sample size
 
     Parameters
     ----------
@@ -177,4 +180,4 @@ def aicc(loglikehood, n, k):
         Number of parameters
 
     """
-    return 2 * k - 2 * loglikehood + 2 * k * (k + 1) / (n - k - 1)
+    return aic(loglikehood, k) + 2 * k * (k + 1) / (n - k - 1)
