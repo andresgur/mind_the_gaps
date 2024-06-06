@@ -5,13 +5,13 @@
 # @Last modified time: 28-02-2022
 import numpy as np
 from random import sample
-##from mind_the_gaps import Simulator
+from mind_the_gaps.simulator import Simulator
 
 class GappyLightcurve:
     """
     A class to store parameters of a irregularly-sampled lightcurve
     """
-    def __init__(self, times, y, dy, exposure=None, bkg_rate=None, bkg_rate_err=None):
+    def __init__(self, times, y, dy, exposures=None, bkg_rate=None, bkg_rate_err=None):
         """
 
         Parameters
@@ -33,9 +33,14 @@ class GappyLightcurve:
         self._times = times
         self._y = y
         self._dy = dy
-        self._exposures = exposure if exposure is not None else np.zeros(len(times))
+        self._exposures = exposures if exposures is not None else np.zeros(len(times))
         self._bkg_rate = bkg_rate if bkg_rate is not None else np.zeros(len(times))
         self._bkg_rate_err = bkg_rate_err if bkg_rate_err is not None else np.zeros(len(times))
+
+        epsilon = 0.99 # to avoid numerically distinct but equal
+        wrong = np.count_nonzero(np.diff(self._times) < self._exposures[:-1] * epsilon)
+        if wrong >0:
+            raise ValueError("Some timestamps (%d) have a spacing below the exposure sampling time!" % wrong)
 
     @property
     def times(self):
@@ -170,6 +175,31 @@ class GappyLightcurve:
             self._bkg_rate_err[mask]
         )
 
+    def split(self, interval):
+        """
+        Split the lightcurve based on the input (time) interval
+
+        Parameters
+        ----------
+        interval : float
+            Time interval with which split the lightcurve
+
+        Returns
+        -------
+        array of GappyLightcurve
+            Each split lightcurve will be stored as a new object
+        """
+        lightcurves = []
+        # find places where the spacing is larger than the interval
+        indexes = np.where(np.diff(self.times) > interval)[0]
+        # add last index
+        indexes = np.append(indexes, -1)
+        j = 0
+        for i in indexes:
+            lightcurves.append(self.truncate(self.times[j], self.times[i]))
+            j = i + 1
+        return lightcurves
+
     def rand_remove(self, points_remove):
         """Randomly remove a given number of points from the lightcurve"""
         if points_remove > self.n:
@@ -192,7 +222,7 @@ class GappyLightcurve:
         np.savetxt(outname, outputs.T, fmt="%.6f", header="t\trate\terror\texposure\tbkg_rate\tbkg_rate_err")
 
 
-    def get_simulator(self, psd_model, pdf, mean=None):
+    def get_simulator(self, psd_model, pdf, noise_std=None):
         """Creates an instance of mind_the_gaps.Simulator based on the lightcurve
             properties (timestamps, exposures, etc)
 
@@ -203,11 +233,5 @@ class GappyLightcurve:
         pdf: str,
             The probability distribution (Gaussian, Lognormal or Uniform)
         """
-        if pdf.lower() not in ["gaussian", "lognormal", "uniform"]:
-            raise ValueError("%s not implemented! Currently implemented: Gaussian, Uniform or Lognormal")
-
-        if mean is None:
-
-            mean = self._mean
-
-        ##return Simulator(psd_model, pdf, self_.times, self_.bkg_rate, self_.bkg_rate_err, mean)
+        return Simulator(psd_model, pdf, self._times, self.exposures, self.mean,
+                         self._bkg_rate, self._bkg_rate_err, noise_std=noise_std)

@@ -11,12 +11,12 @@ import argparse
 import re
 import time
 import warnings
-import subprocess
 import astropy.units as u
 from astropy.visualization import quantity_support
 from multiprocessing import Pool
-from functools import partial
 from shutil import copyfile
+from mind_the_gaps.models.psd_models import BendingPowerlaw, Lorentzian, SHO, Matern32, Jitter
+from astropy.modeling.powerlaws import PowerLaw1D
 from mind_the_gaps.lightcurves import SwiftLightcurve, SimpleLightcurve
 
 
@@ -25,6 +25,41 @@ def parse_model_name(directory):
     if match:
         return match.group(1).replace("_fit","")
     return None
+
+
+def create_model(model_names, kernel_names):
+    """ Read command line arguments and builds the input PSD
+
+    Parameters
+    ----------
+    model_names: array_like,
+        List of strings with the model names
+
+    Returns the model psd (a summation of astropy.model)
+    """
+    models = []
+    for model_name, kernel_name in zip(model_names, kernel_names):
+        name = kernel_name
+        if model_name.lower()=="lorentzian":
+            model_component = Lorentzian(name=kernel_name)
+        elif model_name.lower()=="cosinus":
+            model_component = Lorentzian(Q=np.exp(200), name=kernel_name)
+        elif model_name.lower()=="dampedrandomwalk":
+            model_component = BendingPowerlaw(name=kernel_name)
+        elif model_name.lower()=="sho" or model_name.lower()=="granulation":
+            model_component = SHO(Q = 1 / np.sqrt(2), name=kernel_name)
+        elif model_name.lower()=="matern32":
+            model_component=Matern32(name=kernel_name)
+        elif model_name.lower()=="powerlaw":
+            model_component = PowerLaw1D(name=kernel_name)
+        elif model_name.lower()=="jitter":
+            model_component = Jitter(name=kernel_name)
+
+        models.append(model_component)
+
+    psd_model = np.sum(models)
+
+    return psd_model
 
 
 def create_data_selection_figure(outdir, tmax, tmin):
@@ -58,16 +93,30 @@ def create_data_selection_figure(outdir, tmax, tmin):
     plt.close(fig)
 
 
-def simulate_lcs(command): # don't pass the PDFs otherwise we the same pdf samples all the time!
+def simulate_lcs(input_args): # don't pass the PDFs otherwise we the same pdf samples all the time!
     """Wrapping function for parallelization. It simply takes the samples and simulates the lightcurve"""
-    param_command = command[0]
-    sim = int(command[1])
-    cmd = "python %s/scripts/pythonscripts/mind_the_gaps/scripts/generate_lc.py %s %s --rootfile _%d_%s_ " % (home, generate_lc_args, param_command, sim, model_names_)
+    sim, parameters = input_args # this is a dictionary with kernels:terms[X]:log_XX
+    # set the parameters to the psd
+    outpars = ""
+    for kernel_name in kernel_names:
+        if simulator.simulator.psd_model.n_submodels > 1:
+            model_component = simulator.simulator.psd_model[kernel_name]
+        else:
+            model_component = simulator.simulator.psd_model
+        # get the parameters for the Nth component
+        kernel_param_names = [name for name in samples_data.dtype.names if kernel_name in name]
 
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True, env=os.environ)
-
-    # Wait for the process to finish and get its output
-    stdout, stderr = proc.communicate()
+        for parname, kernel_parname in zip(model_component.param_names, kernel_param_names):
+            setattr(model_component, parname, np.exp(parameters[kernel_parname]))
+            outpars += "%s%.3f_" % (parname, parameters[kernel_parname])
+    rates = simulator.generate_lightcurve(extension_factor)
+    noisy_rates, dy = simulator.add_noise(rates)
+    sample_variance = np.var(noisy_rates)
+    rootfile = "_%d_%s_" % (sim, model_names_)
+    outfile = "lc%s%sv%.3E.dat" % (rootfile, outpars, sample_variance)
+    outputs = np.asarray([lc.times, noisy_rates, dy])
+    np.savetxt("lightcurves/%s" % (outfile), outputs.T, delimiter="\t",
+               fmt="%.6f", header="t\trate\terror")
 
     print("Simulation %d/%d completed" % (sim + 1, n_sims), flush=True)
 
@@ -111,8 +160,6 @@ celerite_dir = args.input_dir
 
 celerite_file = "%s/samples.dat" % celerite_dir
 
-model_names_ = parse_model_name(celerite_dir)
-model_names = model_names_.split("_")
 
 if tmin > tmax:
     raise ValueError("Error minimum time %.3f is larger than maximum time: %.3f" % (args.tmin, args.tmax))
@@ -128,9 +175,6 @@ if os.path.isfile(count_rate_file):
     lc = lc.truncate(tmin, tmax)
 
     duration = lc.duration * u.s
-    dt = np.median(np.diff(lc.times))
-    # in seconds
-    sim_dt = np.min(lc.exposures) / 2
 
     time_range = "{:0.3f}-{:0.3f}{:s}".format(lc.times[0], lc.times[-1], "s")
     print("Time range considered: %s" % time_range)
@@ -166,51 +210,40 @@ if os.path.isfile(count_rate_file):
     kernel_pattern = r'kernel(?::terms\[\d+\])?'
 
     kernel_names = np.unique([re.findall(kernel_pattern, name)[0] for name in samples_data.dtype.names[:-1]])
+    model_names_ = parse_model_name(celerite_dir)
+    model_names = model_names_.split("_")
+    psd_model = create_model(model_names, kernel_names)
 
     n_kernels = len(kernel_names)
+
+    if n_kernels!= psd_model.n_submodels:
+        raise ValueError("Number of model components do not match! %d != %d" % (n_kernels, psd_model.n_submodels))
 
     print("Input model has %d model components" % n_kernels)
 
     rand_ints = np.random.randint(0, len(samples_data), n_sims)
 
-    random_samples = samples_data[rand_ints]
+    random_param_samples = samples_data[rand_ints]
 
-    #if there is more than one kernel we skip the first one (the periodic component)
-    #if (model_names[0]=="Lorentzian" or  model_names[0]=="Cosinus") and n_kernels>1:
-    #    warnings.warn("Skipping the first model (%s component)" % model_names[0])
-    #    model_names = model_names[1:]
-    #    kernel_names = kernel_names[1:]
-
-    commands = []
-    for row in random_samples:
-        command = ""
-        for model_name, kernel_name in zip(model_names, kernel_names):
-            command += " --%s" %model_name
-            # match only the param bit of the kernel:terms:bla bla
-            params = [name for name in samples_data.dtype.names if kernel_name in name]
-            for par in params:
-                command += " %.4f" % row[par]
-        commands.append(command)
-    print("Here are the first 10 commands")
-    print(commands[0:10])
     start_time = time.time()
     print("\nSimulating %d lightcurves on %d cores" % (n_sims, cores))
     os.chdir("%s" % outdir)
 
-    generate_lc_args = "-f lc_data.dat -s %s -o lightcurves --pdf %s -e %.2f"  %(simulator, pdf, extension_factor)
-    if noise_std is not None:
-        generate_lc_args += " --noise_std %.5f" % noise_std
+    simulator = lc.get_simulator(psd_model, pdf, noise_std=noise_std)
     # if on the cluster switch to the set number of tasks
     if "SLURM_CPUS_PER_TASK" in os.environ:
         cores = int(os.environ['SLURM_CPUS_PER_TASK'])
         warnings.warn("The numbe of cores is being reset to SLURM_CPUS_PER_TASK = %d " % cores )
-
+    start = time.time()
     with Pool(processes=cores, initializer=np.random.seed) as pool:
         pool.map(
-            simulate_lcs, np.array([commands, np.arange(n_sims)]).T
+            simulate_lcs, enumerate(random_param_samples)
         )
 
     os.chdir("../")
+    end = time.time()
+    time_taken = (end - start) / 60
+    print("Time taken: %.2f minutes" % (time_taken))
     # copy the input samples file
     samples_file = os.path.basename(celerite_file)
     copyfile(celerite_file, "%s/%s" % (outdir, samples_file))

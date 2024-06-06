@@ -24,7 +24,6 @@ class SimpleLightcurve(GappyLightcurve):
             How many rows to skip
         """
         time, y, yerr, exposures, bkg_rate, bkg_err = self.readdata(input_file, skip_header, delimiter)
-
         super().__init__(time.to(u.s).value, y, yerr, exposures, bkg_rate, bkg_err)
 
 
@@ -50,11 +49,11 @@ class SimpleLightcurve(GappyLightcurve):
                 bkg_rate = data[data.dtype.names[4]]
                 bkg_err = data[data.dtype.names[5]]
             else:
-                bkg_rate = np.zeros_like(time)
-                bkg_err = np.zeros_like(time)
+                bkg_rate = np.zeros(len(time))
+                bkg_err = np.zeros(len(time))
         else:
             warnings.warn("Lightcurve has no exposures!")
-            exposures = np.zeros_like(time)
-            bkg_rate = np.zeros_like(time)
-            bkg_err = np.zeros_like(time)
+            exposures = np.zeros(len(time))
+            bkg_rate = np.zeros(len(time))
+            bkg_err = np.zeros(len(time))
         return time, data[rate_column], data[err_column], exposures, bkg_rate, bkg_err
