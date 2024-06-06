@@ -42,7 +42,7 @@ class GPModelling:
         self.gp = celerite.GP(kernel, mean=meanmodel, fit_mean=fit_mean)
         # self.gp = GaussianProcess(kernel, self._lightcurve.times, diag=self._lightcurve.dy**2) --> Tiny GP
         # initialize GP ( # You always need to call compute once.)
-        self.gp.compute(self._lightcurve.times, self._lightcurve.dy)
+        self.gp.compute(self._lightcurve.times, self._lightcurve.dy + 1e-12)
         self.initial_params = self.gp.get_parameter_vector()
         self._ndim = len(self.initial_params)
         self._posteriors_derived = False
@@ -328,6 +328,7 @@ class GPModelling:
     def parameter_names(self):
         return gp.get_parameter_names()
 
+
     @property
     def k(self):
         """
@@ -349,6 +350,6 @@ class GPModelling:
         return self._tau
 
 
-    def generate_from_posteriors(self):
+    def generate_from_posteriors(self, cores=8):
         if self._mcmc_samples is None:
             raise RuntimeError("Posteriors have not been derived. Please run derive_posteriors prior to calling this method.")
