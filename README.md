@@ -17,7 +17,9 @@ celerite_script.py --> Main script to fit a lightcurve and derive posteriors usi
 
 fit_lcs.py --> This is a lighter and faster version of the above and is meant to be used to fit the simulated lightcurves, when deriving the full posteriors is not necessary (as we are only looking for the maximum of the loglikehood). 
 
-generate_lc.py --> Generates a lightcurve based on an existing observing window (-f file option) using the  [TK95](https://ui.adsabs.harvard.edu/abs/1995A&A...300..707T) method (when specified or PDF is Gaussian) or the [E13](https://academic.oup.com/mnras/article/433/2/907/1746942) method. The PDF is specified through the --pdf command (only Gaussian, Uniform or Lognormal are accepted so far). The lightcurve input file needs to have 6 columns: timestamps, rates, errors, exposures, bkg count rates and uncertainties on the background rates. The model can be specified through the command line or through a config file. 
+generate_lcs.py --> Generates lightcurves based on an existing observing window (-f file option) using the [TK95](https://ui.adsabs.harvard.edu/abs/1995A&A...300..707T) method (when PDF is Gaussian) or the [E13](https://academic.oup.com/mnras/article/433/2/907/1746942) method when the PDF is not Gaussian. The PDF is specified through the --pdf command (only Gaussian, Uniform or Lognormal are accepted so far). The lightcurve input file needs to have at least 4 columns: timestamps, rates, errors, exposures, and optionally bkg count rates and uncertainties on the background rates. The model can be specified through the command line or through a config file. 
+
+generate_lcs_significance.py --> This takes the posteriors from a celerite_script.py run (from the input folder) and generates N lightcurves sampling from them. As generate_lcs.py, the pdf and observing strategy can be specified.
 
 ## Workflow
 
