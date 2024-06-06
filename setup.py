@@ -10,10 +10,8 @@ setup(
     packages=find_packages(),
     scripts=[
         "scripts/celerite_script.py",
-        "scripts/generate_lc.py",
-        "scripts/generate_lcs_significance.py",
+        "scripts/generate_lcs.py",
         "scripts/fit_lcs.py",
-        "scripts/generate_lcs_goodness.py",
         "scripts/generate_lcs_significance.py",
         "scripts/generate_strategy.py",
         "scripts/plot_ratio_test.py",
