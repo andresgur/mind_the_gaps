@@ -30,7 +30,13 @@ class BaseSimulatorMethod:
             setattr(self.psd_model, par, psd_params[par])
 
     def prepare_segment(self, extension_factor=10):
-        """This generates a TK95 long segment to be post processed later by one of the simulator methods"""
+        """This generates a TK95 long segment to be post processed later by one of the simulator methods
+        Parameters
+        ----------
+        extension_factor: float,
+            Factor x lightcurve_length by which generate the lightcurve in order
+            to introduce red noise leakage
+        """
         lc = simulate_lightcurve(self.timestamps, self.psd_model, self.sim_dt,
                                     extension_factor=extension_factor)
         segment = cut_random_segment(lc, self.sim_duration)
@@ -45,9 +51,9 @@ class TK95Simulator(BaseSimulatorMethod):
         super().__init__(psd_model, timestamps, exposures, sim_dt, sim_duration, mean)
 
     def simulate(self, segment):
+        # Implementation of TK95 simulation
         lc_rates = downsample(segment, self.timestamps, self.exposures)
         lc_rates += self.meanrate - np.mean(lc_rates)
-        # Implementation of TK95 simulation
         return lc_rates
 
 
@@ -68,7 +74,7 @@ class E13Simulator(BaseSimulatorMethod):
             pdf = create_uniform_distribution(self.meanrate, sample_variance)
         elif self.pdf=="gaussian":
             pdf = norm(loc=self.meanrate, scale=np.sqrt(sample_variance))
-        # Implementation of E13 simulation with additional parameters pd and max_iter
+        # Implementation of E13 simulation with additional parameters pdf and max_iter
         lc_rates = E13_sim_TK95(segment, self.timestamps, [pdf], [1],
                                 exposures=self.exposures, max_iter=self.max_iter)
         return lc_rates
@@ -416,7 +422,7 @@ def get_fft(N, dt, model):
     complex_fft[0] = 1e6
     # In case of even number of data points f_nyquist is only real (see e.g. Emmanoulopoulos+2013 or Timmer & Koening+95)
     if N % 2 == 0:
-        complex_fft[-1] = np.real(complex_fft[-1])
+        complex_fft[-1] = real[-1]#np.real(complex_fft[-1])
     return complex_fft
 
 
