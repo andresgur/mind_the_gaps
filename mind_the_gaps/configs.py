@@ -58,13 +58,14 @@ def read_config_file(config_file, walkers=32):
                 # create the variables if it's the first kernel
                 kernel_columns = ["kernel:%slog_omega0" % kernel_string, "kernel:%slog_S0" %kernel_string, "kernel:%slog_Q"%kernel_string]
                 kernel_labels = [r"$P$ (days)", r"log $S_0$", r"log Q"]
+                init_model_pars = np.array([np.random.uniform(S_0[0], S_0[2], walkers),
+                                         np.random.uniform(Q[0], Q[2], walkers),
+                                        np.random.uniform(w[2], w[0], walkers)])
                 if initial_params is None:
-                    initial_pars = np.array([np.random.uniform(S_0[0], S_0[2], walkers),
-                                             np.random.uniform(Q[0], Q[2], walkers),
-                                            np.random.uniform(w[2], w[0], walkers)])
+                    initial_pars = init_model_pars
                     initial_params = initial_pars
                 else:
-                    initial_params = np.append(initial_params, initial_pars, axis=0)
+                    initial_params = np.append(initial_params, init_model_pars, axis=0)
 
                 if row["model"]=="SHO":
                     kernel = celerite.terms.SHOTerm(log_S0=S_0[1], log_Q=Q[1], log_omega0=w[1], bounds=bounds)
