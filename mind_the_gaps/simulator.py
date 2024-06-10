@@ -453,12 +453,12 @@ def simulate_lightcurve_numpy(timestamps, psd_model, dt, extension_factor=25):
 
     complex_fft = get_fft_slow(n_datapoints, dt, psd_model)
 
-    countrate = np.fft.irfft(complex_fft, n=n_datapoints)
+    counts = np.fft.irfft(complex_fft, n=n_datapoints)
     # the power gets diluted due to the sampling, bring it back by applying this factor
     # the sqrt(2pi) factor enters because of celerite
-    countrate *= np.sqrt(n_datapoints) * np.sqrt(dt) * np.sqrt(np.sqrt(2 * np.pi))
+    counts *= np.sqrt(n_datapoints) * np.sqrt(dt) * np.sqrt(np.sqrt(2 * np.pi))
 
-    return Lightcurve(sim_timestamps, countrate, input_counts=True, skip_checks=True, dt=dt)
+    return Lightcurve(sim_timestamps, counts, input_counts=True, skip_checks=True, dt=dt)
 
 
 def simulate_lightcurve(timestamps, psd_model, dt, extension_factor=25):
