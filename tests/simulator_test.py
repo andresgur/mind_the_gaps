@@ -75,10 +75,9 @@ class TestSimulator(unittest.TestCase):
         dt = 1 # 1 day
         n = 1000
         times = np.arange(0, dt * n, dt) * 3600 * 24
-
-        rate = 5000 * np.ones(len(times))
+        dummyrates = np.ones(len(times))
         exposures = 2000 * np.ones(len(times))
-        lc = GappyLightcurve(times, rate, np.ones(len(rate)), exposures)
+        lc = GappyLightcurve(times, dummyrates, np.ones(len(rate)), exposures)
         variance = 162754.
         bendscale = 10. * 3600 * 24 # days
         omega0 = 2 * np.pi / bendscale
