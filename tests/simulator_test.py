@@ -12,7 +12,6 @@ import time
 from scipy.stats import lognorm, rv_continuous
 from mind_the_gaps.lightcurves import GappyLightcurve
 from mind_the_gaps.models.psd_models import BendingPowerlaw
-from multiprocessing import Pool
 from scipy.optimize import minimize
 from mind_the_gaps.fitting import s_statistic
 #import matplotlib.pyplot as plt
