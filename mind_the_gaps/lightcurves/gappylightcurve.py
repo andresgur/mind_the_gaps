@@ -7,6 +7,10 @@ import numpy as np
 from random import sample
 from mind_the_gaps.simulator import Simulator
 
+class ExposureTimeError(Exception):
+    def __init__(self, message):
+        super().__init__(message)
+
 class GappyLightcurve:
     """
     A class to store parameters of a irregularly-sampled lightcurve
@@ -37,10 +41,11 @@ class GappyLightcurve:
         self._bkg_rate = bkg_rate if bkg_rate is not None else np.zeros(len(times))
         self._bkg_rate_err = bkg_rate_err if bkg_rate_err is not None else np.zeros(len(times))
 
-        epsilon = 0.99 # to avoid numerically distinct but equal
-        wrong = np.count_nonzero(np.diff(self._times) < self._exposures[:-1] * epsilon)
-        if wrong >0:
-            raise ValueError("Some timestamps (%d) have a spacing below the exposure sampling time!" % wrong)
+        epsilon = 1.01 # to avoid numerically distinct but equal
+        if exposures is not None:
+            wrong = np.count_nonzero(np.diff(self._times) < self._exposures[:-1] * epsilon / 2 )
+            if wrong >0:
+                raise ExposureTimeError("Some timestamps (%d) have a spacing below the exposure sampling time!" % wrong)
 
     @property
     def times(self):

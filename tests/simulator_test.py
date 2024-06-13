@@ -10,6 +10,10 @@ from mind_the_gaps.fitting import fit_psd_powerlaw
 from astropy.modeling.powerlaws import BrokenPowerLaw1D, PowerLaw1D, SmoothlyBrokenPowerLaw1D
 import time
 from scipy.stats import lognorm, rv_continuous
+from mind_the_gaps.lightcurves import GappyLightcurve
+from mind_the_gaps.models.psd_models import BendingPowerlaw
+from scipy.optimize import minimize
+from mind_the_gaps.fitting import s_statistic
 #import matplotlib.pyplot as plt
 
 
@@ -26,6 +30,11 @@ class TestSimulator(unittest.TestCase):
             pow_spec = (np.absolute(np.fft.rfft(rate)[1:])) ** 2
             frequencies = freqs[1:]
         return frequencies, pow_spec
+
+    def model_fit(self, params, freqs, powers):
+        model = BendingPowerlaw(np.exp(params[0]), np.exp(params[1]))(freqs * 2* np.pi)
+        S = s_statistic(powers, model)
+        return S
 
     def test_slope_TK95(self):
         dt = 0.5
@@ -61,6 +70,32 @@ class TestSimulator(unittest.TestCase):
             slopes[index] = psd_slope.value
         err = np.abs(3 * np.std(slopes))
         #self.assertAlmostEqual(-input_beta, np.mean(slopes), None, "Average slope of %d lightcurve is not the same as the input!" % Nsims, err)
+
+    def test_powerspec_bendingpowerlaw(self):
+        dt = 1 # 1 day
+        n = 1000
+        times = np.arange(0, dt * n, dt) * 3600 * 24
+        dummyrates = np.ones(len(times))
+        exposures = 2000 * np.ones(len(times))
+        lc = GappyLightcurve(times, dummyrates, np.ones(len(rate)), exposures)
+        variance = 162754.
+        bendscale = 10. * 3600 * 24 # days
+        omega0 = 2 * np.pi / bendscale
+        psd_model = BendingPowerlaw(S0=variance, omega0=omega0)
+        simu = lc.get_simulator(psd_model, "Gaussian")
+        bnds = ((0.1, 60), (-18, np.log(1e-4)))
+        # do 200 lightcurves and fit them
+        n_sims = 200
+        omegas = []
+        for i in range(n_sims):
+            lc_ = simu.simulator.prepare_segment(2)
+            freqs, powers = self.power_spectrum(lc_.time, lc_.countrate)
+            results = minimize(self.model_fit, [12, np.log(1e-6)], args=(freqs, powers),
+                              bounds=bnds, method='L-BFGS-B')
+            omegas.append(results.x[1])
+        omegas = np.exp(omegas)
+        self.assertAlmostEqual(np.mean(omegas), omega0, None, delta=np.std(omegas),
+                               msg="Bend of the Bending Powerlaw does not match simulated periodograms!")
 
     def test_variance(self):
         """Test that the powerspectrum has the correct area after simulation"""

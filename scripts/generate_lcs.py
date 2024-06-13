@@ -287,7 +287,7 @@ ap.add_argument("--config", nargs='?', help="Config file with simulation models 
 ap.add_argument("--rootname", nargs='?', help="Any characters to append to the output lightcurve files", type=str,
                 default="")
 ap.add_argument("-f", '--file', nargs='?', help="File with timestamps, rates, errors, exposures, bkg count rates and bkg rates uncertainties",
-                type=str, required=True)
+                type=str, required=True, metavar="LC_FILE")
 ap.add_argument("-e", '--extension_factor', nargs='?',
                 help="Generate lightcurves initially e times longer than input lightcurve to introduce red noise leakage.", type=float, default=5)
 ap.add_argument("-s", "--simulator", nargs="?", help="Light curve simulator to use. Shuffle will simply randomized the times of the fluxes based on the observing window",
@@ -327,7 +327,7 @@ if os.path.isfile(count_rate_file):
     try:
         lc = SwiftLightcurve(count_rate_file)
         print("Read as Swift lightcurve...")
-    except:
+    except ValueError:
 
         lc = SimpleLightcurve(count_rate_file)
         print("Read as SimpleLightcurve")
