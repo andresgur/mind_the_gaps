@@ -422,7 +422,7 @@ def get_fft(N, dt, model):
     complex_fft[0] = 1e6
     # In case of even number of data points f_nyquist is only real (see e.g. Emmanoulopoulos+2013 or Timmer & Koening+95)
     if N % 2 == 0:
-        complex_fft[-1] = real[-1]#np.real(complex_fft[-1])
+        complex_fft[-1] = real[-1]
     return complex_fft
 
 
@@ -488,13 +488,13 @@ def simulate_lightcurve(timestamps, psd_model, dt, extension_factor=25):
 
     complex_fft = get_fft(n_datapoints, dt, psd_model)
 
-    countrate = pyfftw.interfaces.numpy_fft.irfft(complex_fft, n=n_datapoints) # it does seem faster than numpy although only slightly
+    counts = pyfftw.interfaces.numpy_fft.irfft(complex_fft, n=n_datapoints) # it does seem faster than numpy although only slightly
 
     # the power gets diluted due to the sampling, bring it back by applying this factor
     # the sqrt(2pi) factor enters because of celerite
-    countrate *= np.sqrt(n_datapoints * dt * np.sqrt(2 * np.pi))
+    counts *= np.sqrt(n_datapoints * dt * np.sqrt(2 * np.pi))
 
-    return Lightcurve(sim_timestamps, countrate, input_counts=True, skip_checks=True, dt=dt, err_dist="gauss") # gauss is needed as some counts will be negative
+    return Lightcurve(sim_timestamps, counts, input_counts=True, skip_checks=True, dt=dt, err_dist="gauss") # gauss is needed as some counts will be negative
 
 
 def get_segment(lc, duration, N):
