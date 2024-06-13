@@ -34,7 +34,6 @@ class GPModelling:
             Mean model. If given it will be fitted, otherwise assumed the mean value.
             Available implementations are Constant, Linear and Gaussian.
         """
-        self._kernel = kernel
         self._lightcurve = lightcurve
 
         meanmodel, fit_mean = self._build_mean_model(mean_model)
@@ -350,6 +349,35 @@ class GPModelling:
         return self._tau
 
 
-    def generate_from_posteriors(self, cores=8):
+    def generate_from_posteriors(self, nsims=10, cpus=8, pdf="Gaussian", extension_factor=2):
+        """Generates lightcurves by sampling from the MCMC posteriors
+
+        nsims: int,
+            Number of lightcurve simulations to perform
+        cpus: int,
+            Number of cpus to use for parallelization
+        pdf: str,
+            PDF for the simulations: Gaussian, Lognormal or Uniform
+        extension_factor: int,
+            Extension factor for the generation of the lightcurves, to introduce rednoise leakage
+        """
+        raise NotImplementedError("Still not implemented!")
+        def generate_from_params(self, parameters):
+            self.gp.set_parameter_vector(parameters)
+            psd_model = self.gp.kernel.get_psd
+            simulator = self.lc.get_simulator(psd_model, pdf)
+            rates = simulator.generate_lightcurve(2)
+            noisy_rates, dy = simulator.add_noise(rates)
+            lc = GappyLightcurve(lc.times, noisy_rates, dy)
+
         if self._mcmc_samples is None:
             raise RuntimeError("Posteriors have not been derived. Please run derive_posteriors prior to calling this method.")
+        if nsims => len(self._mcmc_samples):
+            warnings.warn("The number of simulation requested (%d) is higher than the number of posterior samples (%d), so many samples will be drawn more than once")
+
+        # get some parameter combinations at random
+        param_samples = self._mcmc_samples[np.random.randint(len(nsims), size=nsims)]
+        warnings.simplefilter('ignore')
+        with Pool(processes=15, initializer=np.random.seed) as pool:
+            lightcurves = pool.map(self.generate_lc, param_samples)
+        return lightcurves
