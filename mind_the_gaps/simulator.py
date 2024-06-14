@@ -534,9 +534,8 @@ def imprint_sampling_pattern(lightcurve, timestamps, bin_exposures):
 
     # get rid of all bins in between timestamps using Stingray
     lc_split = lightcurve.split_by_gti(gti, min_points=0)
-    # stingray pints a warning for lightcurves with 0 data point that can be ignored
     # get average count rates for the entire subsegment corresponding to each timestamps
-    return np.array([lc.meanrate for lc in lc_split])
+    return np.fromiter((lc.meanrate for lc in lc_split), dtype=np.float)
 
 
 def downsample(lc, timestamps, bin_exposures):
