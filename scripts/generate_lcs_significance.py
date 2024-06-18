@@ -128,7 +128,7 @@ ap.add_argument("-o", "--outdir", nargs='?', help="Output dir", type=str, defaul
 ap.add_argument("--input_dir", nargs="?", help="Input directory from a celerite run, with the samples in samples.dat",
                 type=str, required=False)
 ap.add_argument("-n", "--n_sims", nargs='?', help="Number of simulations to perform", type=int, default=1000)
-ap.add_argument("-f", '--file', nargs=1, help="Lightcurve file with count rates", type=str)
+ap.add_argument("-f", '--file', nargs=1, help="Lightcurve file with count rates", type=str, required=True)
 ap.add_argument("-c", '--cores', nargs='?', help="Number of CPUs for parallelization", type=int, default=10)
 ap.add_argument("-s", "--simulator", nargs="?", help="Light curve simulator to use.", type=str, default="E13",
                 choices=["E13", "TK95"])
