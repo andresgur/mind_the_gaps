@@ -372,7 +372,7 @@ class GPModelling:
 
         if self._mcmc_samples is None:
             raise RuntimeError("Posteriors have not been derived. Please run derive_posteriors prior to calling this method.")
-        if nsims => len(self._mcmc_samples):
+        if nsims >= len(self._mcmc_samples):
             warnings.warn("The number of simulation requested (%d) is higher than the number of posterior samples (%d), so many samples will be drawn more than once")
 
         # get some parameter combinations at random
