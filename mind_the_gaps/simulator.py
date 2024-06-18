@@ -85,7 +85,7 @@ class Simulator:
     A class to simulate lightcurves from a given power spectral densities and flux probability density function
     """
     def __init__(self, psd_model, pdf, times, exposures, mean, bkg_rate=None,
-                 bkg_rate_err=None, noise_std=None, random_state=None):
+                 bkg_rate_err=None, noise_std=None, aliasing_factor=2, random_state=None):
         """
         Parameters
         ----------
@@ -98,20 +98,22 @@ class Simulator:
             Timestamps of the lightcurve (i.e. times at the "center" of the sampling). Always in seconds
         exposures:
             Exposure time of each datapoint in seconds
+        mean: float,
+            Desired mean for the lightcurve
         bkg_rate: array-like
             Associated background rate (or flux) with each datapoint
         bkg_rate_err:array-like
             uncertainty on background rate
-        mean: float,
-            Desired mean for the lightcurve
+        aliasing_factor: float,
+            This defines the grid of the original, regularly-sampled lightcurve produced
+            prior to resampling as min(exposure) / aliasing_factor
         random_state: int,
         """
 
         self.random_state = np.random.RandomState(random_state)
-        half_bins = exposures / 2
-        start_time = times[0] - 2 * half_bins[0]
-        end_time = times[-1] + 3 * half_bins[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
-        sim_dt = np.min(exposures) / 2
+        start_time = times[0] - exposures[0]
+        end_time = times[-1] + 1.5 * exposures[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
+        sim_dt = np.min(exposures) / aliasing_factor
         sim_duration = end_time - start_time
 
         if pdf.lower() not in ["gaussian", "lognormal", "uniform"]:
@@ -124,6 +126,9 @@ class Simulator:
             print("Simulator will use E13 algorithm with %s pdf" % pdf)
             self.simulator = E13Simulator(psd_model, times, exposures, sim_dt, sim_duration,
                                           mean, pdf.lower(), max_iter=400)
+
+        if np.any(exposures==0):
+            raise ValueError("Some exposure times are 0!")
 
         self._psd_model = psd_model
         self._times = times
@@ -478,10 +483,10 @@ def simulate_lightcurve(timestamps, psd_model, dt, extension_factor=25):
     if extension_factor < 1:
         raise ValueError("Extension factor must be greater than 1")
 
-    duration = timestamps[-1] - timestamps[0]
+    duration = (timestamps[-1] - timestamps[0]) * extension_factor
     # generate timesctamps sampled at the median exposure longer than input lightcurve by extending the end
     sim_timestamps = np.arange(timestamps[0] - 2 * dt,
-                               timestamps[0] + duration * extension_factor + dt,
+                               timestamps[0] + duration + dt,
                                dt)
 
     n_datapoints = len(sim_timestamps)
