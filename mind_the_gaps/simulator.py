@@ -427,7 +427,7 @@ def get_fft(N, dt, model):
     complex_fft[0] = 1e6
     # In case of even number of data points f_nyquist is only real (see e.g. Emmanoulopoulos+2013 or Timmer & Koening+95)
     if N % 2 == 0:
-        complex_fft[-1] = real[-1]
+        complex_fft[-1] = np.real(complex_fft[-1])
     return complex_fft
 
 
@@ -519,14 +519,14 @@ def cut_random_segment(lc, duration):
 
 def imprint_sampling_pattern(lightcurve, timestamps, bin_exposures):
     """Modify the input lightcurve to have the input sampling pattern (timestamps and exposures) provided
+    Parameters
+    ---------
     lightcurve: stingray.lightcurve
         Lightcurve to which imprint the given sampling pattern
     timestamps: array
         New timestamps of the new sampling
     bin_exposures: array or scalar
         Exposures of the timestamps. Either as a float or array (or 1 item array)
-    Parameters
-    ---------
     """
     half_bins = bin_exposures / 2
 
@@ -549,10 +549,10 @@ def downsample(lc, timestamps, bin_exposures):
     ----------
     lc: Lightcurve
         With the old binning
-    timestmaps: array or Quantity
+    timestmaps: array
         The new timestamps for the lightcurve
-    bin_exposures: array or Quantity
-        Exposure times of each new bin
+    bin_exposures: array
+        Exposure times of each new bin in same units as timestamps
     Returns the downsampled count rates
     """
     # return the lightcurve as it is
