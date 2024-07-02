@@ -62,8 +62,7 @@ def read_config_file(config_file, walkers=32):
                                          np.random.uniform(Q[0], Q[2], walkers),
                                         np.random.uniform(w[2], w[0], walkers)])
                 if initial_params is None:
-                    initial_pars = init_model_pars
-                    initial_params = initial_pars
+                    initial_params = init_model_pars
                 else:
                     initial_params = np.append(initial_params, init_model_pars, axis=0)
 
@@ -91,12 +90,13 @@ def read_config_file(config_file, walkers=32):
 
                 kernel_labels = [r"log $S_N$", r"log $\omega_N$"]
                 kernel_columns = ["kernel:%s%s" %(kernel_string, name) for name in kernel.get_parameter_names()]
+
+                init_model_pars = np.array([np.random.uniform(S_0[0], S_0[2], walkers),
+                                            np.random.uniform(w[2], w[0], walkers)])
                 if initial_params is None:
-                    initial_params = np.array([np.random.uniform(S_0[0], S_0[2], walkers),
-                                                np.random.uniform(w[2], w[0], walkers)])
+                    initial_params = init_model_pars
                 else:
-                    initial_params = np.append(initial_params, np.array([np.random.uniform(S_0[0], S_0[2], walkers),
-                                                np.random.uniform(w[2], w[0], walkers)]), axis=0)
+                    initial_params = np.append(initial_params, init_model_pars, axis=0)
 
             elif row["model"]=="Matern32":
                 log_rho = np.log(np.array(row["P"].split(":")).astype(float) * days_to_seconds)
@@ -107,13 +107,13 @@ def read_config_file(config_file, walkers=32):
                 kernel_columns = ["kernel:%s%s" %(kernel_string, name) for name in kernel.get_parameter_names()]
                 kernel_labels = [r"log $\sigma$", r"log $\rho$"]
 
+                init_model_pars = np.array([np.random.uniform(S_0[0], S_0[2], walkers),
+                                            np.random.uniform(w[2], w[0], walkers)])
                 if initial_params is None:
-                    initial_params = np.array([np.random.uniform(S_0[0], S_0[2], walkers),
-                                                np.random.uniform(w[2], w[0], walkers)])
+                    initial_params = init_model_pars
 
                 else:
-                    initial_params = np.append(initial_params, np.array([np.random.uniform(S_0[0], S_0[2], walkers),
-                                                np.random.uniform(w[2], w[0], walkers)]), axis=0)
+                    initial_params = np.append(initial_params, init_model_pars, axis=0)
 
             elif row["model"]=="Jitter":
                 bounds = dict(log_sigma=(S_0[0], S_0[2]))
@@ -121,10 +121,11 @@ def read_config_file(config_file, walkers=32):
                 kernel_columns = ["kernel:%s%s" %(kernel_string, name) for name in kernel.get_parameter_names()]
                 kernel_labels = [r"log $\sigma$"]
 
+                init_model_pars = np.array([np.random.uniform(S_0[0], S_0[2], walkers)])
                 if initial_params is None:
-                    initial_params = np.array([np.random.uniform(S_0[0], S_0[2], walkers)])
+                    initial_params = init_model_pars
                 else:
-                    initial_params = np.append(initial_params, np.array([np.random.uniform(S_0[0], S_0[2], walkers)]), axis=0)
+                    initial_params = np.append(initial_params, init_model_pars, axis=0)
 
             else:
                 warnings.warn("Component %s unrecognised. Skipping..." % row["model"])
