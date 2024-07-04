@@ -224,7 +224,7 @@ class GappyLightcurve:
     def to_csv(self, outname: str):
         """Save lightcurve properties to csv file"""
         outputs = np.array([self._times, self._y, self._dy, self._exposures, self._bkg_rate, self._bkg_rate_err])
-        np.savetxt(outname, outputs.T, fmt="%.6f", header="t\trate\terror\texposure\tbkg_rate\tbkg_rate_err")
+        np.savetxt(outname, outputs.T, fmt="%.5e", header="t\trate\terror\texposure\tbkg_rate\tbkg_rate_err")
 
 
     def get_simulator(self, psd_model, pdf, noise_std=None, aliasing_factor=2, **kwargs):
