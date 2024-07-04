@@ -224,10 +224,10 @@ class GappyLightcurve:
     def to_csv(self, outname: str):
         """Save lightcurve properties to csv file"""
         outputs = np.array([self._times, self._y, self._dy, self._exposures, self._bkg_rate, self._bkg_rate_err])
-        np.savetxt(outname, outputs.T, fmt="%.6f", header="t\trate\terror\texposure\tbkg_rate\tbkg_rate_err")
+        np.savetxt(outname, outputs.T, fmt="%.5e", header="t\trate\terror\texposure\tbkg_rate\tbkg_rate_err")
 
 
-    def get_simulator(self, psd_model, pdf, noise_std=None):
+    def get_simulator(self, psd_model, pdf, noise_std=None, aliasing_factor=2, **kwargs):
         """Creates an instance of mind_the_gaps.Simulator based on the lightcurve
             properties (timestamps, exposures, etc)
 
@@ -239,4 +239,5 @@ class GappyLightcurve:
             The probability distribution (Gaussian, Lognormal or Uniform)
         """
         return Simulator(psd_model, pdf, self._times, self.exposures, self.mean,
-                         self._bkg_rate, self._bkg_rate_err, noise_std=noise_std)
+                         self._bkg_rate, self._bkg_rate_err, noise_std=noise_std,
+                         aliasing_factor=aliasing_factor, **kwargs)

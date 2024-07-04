@@ -17,6 +17,7 @@ from mind_the_gaps.models.psd_models import BendingPowerlaw, Lorentzian, SHO, Ma
 from astropy.modeling.powerlaws import PowerLaw1D
 from mind_the_gaps.lightcurves import SimpleLightcurve, SwiftLightcurve
 import warnings
+from math import exp
 from multiprocessing import Pool
 
 
@@ -44,7 +45,7 @@ def read_command_line(args):
             input_command += "--Lorentzian %s" % set_of_pars
             # set the parameters
             for parname, param in zip(model_component.param_names, set_of_pars):
-                setattr(model_component, parname, np.exp(float(param)))
+                setattr(model_component, parname, exp(float(param)))
                 outpars += "%s%.3f_" % (parname, float(param))
             models.append(model_component)
 
@@ -56,7 +57,7 @@ def read_command_line(args):
             input_command += "--BendingPowerlaw %s" % set_of_pars
             # set the parameters
             for parname, param in zip(model_component.param_names, set_of_pars):
-                setattr(model_component, parname, np.exp(float(param)))
+                setattr(model_component, parname, exp(float(param)))
                 outpars += "%s%.3f_" % (parname, float(param))
             models.append(model_component)
 
@@ -69,7 +70,7 @@ def read_command_line(args):
             model_component = SHO(Q = 1 / np.sqrt(2))
             input_command += "--SHO %s" % set_of_pars
             for parname, param in zip(model_component.param_names, set_of_pars):
-                setattr(model_component, parname, np.exp(float(param)))
+                setattr(model_component, parname, exp(float(param)))
                 outpars += "%s%.3f_" % (parname, float(param))
             models.append(model_component)
 
@@ -81,7 +82,7 @@ def read_command_line(args):
             input_command += "--Matern32 %s" % args.Matern32
             # set the parameters
             for parname, param in zip(model_component.param_names, set_of_pars):
-                setattr(model_component, parname, np.exp(float(param)))
+                setattr(model_component, parname, exp(float(param)))
                 outpars += "%s%.3f_" % (parname, float(param))
 
             models.append(model_component)
@@ -94,7 +95,7 @@ def read_command_line(args):
             input_command += "--Powerlaw %s" % args.Powerlaw
             # set the parameters
             for parname, param in zip(model_component.param_names, set_of_pars):
-                setattr(model_component, parname, np.exp(float(param)))
+                setattr(model_component, parname, exp(float(param)))
                 outpars += "%s%.3f_" % (parname, float(param))
             models.append(model_component)
 
@@ -106,7 +107,7 @@ def read_command_line(args):
             input_command += "--Jitter %s" % args.Jitter
             # set the parameters
             for parname, param in zip(model_component.param_names, set_of_pars):
-                setattr(model_component, parname, np.exp(float(param)))
+                setattr(model_component, parname, exp(float(param)))
                 outpars += "%s%.3f_" % (parname, float(param))
 
             models.append(model_component)
@@ -300,7 +301,7 @@ ap.add_argument("--noise_std", nargs="?", help="Standard deviation of the noise 
                 required=False, default=None, type=float)
 args = ap.parse_args()
 
-print("generate_lc:Parsed args: ", args)
+print("generate_lcs:Parsed args: ", args)
 
 count_rate_file = args.file
 pdf = args.pdf
@@ -323,147 +324,146 @@ if tmin > tmax:
 
 file_extension = ".png"
 
-if os.path.isfile(count_rate_file):
-    try:
-        lc = SwiftLightcurve(count_rate_file)
-        print("Read as Swift lightcurve...")
-    except ValueError:
+try:
+    lc = SwiftLightcurve(count_rate_file)
+    print("Read as Swift lightcurve...")
+except ValueError:
 
-        lc = SimpleLightcurve(count_rate_file)
-        print("Read as SimpleLightcurve")
+    lc = SimpleLightcurve(count_rate_file)
+    print("Read as SimpleLightcurve")
 
-    lc = lc.truncate(tmin, tmax)
+lc = lc.truncate(tmin, tmax)
 
-    # remove any random number of points
-    if points_remove > 0:
-        print("%d random datapoints will be removed from the lightcurve")
-        lc = lc.rand_remove(points_remove)
+# remove any random number of points
+if points_remove > 0:
+    print("%d random datapoints will be removed from the lightcurve")
+    lc = lc.rand_remove(points_remove)
 
-    duration = lc.duration << u.s
-    # in seconds and unitless
-    livetime = np.sum(lc.exposures) * u.s
-    duration = lc.duration * u.s
+duration = lc.duration << u.s
+# in seconds and unitless
+livetime = np.sum(lc.exposures) * u.s
+duration = lc.duration * u.s
 
-    time_range = "{:0.3f}-{:0.3f}{:s}".format(lc.times[0], lc.times[-1], "s")
-    print("Time range considered: %s" % time_range)
-    print("Duration: %.2f days" % (duration.to(u.d).value))
-    print("Extension factor: %.1f" % extension_factor)
-    print("Live time %.2f days" % (livetime.to(u.d).value))
+time_range = "{:0.3f}-{:0.3f}{:s}".format(lc.times[0], lc.times[-1], "s")
+print("Time range considered: %s" % time_range)
+print("Duration: %.2f days" % (duration.to(u.d).value))
+print("Extension factor: %.1f" % extension_factor)
+print("Live time %.2f days" % (livetime.to(u.d).value))
 
-    if "SLURM_CPUS_PER_TASK" in os.environ:
-        cores = int(os.environ['SLURM_CPUS_PER_TASK'])
-        warnings.warn("The number of cores is being reset to SLURM_CPUS_PER_TASK = %d " % cores )
+if "SLURM_CPUS_PER_TASK" in os.environ:
+    cores = int(os.environ['SLURM_CPUS_PER_TASK'])
+    warnings.warn("The number of cores is being reset to SLURM_CPUS_PER_TASK = %d " % cores )
 
-    if args.simulator.lower() == "e13" or args.simulator.lower()=="tk95":
+if args.simulator.lower() == "e13" or args.simulator.lower()=="tk95":
 
-        if args.config is None:
-            psd_model, outpars, input_command, model_str = read_command_line(args)
-            python_command += input_command
-        else:
-            psd_model, outpars, model_str = read_config_file(args.config)
+    if args.config is None:
+        psd_model, outpars, input_command, model_str = read_command_line(args)
+        python_command += input_command
+    else:
+        psd_model, outpars, model_str = read_config_file(args.config)
 
-        outdir += "_" + model_str
+    outdir += "_" + model_str
 
-        if not os.path.isdir(outdir):
-            os.mkdir(outdir)
+    if not os.path.isdir(outdir):
+        os.mkdir(outdir)
 
-        if not os.path.isdir(outdir + "/lightcurves"):
-            os.mkdir(outdir + "/lightcurves")
-        print("Simulating lightcurve with a length %.2f times longer than input lightcurve with the input model and parameters:" % extension_factor)
+    if not os.path.isdir(outdir + "/lightcurves"):
+        os.mkdir(outdir + "/lightcurves")
+    print("Simulating lightcurve with a length %.2f times longer than input lightcurve with the input model and parameters:" % extension_factor)
 
-        print("PSD model\n---------")
-        print(psd_model)
-        print("------")
-        print("PDF model\n--------\n %s\n---------" % pdf)
-        simulator = lc.get_simulator(psd_model, pdf, args.noise_std)
+    print("PSD model\n---------")
+    print(psd_model)
+    print("------")
+    print("PDF model\n--------\n %s\n---------" % pdf)
+    simulator = lc.get_simulator(psd_model, pdf, args.noise_std)
 
-        start = time.time()
+    start = time.time()
 
-        with Pool(processes=cores, initializer=np.random.seed) as pool:
-            pool.map(simulate_lcs, np.arange(n_sims))
+    with Pool(processes=cores, initializer=np.random.seed) as pool:
+        pool.map(simulate_lcs, np.arange(n_sims))
 
-        # the 20 is arbitrary but to make sure we get the variance right for highly peaked components
-        # eventually remove these things
-        #df_int = 1 / (duration.to(u.s).value * extension_factor)
-        #dw_int = df_int * 2 * np.pi # frequency differential in angular units
-        #fnyq = maximum_frequency.value # already divided by 2
+    # the 20 is arbitrary but to make sure we get the variance right for highly peaked components
+    # eventually remove these things
+    #df_int = 1 / (duration.to(u.s).value * extension_factor)
+    #dw_int = df_int * 2 * np.pi # frequency differential in angular units
+    #fnyq = maximum_frequency.value # already divided by 2
 
-        # prepare TK lightcurve with correct normalization
-        #lc_mc = simulate_lightcurve(timestamps, psd_model, sim_dt, extension_factor=extension_factor)
+    # prepare TK lightcurve with correct normalization
+    #lc_mc = simulate_lightcurve(timestamps, psd_model, sim_dt, extension_factor=extension_factor)
 
-        #half_bins = lc.exposures / 2
-        #start_time = timestamps[0] - 2 * half_bins[0]
-        #end_time = timestamps[-1] + 3 * half_bins[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
-        #duration = end_time - start_time
+    #half_bins = lc.exposures / 2
+    #start_time = timestamps[0] - 2 * half_bins[0]
+    #end_time = timestamps[-1] + 3 * half_bins[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
+    #duration = end_time - start_time
 
-        #segment = cut_random_segment(lc_mc, duration)
-        #sample_variance = np.var(segment.countrate)
+    #segment = cut_random_segment(lc_mc, duration)
+    #sample_variance = np.var(segment.countrate)
 
-        #if args.simulator == "E13" and pdf!="Gaussian":
-            # obtain the variance and create PDF
-            ##int_freq = np.arange(minimum_frequency.to(1 / u.s).value, fnyq, df_int) # frequencies over which to integrate
-            ##w_int = int_freq * 2 * np.pi
-            ##normalization_factor =  2 / np.sqrt(2 * np.pi) # this factor accounts for the fact that we only integrate positive frequencies and the 1 / sqrt(2pi) from the Fourier transform
-            ##var = np.sum(psd_model(w_int)) * dw_int * normalization_factor
-            #if pdf == "Lognormal":
-        #        pdfs = [create_log_normal(meanrate, sample_variance)]
-        #    elif pdf== "Uniform":
-        #        pdfs = [create_uniform_distribution(meanrate, sample_variance)]
-        #    elif pdf=="Gaussian":
-        #        pdfs = [norm(loc=meanrate, scale=np.sqrt(sample_variance))]
+    #if args.simulator == "E13" and pdf!="Gaussian":
+        # obtain the variance and create PDF
+        ##int_freq = np.arange(minimum_frequency.to(1 / u.s).value, fnyq, df_int) # frequencies over which to integrate
+        ##w_int = int_freq * 2 * np.pi
+        ##normalization_factor =  2 / np.sqrt(2 * np.pi) # this factor accounts for the fact that we only integrate positive frequencies and the 1 / sqrt(2pi) from the Fourier transform
+        ##var = np.sum(psd_model(w_int)) * dw_int * normalization_factor
+        #if pdf == "Lognormal":
+    #        pdfs = [create_log_normal(meanrate, sample_variance)]
+    #    elif pdf== "Uniform":
+    #        pdfs = [create_uniform_distribution(meanrate, sample_variance)]
+    #    elif pdf=="Gaussian":
+    #        pdfs = [norm(loc=meanrate, scale=np.sqrt(sample_variance))]
 
-        #    lc_rates = E13_sim_TK95(segment, timestamps, pdfs, [1],
-        #                            exposures=lc.exposures, max_iter=400)
+    #    lc_rates = E13_sim_TK95(segment, timestamps, pdfs, [1],
+    #                            exposures=lc.exposures, max_iter=400)
 
-        #elif args.simulator=="TK95" or pdf == "Gaussian":
-        #    warnings.warn("Using TK95 since PDF is Gaussian")
-        #    lc_rates = downsample(segment, timestamps, lc.exposures)
-            # adjust the mean
-        #    lc_rates += meanrate - np.mean(lc_rates)
+    #elif args.simulator=="TK95" or pdf == "Gaussian":
+    #    warnings.warn("Using TK95 since PDF is Gaussian")
+    #    lc_rates = downsample(segment, timestamps, lc.exposures)
+        # adjust the mean
+    #    lc_rates += meanrate - np.mean(lc_rates)
 
-        # add Gaussian or Poisson noise
-    #    if args.noise_std is None:
-    #        if np.all(lc.bkg_rate==0):
-    #            print("Assuming Poisson errors based on count rates")
-                # the source is bright enough
-    #            noisy_rates, dy = add_poisson_noise(lc_rates, lc.exposures)
-    #        else:
-    #            print("Assuming Kraft errors based on count rates and background rates")
-    #            noisy_rates, dy, upp_lims = add_kraft_noise(lc_rates, lc.exposures,
-    #                                                        lc.bkg_rate * lc.exposures,
-    #                                                        lc.bkg_rate_err)
-    #    else:
-    #        noise_std = args.noise_std
-    #        print("Assuming Gaussian white noise with std: %.5f" % noise_std)
-    #        noisy_rates = lc_rates + np.random.normal(scale=noise_std, size=len(lc_rates))
-    #        dy = errors[np.argsort(noisy_rates)]
+    # add Gaussian or Poisson noise
+#    if args.noise_std is None:
+#        if np.all(lc.bkg_rate==0):
+#            print("Assuming Poisson errors based on count rates")
+            # the source is bright enough
+#            noisy_rates, dy = add_poisson_noise(lc_rates, lc.exposures)
+#        else:
+#            print("Assuming Kraft errors based on count rates and background rates")
+#            noisy_rates, dy, upp_lims = add_kraft_noise(lc_rates, lc.exposures,
+#                                                        lc.bkg_rate * lc.exposures,
+#                                                        lc.bkg_rate_err)
+#    else:
+#        noise_std = args.noise_std
+#        print("Assuming Gaussian white noise with std: %.5f" % noise_std)
+#        noisy_rates = lc_rates + np.random.normal(scale=noise_std, size=len(lc_rates))
+#        dy = errors[np.argsort(noisy_rates)]
 
-    elif args.simulator.lower()=="shuffle":
-        outdir += "_" + "shuffle"
+elif args.simulator.lower()=="shuffle":
+    outdir += "_" + "shuffle"
 
-        if not os.path.isdir(outdir):
-            os.mkdir(outdir)
+    if not os.path.isdir(outdir):
+        os.mkdir(outdir)
 
-        if not os.path.isdir(outdir + "/lightcurves"):
-            os.mkdir(outdir + "/lightcurves")
-        outpars = ""
-        start = time.time()
-        with Pool(processes=cores, initializer=np.random.seed) as pool:
-            pool.map(shuffle_lcs, np.arange(n_sims))
+    if not os.path.isdir(outdir + "/lightcurves"):
+        os.mkdir(outdir + "/lightcurves")
+    outpars = ""
+    start = time.time()
+    with Pool(processes=cores, initializer=np.random.seed) as pool:
+        pool.map(shuffle_lcs, np.arange(n_sims))
 
-    end = time.time()
-    time_taken = (end - start) / 60
-    print("Generated %d lightcurves in: %.2f minutes" % (n_sims, time_taken))
-    # just for the plot
-    if tmin==0:
-        tmin = lc.times[0]
-    if tmax==np.inf:
-        tmax = lc.times[-1]
+end = time.time()
+time_taken = (end - start) / 60
+print("Generated %d lightcurves in: %.2f minutes" % (n_sims, time_taken))
+# just for the plot
+if tmin==0:
+    tmin = lc.times[0]
+if tmax==np.inf:
+    tmax = lc.times[-1]
 
-    create_data_selection_figure(outdir, tmin, tmax)
-    # write the truncated data out
-    lc.to_csv("%s/lc_data.dat" % outdir)
-    # copy the input samples file
-    lightcurve_file = os.path.basename(count_rate_file)
-    copyfile(count_rate_file, "%s/%s" % (outdir, lightcurve_file))
-    print("Results stored to %s" % outdir)
+create_data_selection_figure(outdir, tmin, tmax)
+# write the truncated data out
+lc.to_csv("%s/lc_data.dat" % outdir)
+# copy the input samples file
+lightcurve_file = os.path.basename(count_rate_file)
+copyfile(count_rate_file, "%s/%s" % (outdir, lightcurve_file))
+print("Results stored to %s" % outdir)

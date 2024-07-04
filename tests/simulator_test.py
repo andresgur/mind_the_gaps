@@ -281,7 +281,7 @@ class TestSimulator(unittest.TestCase):
         self.assertAlmostEqual(lc_cut.dt, sim_dt, 3, "Lightcurve binning is not correct!")
 
 
-    def test_downsampling(self):
+    def test_downsampling_basic(self):
         real_dt = 0.5
         times = np.arange(0, 10, real_dt) + real_dt
         rates = np.arange(len(times))
@@ -290,6 +290,7 @@ class TestSimulator(unittest.TestCase):
         lc = Lightcurve(times, rates, input_counts=False, skip_checks=True, dt=new_dt)
         downsampled_rates = imprint_sampling_pattern(lc, timestamps, new_dt)
         np.testing.assert_array_almost_equal(downsampled_rates, [3, 7, 11], 2)
+        np.testing.assert_equal(len(timestamps), len(downsampled_rates))
 
         timestamps = np.arange(0, 8, new_dt) + new_dt
         timestamps = np.delete(timestamps, 2)
@@ -300,21 +301,24 @@ class TestSimulator(unittest.TestCase):
         #plt.errorbar(timestamps, downsampled_rates, xerr=new_dt / 2)
         #plt.show()
         np.testing.assert_array_almost_equal(downsampled_rates, [3, 7, 15], 2)
+        np.testing.assert_equal(len(timestamps), len(downsampled_rates))
 
     def test_downsampling(self):
-        mean_rate, std_rate = 0, 1
         length = 500
         sim_dt = 0.1
-        sampling = 1
+        sampling = 1.
         tk_timestamps = np.arange(0, length, sampling)
-        model = PowerLaw1D(amplitude=1, alpha=1)
+        model = PowerLaw1D(amplitude=10, alpha=1)
         tk_lc = simulate_lightcurve(tk_timestamps, model, sim_dt, 2)
         duration_sec = (tk_timestamps[-1] + sampling - (tk_timestamps[0] - sampling))
         tk_lc_cut = get_segment(tk_lc, duration_sec, 0)
         tk_rate = downsample(tk_lc_cut, tk_timestamps, sampling)
-        self.assertAlmostEqual(tk_rate[0], np.mean(tk_lc_cut.countrate[6:14]), delta=0.5, msg="Downsampling is not working!")
-        self.assertAlmostEqual(tk_rate[1], np.mean(tk_lc_cut.countrate[15:23]), delta=0.5, msg="Downsampling is not working!")
-
+        indexstart = 6
+        bins = int(sampling / sim_dt) - 2 # the oversampling minus the neighbouring bins
+        for i in range(len(tk_rate)):
+            print(i)
+            self.assertAlmostEqual(tk_rate[i], np.mean(tk_lc_cut.countrate[indexstart + i:indexstart + bins]), delta=0.5, msg="Downsampling is not working!")
+            indexstart += bins
 
     def test_bending_powerlaw(self):
 
