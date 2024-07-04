@@ -11,6 +11,7 @@ from stingray import Lightcurve
 from mind_the_gaps.stats import kraft_pdf
 import numexpr as ne
 import pyfftw
+from math import sqrt, log
 from astropy.stats import poisson_conf_interval
 from mind_the_gaps.stats import create_log_normal, create_uniform_distribution
 
@@ -73,7 +74,7 @@ class E13Simulator(BaseSimulatorMethod):
         elif self.pdf== "uniform":
             pdf = create_uniform_distribution(self.meanrate, sample_variance)
         elif self.pdf=="gaussian":
-            pdf = norm(loc=self.meanrate, scale=np.sqrt(sample_variance))
+            pdf = norm(loc=self.meanrate, scale=sqrt(sample_variance))
         # Implementation of E13 simulation with additional parameters pdf and max_iter
         lc_rates = E13_sim_TK95(segment, self.timestamps, [pdf], [1],
                                 exposures=self.exposures, max_iter=self.max_iter)
@@ -162,7 +163,8 @@ class Simulator:
         else:
             # add 0 mean Gaussian White Noise
             noisy_rates = rates + np.random.normal(scale=self._noise_std, size=len(rates))
-            dy = np.sqrt(rates * self._exposures) / self._exposures
+            #dy = np.sqrt(rates * self._exposures) / self._exposures
+            dy = self._noise_std * np.ones(len(rates))
             #dy = errors[np.argsort(noisy_rates)]
 
         return noisy_rates, dy
@@ -348,8 +350,8 @@ def fit_pdf(time_series, nbins=20):
     # Fit with one Gaussian Model
     pdf_model = LognormalModel(prefix='pdf')
     # from the Log Normal distribution (see e.g. https://en.wikipedia.org/wiki/Log-normal_distribution)
-    sigma = np.sqrt(np.log(1 + (np.std(time_series_) / np.mean(time_series_))**2))
-    center = np.log(np.mean(time_series_)**2 / (np.sqrt(np.var(time_series_) + np.mean(time_series_)**2)))
+    sigma = sqrt(log(1 + (np.std(time_series_) / np.mean(time_series_))**2))
+    center = log(np.mean(time_series_)**2 / (sqrt(np.var(time_series_) + np.mean(time_series_)**2)))
 
     pdf_model.set_param_hint("pdfcenter", value=center)
     pdf_model.set_param_hint("pdfsigma", value=sigma)
@@ -461,7 +463,7 @@ def simulate_lightcurve_numpy(timestamps, psd_model, dt, extension_factor=25):
     counts = np.fft.irfft(complex_fft, n=n_datapoints)
     # the power gets diluted due to the sampling, bring it back by applying this factor
     # the sqrt(2pi) factor enters because of celerite
-    counts *= np.sqrt(n_datapoints) * np.sqrt(dt) * np.sqrt(np.sqrt(2 * np.pi))
+    counts *= sqrt(n_datapoints) * sqrt(dt) * sqrt(sqrt(2 * np.pi))
 
     return Lightcurve(sim_timestamps, counts, input_counts=True, skip_checks=True, dt=dt)
 
@@ -497,7 +499,7 @@ def simulate_lightcurve(timestamps, psd_model, dt, extension_factor=25):
 
     # the power gets diluted due to the sampling, bring it back by applying this factor
     # the sqrt(2pi) factor enters because of celerite
-    counts *= np.sqrt(n_datapoints * dt * np.sqrt(2 * np.pi))
+    counts *= sqrt(n_datapoints * dt * sqrt(2 * np.pi))
 
     return Lightcurve(sim_timestamps, counts, input_counts=True, skip_checks=True, dt=dt, err_dist="gauss") # gauss is needed as some counts will be negative
 
