@@ -27,7 +27,7 @@ generate_lcs.py --> Generates lightcurves based on an existing observing window 
 
 An example workflow is included in [docs/workflow.md](docs/workflow.md).
 
-Usually the user will a stochastic model and a stochastic + periodic component model (let's call them null_hypothesis.config and alternative_model.config). The workflow to determine whether the periodic component is required (i.e. whether there is periodic variability in the lightcurve) would look like this (see [Protassov et al. 2002]([https://pages.github.com/](https://ui.adsabs.harvard.edu/abs/2002ApJ...571..545P/abstract)):
+Usually the user will a stochastic model and a stochastic + periodic component model (let's call them null_hypothesis.config and alternative_model.config). The workflow to determine whether the periodic component is required (i.e. whether there is periodic variability in the lightcurve) would look like this (see [Protassov et al. 2002](https://pages.github.com/](https://ui.adsabs.harvard.edu/abs/2002ApJ...571..545P/abstract))):
 1. Fit the observed data using the two config files and `celerite_script.py' (it can be parallelized)
 2. Generate lightcurves from the posteriors of the stochastic model fit using `generate_lcs_significance.py' (it can be parallelized)
 3. Fit the generated lightcurves using `fit_lcs.py' (it can be parallelized) using both models (i.e. one run for each null_hypothesis and alternative_model config files).
