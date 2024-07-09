@@ -8,7 +8,7 @@ import os
 import argparse
 from shutil import copyfile
 import celerite
-from multiprocessing import Pool
+import multiprocessing as mp
 import warnings
 import matplotlib.pyplot as plt
 import time
@@ -63,126 +63,130 @@ def fit_lightcurve(input_file):
 
 
 ap = argparse.ArgumentParser(description='Perform fit of an input lightcurve (no MCMC) (see Foreman-Mackey et al 2017. 10.3847/1538-3881/aa9332)')
-ap.add_argument("-c", "--config_file", nargs='?', help="Config file with initial parameter constraints", type=str, default="/home/andresgur/scripts/swift_scripts/celerite_config/parameters.config")
+ap.add_argument("-c", "--config_file", nargs='?', help="Config file with initial parameter constraints", type=str, required=True)
 ap.add_argument("-o", "--outdir", nargs='?', help="Output dir name", type=str, default="fit_lcs")
 ap.add_argument("-n", "--nmax", nargs='?', help="Maximum number of samples. Default 2000", type=int, default=2000)
 ap.add_argument("--cores", default=12, help="Number of cores. Default 12", nargs="?", type=int)
 ap.add_argument("input_files", nargs='+', help="Input lightcurves", type=str)
 args = ap.parse_args()
 
-if "SLURM_CPUS_PER_TASK" in os.environ:
-    cores = int(os.environ['SLURM_CPUS_PER_TASK'])
-    warnings.warn("The numbe of cores is being reset to SLURM_CPUS_PER_TASK = %d " % cores )
-else:
-    cores = args.cores
+if __name__ == '__main__':
 
-nwalkers = 32 if args.cores < 64 else args.cores * 2 # https://stackoverflow.com/questions/69234421/multiprocessing-the-python-module-emcee-but-not-all-available-cores-on-the-ma
+    if "SLURM_CPUS_PER_TASK" in os.environ:
+        cores = int(os.environ['SLURM_CPUS_PER_TASK'])
+        warnings.warn("The numbe of cores is being reset to SLURM_CPUS_PER_TASK = %d " % cores )
+    else:
+        cores = args.cores
 
-max_n = args.nmax
+    nwalkers = 32 if args.cores < 64 else args.cores * 2 # https://stackoverflow.com/questions/69234421/multiprocessing-the-python-module-emcee-but-not-all-available-cores-on-the-ma
 
-days_to_seconds = 24 * 3600
+    max_n = args.nmax
 
-python_command = "python %s -c %s -o %s" % (__file__, args.config_file,
-                                            args.outdir)
-input_files = args.input_files
+    days_to_seconds = 24 * 3600
 
-prefix = args.outdir if args.outdir=="fit_lcs" else "fit_lcs_%s" % (args.outdir)
+    python_command = "python %s -c %s -o %s" % (__file__, args.config_file,
+                                                args.outdir)
+    input_files = args.input_files
 
-kernel, initial_samples, labels, cols, outmodels = read_config_file(args.config_file, walkers=nwalkers)
+    prefix = args.outdir if args.outdir=="fit_lcs" else "fit_lcs_%s" % (args.outdir)
 
-outmodelsstr = "_" + "_".join(outmodels)
+    kernel, initial_samples, labels, cols, outmodels = read_config_file(args.config_file, walkers=nwalkers)
 
-outdir = "%s_m%s" % (prefix, outmodelsstr)
+    outmodelsstr = "_" + "_".join(outmodels)
 
-if not os.path.isdir(outdir):
-    os.mkdir(outdir)
+    outdir = "%s_m%s" % (prefix, outmodelsstr)
 
-initial_samples = initial_samples.T
-# dummy gp to get values
-dummy_gp = celerite.GP(kernel, mean=0)
-print("parameter_dict:\n{0}\n".format(dummy_gp.get_parameter_dict()))
-print("parameter_names:\n{0}\n".format(dummy_gp.get_parameter_names()))
-print("parameter_vector:\n{0}\n".format(dummy_gp.get_parameter_vector()))
-print("parameter_bounds:\n{0}\n".format(dummy_gp.get_parameter_bounds()))
-initial_params = dummy_gp.get_parameter_vector()
-bounds = np.array(dummy_gp.get_parameter_bounds())
-par_names = list(dummy_gp.get_parameter_names())
+    if not os.path.isdir(outdir):
+        os.mkdir(outdir)
 
-best_pars = {key: [ ] for key in par_names} #  dictionary to store all best fit pars
+    initial_samples = initial_samples.T
+    # dummy gp to get values
+    dummy_gp = celerite.GP(kernel, mean=0)
+    print("parameter_dict:\n{0}\n".format(dummy_gp.get_parameter_dict()))
+    print("parameter_names:\n{0}\n".format(dummy_gp.get_parameter_names()))
+    print("parameter_vector:\n{0}\n".format(dummy_gp.get_parameter_vector()))
+    print("parameter_bounds:\n{0}\n".format(dummy_gp.get_parameter_bounds()))
+    initial_params = dummy_gp.get_parameter_vector()
+    bounds = np.array(dummy_gp.get_parameter_bounds())
+    par_names = list(dummy_gp.get_parameter_names())
 
-start = time.time()
+    best_pars = {key: [ ] for key in par_names} #  dictionary to store all best fit pars
 
-with Pool(processes=cores, initializer=np.random.seed) as pool:
-    results = pool.map(fit_lightcurve, input_files)
+    start = time.time()
+    # in windows spawn is the default  https://stackoverflow.com/questions/46045956/whats-the-difference-between-threadpool-vs-pool-in-the-multiprocessing-module
+    mp.set_start_method("fork")
 
-best_params = [result[0] for result in results]
+    with mp.Pool(processes=cores, initializer=np.random.seed) as pool:
+        results = pool.map(fit_lightcurve, input_files)
 
-# unnecessary but let's keep it like this for now
-for key in best_pars.keys():
-    for pars in best_params:
-        best_pars[key].append(pars[key])
+    best_params = [result[0] for result in results]
 
-log_likehoods = [result[1] for result in results]
+    # unnecessary but let's keep it like this for now
+    for key in best_pars.keys():
+        for pars in best_params:
+            best_pars[key].append(pars[key])
 
-end = time.time()
+    log_likehoods = [result[1] for result in results]
 
-print("Time taken: %.2fs" % (end-start))
+    end = time.time()
 
-with open("%s/python_command.txt" % outdir, "w+") as file:
-    file.write(python_command)
+    print("Time taken: %.2fs" % (end-start))
 
-# get number of datapoints
-N = len(np.genfromtxt(input_files[0], names=True, usecols=(0)))
+    with open("%s/python_command.txt" % outdir, "w+") as file:
+        file.write(python_command)
 
-print("Number of datapoints per lightcurve: %d" % N)
-# bic information (equation 54 from Foreman et al 2017, see also https://github.com/dfm/celerite/blob/ad3f471f06b18d233f3dab71bb1c20a316173cae/paper/figures/simulated/wrong-qpo.ipynb)
-bics = -2 * np.array(log_likehoods) + len(dummy_gp.get_parameter_dict()) * np.log(N) # we have now defined L as positive!
+    # get number of datapoints
+    N = len(np.genfromtxt(input_files[0], names=True, usecols=(0)))
 
-outputs = np.vstack((input_files, log_likehoods, bics, list(best_pars.values())))
+    print("Number of datapoints per lightcurve: %d" % N)
+    # bic information (equation 54 from Foreman et al 2017, see also https://github.com/dfm/celerite/blob/ad3f471f06b18d233f3dab71bb1c20a316173cae/paper/figures/simulated/wrong-qpo.ipynb)
+    bics = -2 * np.array(log_likehoods) + len(dummy_gp.get_parameter_dict()) * np.log(N) # we have now defined L as positive!
 
-header = "sim\tloglikelihood\tbic\t" + "\t".join(par_names)
+    outputs = np.vstack((input_files, log_likehoods, bics, list(best_pars.values())))
 
-np.savetxt("%s/fits_results.dat" % outdir,
-           outputs.T, header=header, fmt="%s") # store all strings as it is hard to do otherwise
+    header = "sim\tloglikelihood\tbic\t" + "\t".join(par_names)
 
-omega_par= [name for name in par_names if "omega" in name]
+    np.savetxt("%s/fits_results.dat" % outdir,
+               outputs.T, header=header, fmt="%s") # store all strings as it is hard to do otherwise
 
-# there is some omega parameter in the list store the periods too
-if not omega_par:
+    omega_par= [name for name in par_names if "omega" in name]
 
-    for i, omega in omega_par:
-        periods = [(2 * np.pi / (np.exp(best_pars[omega]) * days_to_seconds)) for best_pars in best_params]
+    # there is some omega parameter in the list store the periods too
+    if not omega_par:
 
-        np.savetxt("%s/periods_%d.dat" % (outdir, i), periods, header="P", fmt="%.3f")
-else:
+        for i, omega in omega_par:
+            periods = [(2 * np.pi / (np.exp(best_pars[omega]) * days_to_seconds)) for best_pars in best_params]
 
-    periods = None
+            np.savetxt("%s/periods_%d.dat" % (outdir, i), periods, header="P", fmt="%.3f")
+    else:
 
-config_file_name = os.path.basename(args.config_file)
-copyfile(args.config_file, "%s/%s" % (outdir, config_file_name))
+        periods = None
 
-if len(args.input_files) >1:
+    config_file_name = os.path.basename(args.config_file)
+    copyfile(args.config_file, "%s/%s" % (outdir, config_file_name))
 
-    plt.figure()
-    plt.hist(bics)
-    plt.xlabel("BIC")
-    plt.savefig("%s/bics.png" % outdir)
+    if len(args.input_files) >1:
 
-    plt.figure()
-    plt.hist(log_likehoods)
-    plt.xlabel("$L$")
-    plt.savefig("%s/likehoods.png"% outdir)
-
-    for par in best_pars.keys():
         plt.figure()
-        plt.hist(best_pars[par])
-        plt.xlabel("%s" %par)
-        plt.savefig("%s/%s.png"% (outdir, par))
+        plt.hist(bics)
+        plt.xlabel("BIC")
+        plt.savefig("%s/bics.png" % outdir)
 
-    if periods is not None:
         plt.figure()
-        plt.hist(periods)
-        plt.xlabel("$P$ (days)")
-        plt.savefig("%s/periods.png"% outdir)
+        plt.hist(log_likehoods)
+        plt.xlabel("$L$")
+        plt.savefig("%s/likehoods.png"% outdir)
 
-print("Results stored to %s" % outdir)
+        for par in best_pars.keys():
+            plt.figure()
+            plt.hist(best_pars[par])
+            plt.xlabel("%s" %par)
+            plt.savefig("%s/%s.png"% (outdir, par))
+
+        if periods is not None:
+            plt.figure()
+            plt.hist(periods)
+            plt.xlabel("$P$ (days)")
+            plt.savefig("%s/periods.png"% outdir)
+
+    print("Results stored to %s" % outdir)

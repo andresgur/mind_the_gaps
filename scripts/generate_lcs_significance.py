@@ -11,9 +11,7 @@ import argparse
 import re
 import time
 import warnings
-import astropy.units as u
-from astropy.visualization import quantity_support
-from multiprocessing import Pool
+import multiprocessing as mp
 from shutil import copyfile
 from mind_the_gaps.models.psd_models import BendingPowerlaw, Lorentzian, SHO, Matern32, Jitter
 from astropy.modeling.powerlaws import PowerLaw1D
@@ -140,119 +138,120 @@ ap.add_argument("--noise_std", nargs="?", help="Standard deviation of the noise 
                 required=False, default=None, type=float)
 args = ap.parse_args()
 
-count_rate_file = args.file[0]
-n_sims = args.n_sims
-cores = args.cores
-pdf = args.pdf
-extension_factor = args.extension_factor
-simulator = args.simulator
-python_command = "python %s -n %d -f %s --tmin %.2f --tmax %.2f -c %d -s %s --input_dir %s --pdf %s -e %.2f -o %s" % (__file__, args.n_sims, args.file[0],
-                    args.tmin, args.tmax, cores, simulator, args.input_dir, args.pdf, extension_factor, args.outdir)
+if __name__ == '__main__':
+    count_rate_file = args.file[0]
+    n_sims = args.n_sims
+    cores = args.cores
+    pdf = args.pdf
+    extension_factor = args.extension_factor
+    simulator = args.simulator
+    python_command = "python %s -n %d -f %s --tmin %.2f --tmax %.2f -c %d -s %s --input_dir %s --pdf %s -e %.2f -o %s" % (__file__, args.n_sims, args.file[0],
+                        args.tmin, args.tmax, cores, simulator, args.input_dir, args.pdf, extension_factor, args.outdir)
 
-quantity_support()
+    home = os.getenv("HOME")
 
-home = os.getenv("HOME")
+    tmin = args.tmin
+    tmax = args.tmax
+    noise_std = args.noise_std
+    celerite_dir = args.input_dir
 
-tmin = args.tmin
-tmax = args.tmax
-noise_std = args.noise_std
-celerite_dir = args.input_dir
-
-celerite_file = "%s/samples.dat" % celerite_dir
+    celerite_file = "%s/samples.dat" % celerite_dir
 
 
-if tmin > tmax:
-    raise ValueError("Error minimum time %.3f is larger than maximum time: %.3f" % (args.tmin, args.tmax))
+    if tmin > tmax:
+        raise ValueError("Error minimum time %.3f is larger than maximum time: %.3f" % (args.tmin, args.tmax))
 
-if os.path.isfile(count_rate_file):
-    try:
-        lc = SwiftLightcurve(count_rate_file)
-        print("Read as Swift lightcurve...")
-    except:
-        lc = SimpleLightcurve(count_rate_file)
-        print("Read as SimpleLightcurve")
+    if os.path.isfile(count_rate_file):
+        try:
+            lc = SwiftLightcurve(count_rate_file)
+            print("Read as Swift lightcurve...")
+        except:
+            lc = SimpleLightcurve(count_rate_file)
+            print("Read as SimpleLightcurve")
 
-    lc = lc.truncate(tmin, tmax)
+        lc = lc.truncate(tmin, tmax)
 
-    duration = lc.duration * u.s
+        duration = lc.duration # seconds
 
-    time_range = "{:0.3f}-{:0.3f}{:s}".format(lc.times[0], lc.times[-1], "s")
-    print("Time range considered: %s" % time_range)
-    print("Duration: %.2f days" % (duration.to(u.d).value))
+        time_range = "{:0.3f}-{:0.3f}{:s}".format(lc.times[0], lc.times[-1], "s")
+        print("Time range considered: %s" % time_range)
+        print("Duration: %.2f days" % (duration / 3600 / 24))
 
-    end_dir = "%s_t%s_N%d_s%s_pdf%s" % (args.outdir, time_range, n_sims, simulator, pdf)
+        end_dir = "%s_t%s_N%d_s%s_pdf%s" % (args.outdir, time_range, n_sims, simulator, pdf)
 
-    if args.outdir == "lightcurves_significance":
-        outdir = end_dir
+        if args.outdir == "lightcurves_significance":
+            outdir = end_dir
+        else:
+            outdir = "lightcurves_significance_%s" % end_dir
+
+        if not os.path.isdir(outdir):
+            os.mkdir(outdir)
+
+        # write data out
+        lc.to_csv("%s/lc_data.dat" % outdir)
+
+        # just for the plot
+        if tmin==0:
+            tmin = lc.times[0]
+        if tmax==np.inf:
+            tmax = lc.times[-1]
+        create_data_selection_figure(outdir, tmin, tmax)
+
+        if not os.path.isdir("%s/lightcurves" % outdir):
+            os.mkdir("%s/lightcurves" % outdir)
+
+        print("Reading celerite samples from %s" % celerite_file)
+        samples_data = np.genfromtxt(celerite_file, delimiter="\t", names=True, deletechars="")
+
+        # read the headers of the parameters
+        kernel_pattern = r'kernel(?::terms\[\d+\])?'
+
+        kernel_names = np.unique([re.findall(kernel_pattern, name)[0] for name in samples_data.dtype.names[:-1]])
+        model_names_ = parse_model_name(celerite_dir)
+        model_names = model_names_.split("_")
+        psd_model = create_model(model_names, kernel_names)
+
+        n_kernels = len(kernel_names)
+
+        if n_kernels!= psd_model.n_submodels:
+            raise ValueError("Number of model components do not match! %d != %d" % (n_kernels, psd_model.n_submodels))
+
+        print("Input model has %d model components" % n_kernels)
+
+        rand_ints = np.random.randint(0, len(samples_data), n_sims)
+
+        random_param_samples = samples_data[rand_ints]
+
+        start_time = time.time()
+        print("\nSimulating %d lightcurves on %d cores" % (n_sims, cores))
+        os.chdir("%s" % outdir)
+
+        simulator = lc.get_simulator(psd_model, pdf, noise_std=noise_std)
+        # if on the cluster switch to the set number of tasks
+        if "SLURM_CPUS_PER_TASK" in os.environ:
+            cores = int(os.environ['SLURM_CPUS_PER_TASK'])
+            warnings.warn("The numbe of cores is being reset to SLURM_CPUS_PER_TASK = %d " % cores )
+
+        mp.set_start_method("fork")
+        start = time.time()
+        with mp.Pool(processes=cores, initializer=np.random.seed) as pool:
+            pool.map(
+                simulate_lcs, enumerate(random_param_samples)
+            )
+
+        os.chdir("../")
+        end = time.time()
+        time_taken = (end - start) / 60
+        print("Time taken: %.2f minutes" % (time_taken))
+        # copy the input samples file
+        samples_file = os.path.basename(celerite_file)
+        copyfile(celerite_file, "%s/%s" % (outdir, samples_file))
+        lc_file = os.path.basename(count_rate_file)
+        copyfile(count_rate_file, "%s/%s" % (outdir, lc_file))
+        file = open("%s/python_command.txt" % outdir, "w+")
+        file.write(python_command)
+        file.close()
+        print("Results stored to %s" % outdir)
+
     else:
-        outdir = "lightcurves_significance_%s" % end_dir
-
-    if not os.path.isdir(outdir):
-        os.mkdir(outdir)
-
-    # write data out
-    lc.to_csv("%s/lc_data.dat" % outdir)
-
-    # just for the plot
-    if tmin==0:
-        tmin = lc.times[0]
-    if tmax==np.inf:
-        tmax = lc.times[-1]
-    create_data_selection_figure(outdir, tmin, tmax)
-
-    if not os.path.isdir("%s/lightcurves" % outdir):
-        os.mkdir("%s/lightcurves" % outdir)
-
-    print("Reading celerite samples from %s" % celerite_file)
-    samples_data = np.genfromtxt(celerite_file, delimiter="\t", names=True, deletechars="")
-
-    # read the headers of the parameters
-    kernel_pattern = r'kernel(?::terms\[\d+\])?'
-
-    kernel_names = np.unique([re.findall(kernel_pattern, name)[0] for name in samples_data.dtype.names[:-1]])
-    model_names_ = parse_model_name(celerite_dir)
-    model_names = model_names_.split("_")
-    psd_model = create_model(model_names, kernel_names)
-
-    n_kernels = len(kernel_names)
-
-    if n_kernels!= psd_model.n_submodels:
-        raise ValueError("Number of model components do not match! %d != %d" % (n_kernels, psd_model.n_submodels))
-
-    print("Input model has %d model components" % n_kernels)
-
-    rand_ints = np.random.randint(0, len(samples_data), n_sims)
-
-    random_param_samples = samples_data[rand_ints]
-
-    start_time = time.time()
-    print("\nSimulating %d lightcurves on %d cores" % (n_sims, cores))
-    os.chdir("%s" % outdir)
-
-    simulator = lc.get_simulator(psd_model, pdf, noise_std=noise_std)
-    # if on the cluster switch to the set number of tasks
-    if "SLURM_CPUS_PER_TASK" in os.environ:
-        cores = int(os.environ['SLURM_CPUS_PER_TASK'])
-        warnings.warn("The numbe of cores is being reset to SLURM_CPUS_PER_TASK = %d " % cores )
-    start = time.time()
-    with Pool(processes=cores, initializer=np.random.seed) as pool:
-        pool.map(
-            simulate_lcs, enumerate(random_param_samples)
-        )
-
-    os.chdir("../")
-    end = time.time()
-    time_taken = (end - start) / 60
-    print("Time taken: %.2f minutes" % (time_taken))
-    # copy the input samples file
-    samples_file = os.path.basename(celerite_file)
-    copyfile(celerite_file, "%s/%s" % (outdir, samples_file))
-    lc_file = os.path.basename(count_rate_file)
-    copyfile(count_rate_file, "%s/%s" % (outdir, lc_file))
-    file = open("%s/python_command.txt" % outdir, "w+")
-    file.write(python_command)
-    file.close()
-    print("Results stored to %s" % outdir)
-
-else:
-    raise ValueError("Input file %s not found! Use -f option to supply your input lightcurve" % count_rate_file)
+        raise ValueError("Input file %s not found! Use -f option to supply your input lightcurve" % count_rate_file)
