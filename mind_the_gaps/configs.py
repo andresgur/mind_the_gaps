@@ -108,7 +108,7 @@ def read_config_file(config_file, walkers=32):
                 kernel_labels = [r"log $\sigma$", r"log $\rho$"]
 
                 init_model_pars = np.array([np.random.uniform(S_0[0], S_0[2], walkers),
-                                            np.random.uniform(w[2], w[0], walkers)])
+                                            np.random.uniform(log_rho[0], log_rho[2], walkers)])
                 if initial_params is None:
                     initial_params = init_model_pars
 
