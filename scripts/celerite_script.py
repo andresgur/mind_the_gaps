@@ -67,13 +67,15 @@ def standarized_residuals(data, model, uncer,  ouput):
     plt.text(0.1, 0.7, "p-value = %.3f %%" % (kstest_res.pvalue * 100),
              transform=ax.transAxes, fontsize=24)
     plt.legend()
+    plt.ylabel("PDF")
+    plt.xlabel("Standarized Residuals")
     plt.savefig("%s/standarized_res_%s.png" % (outdir, ouput), dpi=100)
     plt.close(fig)
 
     # plot aucorr
     fig = plt.figure()
     lags, acf, _, __ = plt.acorr(std_res, maxlags=None)
-    # sigma
+    # 1 sigma
     plt.axhspan(-1 / np.sqrt(len(std_res)), 1 / np.sqrt(len(std_res)), alpha=0.3, color="black")
     plt.xlim(left=0)
     plt.ylim(top=np.max(acf[acf < 0.99]) + 0.05) # the max after the 1.0 at the 0 lag
@@ -166,6 +168,7 @@ if __name__ == "__main__":
 
     time, y, yerr = lc.times, lc.y, lc.dy
 
+
     # warn the user of negative bins
     if np.count_nonzero(y<0):
         warnings.warn("Lightcurve has some negative bins!")
@@ -177,6 +180,7 @@ if __name__ == "__main__":
 
     duration = lc.duration # seconds
     print("Duration: %.2fd" % (duration / days_to_seconds))
+    print("Variance: %.2f" % np.var(y))
     # filter data according to input parameters
     time_range = "%.3f-%.3f" % (time[0], time[-1])
     dt = np.mean(np.diff(time))
@@ -186,7 +190,7 @@ if __name__ == "__main__":
     normalization_factor =  2 / np.sqrt(2 * np.pi) # this factor accounts for the fact that we only integrate positive frequencies and the 1 / sqrt(2pi) from the Fourier transform
     psd_noise_level = 2 * dt * np.mean(yerr**2) / (2 * np.pi * normalization_factor)
     # timestamps to plot the model
-    t_samples = 18 * lc.n if lc.n < 5000 else 7 * lc.n
+    t_samples = 18 * lc.n if lc.n < 5000 else 1 * lc.n
     time_model = np.linspace(np.min(time), np.max(time), t_samples) # seconds
     # for plotting the PSD (if less than 500d extend a bit)
     if duration / days_to_seconds < 800 and lc.n < 5000:
@@ -310,7 +314,8 @@ if __name__ == "__main__":
             ax1.set_ylabel(" log(Count-rate (ct/s))")
         else:
             ax1.set_ylabel("Count-rate (ct/s)")
-        ax1.plot(time_model / days_to_seconds, pred_mean, color="orange", zorder=100)
+        ax1.plot(time_model / days_to_seconds, pred_mean, color="orange",
+                 zorder=100)
         # plot mean model if given
 
         ax1.plot(time_model / days_to_seconds, gpmodel.gp.mean.get_value(time_model), color="orange",
@@ -322,7 +327,7 @@ if __name__ == "__main__":
         np.savetxt("%s/model_fit.dat" % outdir, outputs.T, header="time(d)\tmodel\tstd", fmt="%.6f")
 
         # no need to pass time here as if this is omitted the coordinates will be assumed to be x from GP.compute() and an efficient method will be used to compute the prediction (https://celerite.readthedocs.io/en/stable/python/gp/)
-        #gp.compute(time, yerr) no need as we already call compute above
+        #gp.compute(time, yerr) no need as we already call compute above (tested)
         pred_mean, pred_var = gpmodel.gp.predict(y, return_var=True, return_cov=False)
         try:
             pvalue = standarized_residuals(y, pred_mean, np.sqrt(pred_var), "best_fit")
@@ -331,7 +336,7 @@ if __name__ == "__main__":
             print(e)
             pvalue = 0
 
-        ax2.errorbar(time / days_to_seconds, (y - pred_mean) / yerr, yerr=1, fmt=".k", capsize=0)
+        ax2.errorbar(time / days_to_seconds, (y - pred_mean), yerr=yerr, fmt=".k", capsize=0)
         ax2.axhline(y=0, ls="--", color="#002FA7")
         ax2.set_ylabel("Residuals")
         ax2.set_xlabel("Time (days)")
@@ -600,7 +605,7 @@ if __name__ == "__main__":
 
     color = "black"
     # draw 1000 samples from the final distributions and create plots
-    n_samples = 1500
+    n_samples = 1000
     psds = np.empty((n_samples, len(frequencies)))
     psd_components = np.empty((len(gpmodel.gp.kernel.terms), n_samples, len(frequencies)))
 
@@ -688,8 +693,8 @@ if __name__ == "__main__":
     colors = ["green", "red", "indigo", "brown"]
     for term_i, term in enumerate(gpmodel.gp.kernel.terms):
         p = np.percentile(psd_components[term_i], [16, 50, 84], axis=0)
-        psd_median_ax.plot(frequencies * days_to_seconds, p[1], color=colors[term_i], ls="--")
-        psd_median_ax.fill_between(frequencies * days_to_seconds, p[0], p[2], alpha=0.3, color=colors[term_i])
+        lines = psd_median_ax.plot(frequencies * days_to_seconds, p[1], ls="--")
+        psd_median_ax.fill_between(frequencies * days_to_seconds, p[0], p[2], alpha=0.3, color=lines[0].get_color())
         np.savetxt("%s/psds_comp%d.dat" % (outdir, term_i), np.array([frequencies, p[0], p[1], p[2], psd_noise_level * np.ones(len(frequencies))]).T,
                     delimiter="\t", fmt="%.8f", header="f\t16%\t50%\t84%\tnoise")
     xticks = psd_median_ax.get_xticks()
