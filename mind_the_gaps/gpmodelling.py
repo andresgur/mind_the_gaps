@@ -378,6 +378,6 @@ class GPModelling:
         # get some parameter combinations at random
         param_samples = self._mcmc_samples[np.random.randint(len(nsims), size=nsims)]
         warnings.simplefilter('ignore')
-        with Pool(processes=15, initializer=np.random.seed) as pool:
+        with Pool(processes=cpus, initializer=np.random.seed) as pool:
             lightcurves = pool.map(self.generate_lc, param_samples)
         return lightcurves
