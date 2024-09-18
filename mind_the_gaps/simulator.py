@@ -86,7 +86,7 @@ class Simulator:
     A class to simulate lightcurves from a given power spectral densities and flux probability density function
     """
     def __init__(self, psd_model, pdf, times, exposures, mean, bkg_rate=None,
-                 bkg_rate_err=None, noise_std=None, aliasing_factor=2, random_state=None):
+                 bkg_rate_err=None, noise_std=None, aliasing_factor=2, max_iter=400, random_state=None):
         """
         Parameters
         ----------
@@ -108,6 +108,8 @@ class Simulator:
         aliasing_factor: float,
             This defines the grid of the original, regularly-sampled lightcurve produced
             prior to resampling as min(exposure) / aliasing_factor
+        max_inter: int,
+            Maximum number of iterations for the E13 method. Not use if method is TK95 (Gaussian PDF)
         random_state: int,
         """
 
@@ -126,7 +128,7 @@ class Simulator:
         else:
             print("Simulator will use E13 algorithm with %s pdf" % pdf)
             self.simulator = E13Simulator(psd_model, times, exposures, sim_dt, sim_duration,
-                                          mean, pdf.lower(), max_iter=400)
+                                          mean, pdf.lower(), max_iter=max_iter)
 
         if np.any(exposures==0):
             raise ValueError("Some exposure times are 0!")
