@@ -26,7 +26,7 @@ class GappyLightcurve:
             Observed flux or count rate
         dy: array-like
             1 sigma uncertainty on y
-        exposures:
+        exposures: scalar or array-like, optional
             Exposure time of each datapoint in seconds
         bkg_rate: array-like
             Associated background rate (or flux) with each datapoint
@@ -37,10 +37,16 @@ class GappyLightcurve:
         self._times = times
         self._y = y
         self._dy = dy
-        self._exposures = exposures if exposures is not None else np.zeros(len(times))
+        if np.isscalar(exposures):
+            self._exposures = np.full(len(times), exposures)
+        elif exposures is not None:
+            self._exposures = exposures
+        else:
+            self._exposures = np.zeros(len(times))
+
         self._bkg_rate = bkg_rate if bkg_rate is not None else np.zeros(len(times))
         self._bkg_rate_err = bkg_rate_err if bkg_rate_err is not None else np.zeros(len(times))
-
+        
         epsilon = 1.01 # to avoid numerically distinct but equal
         if exposures is not None:
             wrong = np.count_nonzero(np.diff(self._times) < self._exposures[:-1] * epsilon / 2 )
@@ -227,7 +233,7 @@ class GappyLightcurve:
         np.savetxt(outname, outputs.T, fmt="%.5e", header="t\trate\terror\texposure\tbkg_rate\tbkg_rate_err")
 
 
-    def get_simulator(self, psd_model, pdf, noise_std=None, aliasing_factor=2, **kwargs):
+    def get_simulator(self, psd_model, pdf="gaussian", noise_std=None, aliasing_factor=2, **kwargs):
         """Creates an instance of mind_the_gaps.Simulator based on the lightcurve
             properties (timestamps, exposures, etc)
 
@@ -236,8 +242,8 @@ class GappyLightcurve:
         psd_model: astropy.modeling.Model,
             The model for the PSD
         pdf: str,
-            The probability distribution (Gaussian, Lognormal or Uniform)
+            A string defining the probability distribution (Gaussian, Lognormal or Uniform)
         """
-        return Simulator(psd_model, pdf, self._times, self.exposures, self.mean,
+        return Simulator(psd_model, self._times, self.exposures, self.mean, pdf,
                          self._bkg_rate, self._bkg_rate_err, noise_std=noise_std,
                          aliasing_factor=aliasing_factor, **kwargs)
