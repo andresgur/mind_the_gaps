@@ -85,15 +85,15 @@ class Simulator:
     """
     A class to simulate lightcurves from a given power spectral densities and flux probability density function
     """
-    def __init__(self, psd_model, pdf, times, exposures, mean, bkg_rate=None,
+    def __init__(self, psd_model, times, exposures, mean, pdf="gaussian", bkg_rate=None,
                  bkg_rate_err=None, noise_std=None, aliasing_factor=2, max_iter=400, random_state=None):
         """
         Parameters
         ----------
-        psd_model: astropy.model
-            PSD model to use for the lightcurve simulations
+        psd_model: function
+            PSD model to use for the lightcurve simulations. Astropy model or a function taking in angular frequencies and returning the power
         pdf: str
-            Flux probability density function desired for the ligthcurve. If Gaussian, uses  Timmer & König 1995 algorithm, otherwise uses Emmanolopoulos et al. 2013.
+            String defining the flux probability density function desired for the ligthcurve. If Gaussian, uses Timmer & König 1995 algorithm, otherwise uses Emmanolopoulos et al. 2013.
               Currently implemented: Gaussian, Lognormal and Uniform distributions.
         times:array_like,
             Timestamps of the lightcurve (i.e. times at the "center" of the sampling). Always in seconds
@@ -118,6 +118,7 @@ class Simulator:
         end_time = times[-1] + 1.5 * exposures[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
         sim_dt = np.min(exposures) / aliasing_factor
         sim_duration = end_time - start_time
+        self.pdf = pdf
 
         if pdf.lower() not in ["gaussian", "lognormal", "uniform"]:
             raise ValueError("%s not implemented! Currently implemented: Gaussian, Uniform or Lognormal")
@@ -139,6 +140,13 @@ class Simulator:
         self._bkg_rate = bkg_rate if bkg_rate is not None else np.zeros(len(times))
         self._bkg_rate_err = bkg_rate_err if bkg_rate_err is not None else np.zeros(len(times))
         self._noise_std = noise_std
+
+    def __str__(self):
+
+        sim_info = (f"Simulator(\n"
+            f"  PSD Model: {self._psd_model}\n"
+            f"  PDF: {self.pdf}\n")
+        return sim_info
 
 
     def set_psd_params(self, psd_params):
