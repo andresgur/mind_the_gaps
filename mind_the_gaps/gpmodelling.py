@@ -2,15 +2,15 @@
 # @Date:   05-02-2022
 # @Email:  agurpidelash@irap.omp.eu
 # @Last modified by:   agurpide
-# @Last modified time: 28-02-2022
+# @Last modified time: 28-05-2024
 import numpy as np
-import astropy.units as u
 from mind_the_gaps.lightcurves import GappyLightcurve
 from celerite.modeling import ConstantModel
 from mind_the_gaps.models.mean_models import LinearModel, GaussianModel, SineModel
 import emcee
 import celerite
 from multiprocessing import Pool
+from functools import partial
 from mind_the_gaps.stats import neg_log_like
 from scipy.optimize import minimize
 import warnings
@@ -44,7 +44,9 @@ class GPModelling:
         self.gp.compute(self._lightcurve.times, self._lightcurve.dy + 1e-12)
         self.initial_params = self.gp.get_parameter_vector()
         self._ndim = len(self.initial_params)
-        self._posteriors_derived = False
+        self._autocorr = []
+        self._loglikelihoods = None
+        self._mcmc_samples = None
 
 
     def _build_mean_model(self, meanmodel):
@@ -90,9 +92,9 @@ class GPModelling:
         elif meanmodel.lower()=="gaussian":
             sigma_guess = (self._lightcurve.duration) / 2
             amplitude_guess = (maxy - np.min(y)) * np.sqrt(2 * np.pi)* sigma_guess
-            mean_guess = time[len(time)//2]
+            mean_guess = self._lightcurve.times[len(self._lightcurve.times)//2]
             meanmodel = GaussianModel(mean_guess, sigma_guess, amplitude_guess,
-                                      bounds=[(time[0], time[-1]), (dt, duration),
+                                      bounds=[(self._lightcurve.times[0], self._lightcurve.times[-1]), (0, self._lightcurve.duration),
                                       (maxy * np.sqrt(2 * np.pi) * self._lightcurve.duration, 50 * maxy * np.sqrt(2 * np.pi) * self._lightcurve.duration)])
 
             meanlabels = ["$\mu$", "$\sigma$", "$A$"]
@@ -143,7 +145,7 @@ class GPModelling:
         return solution
 
 
-    def derive_posteriors(self, initial_params=None, fit=True, converge=True, max_steps=10000,
+    def derive_posteriors(self, initial_chain_params=None, fit=True, converge=True, max_steps=10000,
                         walkers=12, cores=6, progress=True):
         """Derive GP Posteriors
 
@@ -163,22 +165,24 @@ class GPModelling:
             Number of cores for parallelization
         """
         # set the initial parameters if not given
-        if initial_params is None and fit is None:
-            initial_params = self.initial_params
+        if initial_chain_params is None:
+            if not fit:
+                initial_params = self.initial_params
 
-        if fit:
-            solution = self.fit(initial_params)
-            initial_params = self.spread_walkers(walkers, solution.x, np.array(self.gp.get_parameter_bounds()))
-
-        index = 0
-        autocorr = np.zeros(max_steps)
+            else:
+                solution = self.fit(self.initial_params)
+                initial_params = solution.x
+        
+            initial_chain_params = self.spread_walkers(walkers, initial_params, np.array(self.gp.get_parameter_bounds()))
+        
         every_samples = 500
         # This will be useful to testing convergence
         old_tau = np.inf
-        pool =  Pool(cores) if cores >1 else None
-
+        # parallelize only if cores > 1
+        pool =  Pool(cores) if cores >1 else None   
+        self.converged = False
         sampler = emcee.EnsembleSampler(walkers, self._ndim, self._log_probability, pool=pool)
-        for sample in sampler.sample(initial_params, iterations=max_steps, progress=progress):
+        for sample in sampler.sample(initial_chain_params, iterations=max_steps, progress=progress):
             # Only check convergence every 100 steps
             if sampler.iteration % every_samples:
                 continue
@@ -187,25 +191,23 @@ class GPModelling:
             # Using tol=0 means that we'll always get an estimate even
             # if it isn't trustworthy
             tau = sampler.get_autocorr_time(tol=0)
-            autocorr[index] = np.mean(tau)
-            index += 1
+            self.autocorr.append(np.mean(tau))
 
             # Check convergence
-            converged = np.all(tau * 100 < sampler.iteration)
-            converged &= np.all(np.abs(old_tau - tau) / tau < 0.01)
-            if converged and converge:
+            if np.all(tau * 100 < sampler.iteration) and np.all(np.abs(old_tau - tau) / tau < 0.01) and converge:
                 print("Convergence reached after %d samples!" % sampler.iteration)
-
+                self.converged = True
                 break
             old_tau = tau
         if pool is not None:
             pool.close()
+            pool.join() # Ensures all worker processes are cleaned up
 
         self._tau = tau
         mean_tau = np.mean(tau)
 
-        if not converged:
-            warnings.warn("The chains did not converge!")
+        if not self.converged:
+            warnings.warn(f"The chains did not converge after {sampler.iteration} iterations!")
             # tau will be very large here, so let's reduce the numbers
             thin = int(mean_tau / 4)
             discard = int(mean_tau) * 10 # avoid blowing up if discard is larger than the number of samples, this happens if the fit has not converged
@@ -216,12 +218,9 @@ class GPModelling:
                 discard = int(mean_tau * 10)
             thin = int(mean_tau / 2)
 
-        self._loglikehoods = sampler.get_log_prob(discard=discard, thin=thin, flat=True)
+        self._loglikelihoods = sampler.get_log_prob(discard=discard, thin=thin, flat=True)
         self._mcmc_samples = sampler.get_chain(discard=discard, thin=thin, flat=True)
         self._sampler = sampler
-        # trim the array to the values where tau was computed as it won't be fully filled
-        self._autocorr = np.trim_zeros(autocorr)
-        self.converged = converged
 
 
     def spread_walkers(self, walkers, parameters, bounds, percent=10):
@@ -239,6 +238,7 @@ class GPModelling:
         Return a set of randomized samples for the chains
         """
         initial_samples = np.empty((walkers, len(parameters)))
+
         for i in range(walkers):
             accepted = False
 
@@ -247,9 +247,16 @@ class GPModelling:
                 perturbed_params = np.random.normal(parameters, np.abs(parameters) / percent)
 
                 # Check if the perturbed parameters are within the bounds
-                if np.all(np.logical_and(bounds[:, 0] <= perturbed_params, perturbed_params <= bounds[:, 1])):
+                #if np.all(np.logical_and(bounds[:, 0] <= perturbed_params, perturbed_params <= bounds[:, 1])):
+                #    initial_samples[i] = perturbed_params
+                accepted = True
+                for j, (lower, upper) in enumerate(bounds):
+                    if lower is not None and perturbed_params[j] < lower and upper is not None and perturbed_params[j] > upper:
+                        accepted = False
+                        break
+                if accepted:
                     initial_samples[i] = perturbed_params
-                    accepted = True
+        
         return initial_samples
 
 
@@ -280,19 +287,17 @@ class GPModelling:
 
     @property
     def loglikehoods(self):
-        if self._loglikehoods is None:
+        if self._loglikelihoods is None:
             raise AttributeError("Posteriors have not been derived. Please run derive_posteriors prior to populate the attributes.")
-        return self._loglikehoods
+        return self._loglikelihoods
 
     @property
     def autocorr(self):
-        if self._loglikehoods is None:
-            raise AttributeError("Posteriors have not been derived. Please run derive_posteriors prior to populate the attributes.")
         return self._autocorr
 
     @property
     def sampler(self):
-        if self._loglikehoods is None:
+        if self._loglikelihoods is None:
             raise AttributeError("Posteriors have not been derived. Please run derive_posteriors prior to populate the attributes.")
         return self._sampler
 
@@ -304,17 +309,17 @@ class GPModelling:
 
     @property
     def max_loglikehood(self):
-        if self._loglikehoods is None:
+        if self._loglikelihoods is None:
             raise AttributeError("Posteriors have not been derived. Please run derive_posteriors prior to populate the attributes.")
 
-        return np.max(self._loglikehoods)
+        return np.max(self._loglikelihoods)
 
     @property
     def max_parameters(self):
         """Return the parameters that maximize the loglikehood"""
         if self._mcmc_samples is None:
             raise AttributeError("Posteriors have not been derived. Please run derive_posteriors prior to populate the attributes.")
-        return self._mcmc_samples[np.argmax(self._loglikehoods)]
+        return self._mcmc_samples[np.argmax(self._loglikelihoods)]
 
     @property
     def median_parameters(self):
@@ -361,14 +366,6 @@ class GPModelling:
         extension_factor: int,
             Extension factor for the generation of the lightcurves, to introduce rednoise leakage
         """
-        raise NotImplementedError("Still not implemented!")
-        def generate_from_params(self, parameters):
-            self.gp.set_parameter_vector(parameters)
-            psd_model = self.gp.kernel.get_psd
-            simulator = self.lc.get_simulator(psd_model, pdf)
-            rates = simulator.generate_lightcurve(2)
-            noisy_rates, dy = simulator.add_noise(rates)
-            lc = GappyLightcurve(lc.times, noisy_rates, dy)
 
         if self._mcmc_samples is None:
             raise RuntimeError("Posteriors have not been derived. Please run derive_posteriors prior to calling this method.")
@@ -379,5 +376,15 @@ class GPModelling:
         param_samples = self._mcmc_samples[np.random.randint(len(nsims), size=nsims)]
         warnings.simplefilter('ignore')
         with Pool(processes=cpus, initializer=np.random.seed) as pool:
-            lightcurves = pool.map(self.generate_lc, param_samples)
+            lightcurves = pool.map(partial(self._generate_lc_from_params, pdf=pdf, extension_factor=extension_factor), param_samples)
         return lightcurves
+    
+    def _generate_lc_from_params(self, parameters, pdf, extension_factor):
+        self.gp.set_parameter_vector(parameters)
+        psd_model = self.gp.kernel.get_psd
+        simulator = self.lc.get_simulator(psd_model, pdf)
+        print(simulator)
+        rates = simulator.generate_lightcurve(2)
+        noisy_rates, dy = simulator.add_noise(rates)
+        lc = GappyLightcurve(lc.times, noisy_rates, dy)
+        return lc
