@@ -244,6 +244,6 @@ class GappyLightcurve:
         pdf: str,
             A string defining the probability distribution (Gaussian, Lognormal or Uniform)
         """
-        return Simulator(psd_model, self._times, self.exposures, self.mean, pdf,
+        return Simulator(psd_model, self._times, self._exposures, self.mean, pdf,
                          self._bkg_rate, self._bkg_rate_err, noise_std=noise_std,
                          aliasing_factor=aliasing_factor, **kwargs)
