@@ -373,7 +373,7 @@ class GPModelling:
             warnings.warn("The number of simulation requested (%d) is higher than the number of posterior samples (%d), so many samples will be drawn more than once")
 
         # get some parameter combinations at random
-        param_samples = self._mcmc_samples[np.random.randint(len(nsims), size=nsims)]
+        param_samples = self._mcmc_samples[np.random.randint(len(self._mcmc_samples), size=nsims)]
         warnings.simplefilter('ignore')
         with Pool(processes=cpus, initializer=np.random.seed) as pool:
             lightcurves = pool.map(partial(self._generate_lc_from_params, pdf=pdf, extension_factor=extension_factor), param_samples)
@@ -382,9 +382,8 @@ class GPModelling:
     def _generate_lc_from_params(self, parameters, pdf, extension_factor):
         self.gp.set_parameter_vector(parameters)
         psd_model = self.gp.kernel.get_psd
-        simulator = self.lc.get_simulator(psd_model, pdf)
-        print(simulator)
+        simulator = self._lightcurve.get_simulator(psd_model, pdf)
         rates = simulator.generate_lightcurve(2)
         noisy_rates, dy = simulator.add_noise(rates)
-        lc = GappyLightcurve(lc.times, noisy_rates, dy)
+        lc = GappyLightcurve(self._lightcurve.times, noisy_rates, dy)
         return lc
