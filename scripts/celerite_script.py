@@ -196,6 +196,9 @@ if __name__ == "__main__":
     if duration / days_to_seconds < 800 and lc.n < 5000:
         df = 0.5 / duration
         frequencies = np.arange(1 / (5 * duration), 1 / (0.1 * dt), df) #* two_pi 0.1 / duration)
+    elif lc.n < 2000:
+        df = 0.5 / duration
+        frequencies = np.arange(1 / (5 * duration), 1 / (0.1 * dt), df)
     elif lc.n < 5000:
         df = 1 / duration
         frequencies = np.arange(1 / (duration), 1 / (0.1 * dt), df) #* two_pi 0.1 / duration)
@@ -428,8 +431,7 @@ if __name__ == "__main__":
         thin = int(mean_tau / 2)
 
     fig = plt.figure()
-    index = len(autocorr)
-    n = every_samples * np.arange(1, index + 1)
+    n = np.arange(1, len(autocorr) + 1)
     plt.plot(n, autocorr, "-o")
     plt.ylabel("Mean $\\tau$")
     plt.xlabel("Number of steps")
