@@ -223,7 +223,7 @@ class GPModelling:
         self._sampler = sampler
 
 
-    def spread_walkers(self, walkers, parameters, bounds, percent=10):
+    def spread_walkers(self, walkers, parameters, bounds, percent=0.1):
         """Spread the walkers using a Gaussian distribution around a given set of parameters
         walkers:int,
             Number of walkers
@@ -232,8 +232,8 @@ class GPModelling:
         bounds: array of tuples
             Bounds (min, max) for each of the parameters (in same order)
         percent: float,
-            By which factor scale down the initial parameters for the standard deviation
-                of the Gaussians. Default: 10.0
+            By which percentage factor (0-1) scale the initial parameters for the standard deviation
+                of the Gaussians. Default: 0.1 (i.e. 10%)
 
         Return a set of randomized samples for the chains
         """
@@ -244,14 +244,14 @@ class GPModelling:
 
             while not accepted:
                 # Generate random values centered around the best-fit parameters
-                perturbed_params = np.random.normal(parameters, np.abs(parameters) / percent)
+                perturbed_params = np.random.normal(parameters, np.abs(parameters) * percent)
 
                 # Check if the perturbed parameters are within the bounds
                 #if np.all(np.logical_and(bounds[:, 0] <= perturbed_params, perturbed_params <= bounds[:, 1])):
                 #    initial_samples[i] = perturbed_params
                 accepted = True
                 for j, (lower, upper) in enumerate(bounds):
-                    if lower is not None and perturbed_params[j] < lower and upper is not None and perturbed_params[j] > upper:
+                    if (lower is not None and perturbed_params[j] < lower) or (upper is not None and perturbed_params[j] > upper):
                         accepted = False
                         break
                 if accepted:
