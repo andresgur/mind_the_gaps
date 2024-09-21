@@ -210,7 +210,7 @@ class GPModelling:
             warnings.warn(f"The chains did not converge after {sampler.iteration} iterations!")
             # tau will be very large here, so let's reduce the numbers
             thin = int(mean_tau / 4)
-            discard = int(mean_tau) * 10 # avoid blowing up if discard is larger than the number of samples, this happens if the fit has not converged
+            discard = int(mean_tau) * 5 # avoid blowing up if discard is larger than the number of samples, this happens if the fit has not converged
 
         else:
             discard = int(mean_tau * 40)
