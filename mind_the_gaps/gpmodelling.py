@@ -223,7 +223,7 @@ class GPModelling:
         self._sampler = sampler
 
 
-    def spread_walkers(self, walkers, parameters, bounds, percent=0.1):
+    def spread_walkers(self, walkers, parameters, bounds, percent=0.1, max_attempts=10):
         """Spread the walkers using a Gaussian distribution around a given set of parameters
         walkers:int,
             Number of walkers
@@ -234,28 +234,27 @@ class GPModelling:
         percent: float,
             By which percentage factor (0-1) scale the initial parameters for the standard deviation
                 of the Gaussians. Default: 0.1 (i.e. 10%)
+        max_attempts: int,
+            Attempts before giving up (if the parameters fall always outside the imposed bounds)
 
         Return a set of randomized samples for the chains
         """
         initial_samples = np.empty((walkers, len(parameters)))
+        # Replace None with -inf and inf
+        bounds = np.array([(-np.inf if lower is None else lower, 
+                        np.inf if upper is None else upper) 
+                       for lower, upper in bounds])
 
         for i in range(walkers):
-            accepted = False
 
-            while not accepted:
+            for attempt in range(max_attempts):
                 # Generate random values centered around the best-fit parameters
                 perturbed_params = np.random.normal(parameters, np.abs(parameters) * percent)
 
                 # Check if the perturbed parameters are within the bounds
-                #if np.all(np.logical_and(bounds[:, 0] <= perturbed_params, perturbed_params <= bounds[:, 1])):
-                #    initial_samples[i] = perturbed_params
-                accepted = True
-                for j, (lower, upper) in enumerate(bounds):
-                    if (lower is not None and perturbed_params[j] < lower) or (upper is not None and perturbed_params[j] > upper):
-                        accepted = False
-                        break
-                if accepted:
+                if np.all(np.logical_and(bounds[:, 0] <= perturbed_params, perturbed_params <= bounds[:, 1])):
                     initial_samples[i] = perturbed_params
+                    break
         
         return initial_samples
 
