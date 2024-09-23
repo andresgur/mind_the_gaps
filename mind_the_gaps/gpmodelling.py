@@ -239,7 +239,9 @@ class GPModelling:
 
         Return a set of randomized samples for the chains
         """
-        initial_samples = np.empty((walkers, len(parameters)))
+
+        std = np.abs(parameters) * percent
+        initial_samples = np.random.normal(parameters, std, size=(walkers, len(parameters)))
         # Replace None with -inf and inf
         bounds = np.array([(-np.inf if lower is None else lower, 
                         np.inf if upper is None else upper) 
@@ -249,12 +251,11 @@ class GPModelling:
 
             for attempt in range(max_attempts):
                 # Generate random values centered around the best-fit parameters
-                perturbed_params = np.random.normal(parameters, np.abs(parameters) * percent)
-
-                # Check if the perturbed parameters are within the bounds
-                if np.all(np.logical_and(bounds[:, 0] <= perturbed_params, perturbed_params <= bounds[:, 1])):
-                    initial_samples[i] = perturbed_params
-                    break
+                if np.all(np.logical_and(bounds[:, 0] <= initial_samples[i], initial_samples[i] <= bounds[:, 1])):
+                    break  # If the walker is within bounds, continue to the next walker
+                else:
+                    # Regenerate the walker if it is outside the bounds
+                    initial_samples[i] = np.random.normal(parameters, std)
         
         return initial_samples
 
