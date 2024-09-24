@@ -399,7 +399,7 @@ if __name__ == "__main__":
 
         # reinitialize best fit parameters
         warnings.warn("Initial samples reset based on best-fit parameters")
-        initial_samples = gpmodel.spread_walkers(nwalkers, solution.x, bounds, 10.0)
+        initial_samples = gpmodel.spread_walkers(nwalkers, solution.x, bounds, 0.1)
 
     max_steps = 300000
     print("Running chain for a maximum of %d samples with %d walkers until the chain has a length 100xtau using %d cores" % (max_steps, nwalkers, cores))
