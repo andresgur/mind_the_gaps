@@ -29,7 +29,7 @@ def fit_lightcurve(input_file):
     print("Best-fit log-likelihood: {:.3f} \n".format(-solution.fun)) # here is neg_log_like
 
     if solution.success:
-        initial_mcmc = gpmodel.spread_walkers(nwalkers, solution.x, bounds, 10.0)
+        initial_mcmc = gpmodel.spread_walkers(nwalkers, solution.x, bounds, 0.1)
     else:
         warnings.warn("The solver did not converge!\n %s" % solution.message)
         initial_mcmc = initial_samples
@@ -52,14 +52,7 @@ def fit_lightcurve(input_file):
 
     print("MCMC chains maximum log-likelihood:\n------------------------------------- \n {:.3f}\n".format(best_log))
 
-    gpmodel.gp.set_parameter_vector(best_mcmc_pars)
-
-    best_params = gpmodel.gp.get_parameter_dict()
-
-    for key in best_params.keys():
-        best_pars[key].append(best_params[key])
-
-    return best_params, best_log
+    return best_mcmc_pars, best_log
 
 
 ap = argparse.ArgumentParser(description='Perform fit of an input lightcurve (no MCMC) (see Foreman-Mackey et al 2017. 10.3847/1538-3881/aa9332)')
@@ -103,14 +96,11 @@ if __name__ == '__main__':
     # dummy gp to get values
     dummy_gp = celerite.GP(kernel, mean=0)
     print("parameter_dict:\n{0}\n".format(dummy_gp.get_parameter_dict()))
-    print("parameter_names:\n{0}\n".format(dummy_gp.get_parameter_names()))
+    print("parameter_names:\n{0}\n".format(kernel.parameter_names))
     print("parameter_vector:\n{0}\n".format(dummy_gp.get_parameter_vector()))
     print("parameter_bounds:\n{0}\n".format(dummy_gp.get_parameter_bounds()))
     initial_params = dummy_gp.get_parameter_vector()
     bounds = np.array(dummy_gp.get_parameter_bounds())
-    par_names = list(dummy_gp.get_parameter_names())
-
-    best_pars = {key: [ ] for key in par_names} #  dictionary to store all best fit pars
 
     start = time.time()
     # in windows spawn is the default  https://stackoverflow.com/questions/46045956/whats-the-difference-between-threadpool-vs-pool-in-the-multiprocessing-module
@@ -119,12 +109,7 @@ if __name__ == '__main__':
     with mp.Pool(processes=cores, initializer=np.random.seed) as pool:
         results = pool.map(fit_lightcurve, input_files)
 
-    best_params = [result[0] for result in results]
-
-    # unnecessary but let's keep it like this for now
-    for key in best_pars.keys():
-        for pars in best_params:
-            best_pars[key].append(pars[key])
+    best_params = np.array([result[0] for result in results]).T
 
     log_likehoods = [result[1] for result in results]
 
@@ -142,22 +127,21 @@ if __name__ == '__main__':
     # bic information (equation 54 from Foreman et al 2017, see also https://github.com/dfm/celerite/blob/ad3f471f06b18d233f3dab71bb1c20a316173cae/paper/figures/simulated/wrong-qpo.ipynb)
     bics = -2 * np.array(log_likehoods) + len(dummy_gp.get_parameter_dict()) * np.log(N) # we have now defined L as positive!
 
-    outputs = np.vstack((input_files, log_likehoods, bics, list(best_pars.values())))
+    outputs = np.vstack((input_files, log_likehoods, bics, best_params))
 
-    header = "sim\tloglikelihood\tbic\t" + "\t".join(par_names)
+    header = "sim\tloglikelihood\tbic\t" + "\t".join(kernel.parameter_names)
 
     np.savetxt("%s/fits_results.dat" % outdir,
                outputs.T, header=header, fmt="%s") # store all strings as it is hard to do otherwise
 
-    omega_par= [name for name in par_names if "omega" in name]
+    omega_par= ["omega" in name for name in kernel.parameter_names]
 
     # there is some omega parameter in the list store the periods too
-    if not omega_par:
-
-        for i, omega in omega_par:
-            periods = [(2 * np.pi / (np.exp(best_pars[omega]) * days_to_seconds)) for best_pars in best_params]
-
-            np.savetxt("%s/periods_%d.dat" % (outdir, i), periods, header="P", fmt="%.3f")
+    if np.any(omega_par):
+        for i, omega in enumerate(omega_par):
+            if omega:
+                periods = 2 * np.pi / (np.exp(best_params[i]) * days_to_seconds)
+                np.savetxt("%s/periods_%d.dat" % (outdir, i), periods, header="P", fmt="%.3f")
     else:
 
         periods = None
@@ -177,11 +161,11 @@ if __name__ == '__main__':
         plt.xlabel("$L$")
         plt.savefig("%s/likehoods.png"% outdir)
 
-        for par in best_pars.keys():
+        for i, par in enumerate(best_params):
             plt.figure()
-            plt.hist(best_pars[par])
-            plt.xlabel("%s" %par)
-            plt.savefig("%s/%s.png"% (outdir, par))
+            plt.hist(par)
+            plt.xlabel("%s" % kernel.parameter_names[i])
+            plt.savefig("%s/%s.png"% (outdir, kernel.parameter_names[i]))
 
         if periods is not None:
             plt.figure()

@@ -151,8 +151,8 @@ class GPModelling:
 
         Parameters
         ----------
-        initial_params: array_like,
-            Set of initial parameters for the fit. If not given will use those given at initialization
+        initial_chain_params: array_like,
+            Set of initial parameters for the chains. If not given will use randomized from the parameters given at initialization
         fit: bool,
             Whether to run a minimization routine prior to running the MCMC chains
         converge: bool,

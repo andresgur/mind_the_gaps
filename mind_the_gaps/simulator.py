@@ -145,7 +145,7 @@ class Simulator:
 
         sim_info = (f"Simulator(\n"
             f"  PSD Model: {self._psd_model}\n"
-            f"  PDF: {self.pdf}\n")
+            f"  PDF: {self.pdf}\n)")
         return sim_info
 
 
