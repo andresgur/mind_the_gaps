@@ -223,7 +223,7 @@ class GPModelling:
         self._sampler = sampler
 
 
-    def spread_walkers(self, walkers, parameters, bounds, percent=0.1, max_attempts=10):
+    def spread_walkers(self, walkers, parameters, bounds, percent=0.1, max_attempts=20):
         """Spread the walkers using a Gaussian distribution around a given set of parameters
         walkers:int,
             Number of walkers
@@ -256,7 +256,10 @@ class GPModelling:
                 else:
                     # Regenerate the walker if it is outside the bounds
                     initial_samples[i] = np.random.normal(parameters, std)
-        
+            if attempt == max_attempts - 1:
+                warnings.warn("Some walkers will be out of bounds! This can cause problems" \
+                              ", increase the number of maximum iterations or expand the allowed parameter bounds")
+                
         return initial_samples
 
 
