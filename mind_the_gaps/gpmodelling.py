@@ -223,7 +223,7 @@ class GPModelling:
         self._sampler = sampler
 
 
-    def spread_walkers(self, walkers, parameters, bounds, percent=0.1, max_attempts=20):
+    def spread_walkers(self, walkers, parameters, bounds, percent: float=0.1, max_attempts: int =20):
         """Spread the walkers using a Gaussian distribution around a given set of parameters
         walkers:int,
             Number of walkers
@@ -239,6 +239,8 @@ class GPModelling:
 
         Return a set of randomized samples for the chains
         """
+        if percent < 0 or percent > 1:
+            raise ValueError("The 'percent' parameter must be between 0 and 1 (inclusive).")
 
         std = np.abs(parameters) * percent
         initial_samples = np.random.normal(parameters, std, size=(walkers, len(parameters)))
@@ -246,6 +248,8 @@ class GPModelling:
         bounds = np.array([(-np.inf if lower is None else lower, 
                         np.inf if upper is None else upper) 
                        for lower, upper in bounds])
+        factors_lower = np.where(bounds[:, 0] > 0, 1.05, 0.95)
+        factors_upper = np.where(bounds[:,1] > 0, 0.95, 1.05)
 
         for i in range(walkers):
 
@@ -257,9 +261,16 @@ class GPModelling:
                     # Regenerate the walker if it is outside the bounds
                     initial_samples[i] = np.random.normal(parameters, std)
             if attempt == max_attempts - 1:
-                warnings.warn("Some walkers will be out of bounds! This can cause problems" \
-                              ", increase the number of maximum iterations or expand the allowed parameter bounds")
+                warnings.warn("Some walkers are out of bounds! Setting them to values close to the bounds")
+
+                out_of_bounds_lower = initial_samples[i] < bounds[:, 0]
+                out_of_bounds_upper = initial_samples[i] > bounds[:, 1]
+                # Set the values for walkers outside the lower bounds to 1.05 * lower bound
                 
+                initial_samples[i][out_of_bounds_lower] = np.broadcast_to(bounds[:, 0]  * factors_lower , initial_samples[i].shape)[out_of_bounds_lower]
+                # Set the values for walkers outside the upper bounds to 0.95 * upper bound
+                
+                initial_samples[i][out_of_bounds_upper] = np.broadcast_to(bounds[:, 1] * factors_upper, initial_samples[i].shape)[out_of_bounds_upper] 
         return initial_samples
 
 
