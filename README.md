@@ -10,6 +10,8 @@ then enter the `mind_the_gaps` main directory and pip install it by running:
  `pip install .`
 # Warning
 Users are welcome to use/test the code and provide feedback but beware, the code is still in alpha phase, so expect bugs, errors and crashes! If you are intending to use the code, my recommendation would be to get in touch first!
+# Usage
+See the jupyter-notebook tutorial in the notebooks folder
 
 # Scripts
 Several scripts exists that allow to perform the main tasks. Each of them has a set of input parameters, for help running a given script type
