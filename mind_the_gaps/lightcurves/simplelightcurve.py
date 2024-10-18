@@ -11,7 +11,7 @@ from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
 
 class SimpleLightcurve(GappyLightcurve):
     """
-    A class to create a GappyLightcurve based on a csv file containing only times, rates and errors.
+    A class to create a GappyLightcurve from on a csv file
     """
     def __init__(self, input_file, skip_header=0, delimiter=None):
         """
