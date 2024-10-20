@@ -11,7 +11,6 @@ import emcee
 import celerite
 from multiprocessing import Pool
 from functools import partial
-from mind_the_gaps.stats import neg_log_like
 from scipy.optimize import minimize
 import warnings
 
