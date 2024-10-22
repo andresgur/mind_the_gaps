@@ -11,7 +11,6 @@ import emcee
 import celerite
 from multiprocessing import Pool
 from functools import partial
-from mind_the_gaps.stats import neg_log_like
 from scipy.optimize import minimize
 import warnings
 
@@ -272,6 +271,16 @@ class GPModelling:
                 
                 initial_samples[i][out_of_bounds_upper] = np.broadcast_to(bounds[:, 1] * factors_upper, initial_samples[i].shape)[out_of_bounds_upper] 
         return initial_samples
+    
+
+    def standarized_residuals(self,):
+        """Returns the standarized residuals (see e.g. Kelly et al. 2011) Eq. 49
+        
+        You should set the gp parameters to your best or mean (median) parameter values prior to calling this method
+        """
+        pred_mean, pred_var = self.gp.predict(self._lightcurve.y, return_var=True, return_cov=False)
+        std_res = (self._lightcurve.y - pred_mean) / np.sqrt(pred_var)
+        return std_res
 
 
     def get_rstat(self, burnin: int =None):
@@ -300,7 +309,7 @@ class GPModelling:
         return whithin_chain_variances / between_chain_variances[np.newaxis, :]
 
     @property
-    def loglikehoods(self):
+    def loglikelihoods(self):
         if self._loglikelihoods is None:
             raise AttributeError("Posteriors have not been derived. Please run derive_posteriors prior to populate the attributes.")
         return self._loglikelihoods
@@ -322,7 +331,7 @@ class GPModelling:
         return self._mcmc_samples
 
     @property
-    def max_loglikehood(self):
+    def max_loglikelihood(self):
         if self._loglikelihoods is None:
             raise AttributeError("Posteriors have not been derived. Please run derive_posteriors prior to populate the attributes.")
 
@@ -344,7 +353,7 @@ class GPModelling:
 
     @property
     def parameter_names(self):
-        return gp.get_parameter_names()
+        return self.gp.get_parameter_names()
 
 
     @property
