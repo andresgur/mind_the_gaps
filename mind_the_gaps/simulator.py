@@ -6,7 +6,7 @@
 import numpy as np
 import warnings
 from lmfit.models import LognormalModel
-from scipy.stats import norm, poisson
+from scipy.stats import norm
 from stingray import Lightcurve
 from mind_the_gaps.stats import kraft_pdf
 import numexpr as ne
