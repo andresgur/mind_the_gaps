@@ -16,6 +16,94 @@ from astropy.stats import poisson_conf_interval
 from mind_the_gaps.stats import create_log_normal, create_uniform_distribution
 
 
+class BaseNoise:
+    def __init__(self, name):
+        self.name = name
+
+    def add_noise(self, rates):
+        """Randomize the input rates and calculate uncertainties"""
+        raise NotImplementedError("This method should be implemented by subclasses")
+
+class PoissonNoise(BaseNoise):
+    def __init__(self, exposures, background_counts=None, bkg_rate_err=None):
+        super().__init__(name="Poisson")
+
+        self.exposures = exposures
+        if background_counts is None:
+            self.background_counts = np.zeros(len(exposures), dtype=int)
+        else:
+            self.background_counts = background_counts
+        if bkg_rate_err is None:
+            self.bkg_rate_err = np.zeros(len(exposures))
+        else:
+            self.bkg_rate_err = bkg_rate_err
+
+
+    def add_noise(self, rates):
+        """Add Poisson noise and estimate uncertainties
+        rates: array_like
+            Array of count rates
+        exposures: array_like or float
+            Exposure time at each bin (or a single value if same everywhere)
+
+        Return the array of new Poissonian modified rates and its uncertainties
+        """
+
+        total_counts = rates * self.exposures + self.background_counts
+
+        total_counts_poiss = np.random.poisson(total_counts)
+
+        net_counts = total_counts_poiss - self.background_counts #  frequentists
+
+        dy = np.sqrt((np.sqrt(total_counts_poiss) / self.exposures)**2 + self.bkg_rate_err**2)
+
+        return net_counts  / self.exposures, dy
+    
+class KraftNoise(PoissonNoise):
+    def __init__(self, exposures, background_counts=None, bkg_rate_err=None, kraft_counts=15):
+        super().__init__(exposures, background_counts, bkg_rate_err)
+        self.name = "Kraft"
+        self.kraft_counts = 15
+
+    def add_noise(self, rates):
+        net_rates, dy = super().add_noise(rates)
+        total_counts = net_rates * self.exposures + self.background_counts
+
+        #  frequentists bins
+        net_counts = total_counts - self.background_counts #  frequentists
+        upper_limits = net_rates / self.bkg_rate_err < 1 # frequentists upper limit
+
+        # bayesian bins
+        expression = total_counts < self.kraft_counts
+        if np.any(expression):
+            # calculate the medians
+            pdf = kraft_pdf(a=0, b=35)
+            net_counts[expression] = [pdf(counts, bkg_counts_).median() for counts, bkg_counts_ in zip(np.round(total_counts[expression]).astype(int), self.background_counts[expression])]
+            net_rates[expression] = net_counts[expression] / self.exposures[expression]
+
+            # uncertainties (round to nearest integer number of counts)
+            lower_confs, upper_confs = poisson_conf_interval(total_counts[expression].astype(int), "kraft-burrows-nousek",
+                                                background=self.background_counts[expression], confidence_level=0.68)
+            dy[expression] = (upper_confs - lower_confs) / 2 / self.exposures[expression] # bayesian
+
+            upper_limits[expression] = lower_confs==0 # bayesian upper limit
+
+        return net_rates, dy
+    
+class GaussianNoise(BaseNoise):
+    def __init__(self, exposures, sigma_noise):
+        super().__init__(name="Gaussian")
+
+        self.sigma_noise = sigma_noise
+
+    def add_noise(self, rates):
+        noisy_rates = rates + np.random.normal(scale=self.sigma_noise, size=len(rates))
+        #dy = np.sqrt(rates * self._exposures) / self._exposures
+        dy = self.sigma_noise * np.ones(len(rates))
+        return noisy_rates, dy
+
+
+
 class BaseSimulatorMethod:
     def __init__(self, psd_model, timestamps, exposures, sim_dt, sim_duration,
                  mean):
@@ -86,7 +174,7 @@ class Simulator:
     A class to simulate lightcurves from a given power spectral densities and flux probability density function
     """
     def __init__(self, psd_model, times, exposures, mean, pdf="gaussian", bkg_rate=None,
-                 bkg_rate_err=None, noise_std=None, aliasing_factor=2, max_iter=400, random_state=None):
+                 bkg_rate_err=None, sigma_noise=None, aliasing_factor=2, max_iter=400, random_state=None):
         """
         Parameters
         ----------
@@ -105,6 +193,8 @@ class Simulator:
             Associated background rate (or flux) with each datapoint
         bkg_rate_err:array-like
             uncertainty on background rate
+        sigma_noise: float,
+            Standard deviation for the (Gaussian) noise
         aliasing_factor: float,
             This defines the grid of the original, regularly-sampled lightcurve produced
             prior to resampling as min(exposure) / aliasing_factor
@@ -133,19 +223,28 @@ class Simulator:
 
         if np.any(exposures==0):
             raise ValueError("Some exposure times are 0!")
+        
 
         self._psd_model = psd_model
         self._times = times
         self._exposures = exposures
-        self._bkg_rate = bkg_rate if bkg_rate is not None else np.zeros(len(times))
-        self._bkg_rate_err = bkg_rate_err if bkg_rate_err is not None else np.zeros(len(times))
-        self._noise_std = noise_std
+        
+        # noise
+        if sigma_noise is None:
+            if bkg_rate is None or np.all(bkg_rate==0):
+                self.noise = PoissonNoise(exposures)
+            else:
+                self.noise = KraftNoise(exposures, bkg_rate * exposures, bkg_rate_err)
+        else:
+            self.noise = GaussianNoise(exposures, sigma_noise)
+        print("Simulator will use %s noise" % self.noise.name)
 
     def __str__(self):
 
         sim_info = (f"Simulator(\n"
             f"  PSD Model: {self._psd_model}\n"
-            f"  PDF: {self.pdf}\n)")
+            f"  PDF: {self.pdf}\n)"
+            f" Noise: {self.noise.name}")
         return sim_info
 
 
@@ -158,23 +257,25 @@ class Simulator:
         """
         self.simulator.set_psd_params(psd_params)
 
+
     def add_noise(self, rates):
         """Add noise to the input rates
 
-        errors: ar
+        rates: array_like
         """
-        if self._noise_std is None:
-            if np.all(self._bkg_rate==0):
-                noisy_rates, dy = add_poisson_noise(rates, self._exposures)
-            else:
-                noisy_rates, dy, upp_lims = add_kraft_noise(rates, self._exposures,
-                                                        self._bkg_rate * self._exposures,
-                                                        self._bkg_rate_err)
-        else:
+        noisy_rates, dy = self.noise.add_noise(rates)
+        #if self._noise_std is None:
+         #   if np.all(self._bkg_rate==0):
+          #      noisy_rates, dy = add_poisson_noise(rates, self._exposures)
+           # else:
+            #    noisy_rates, dy, upp_lims = add_kraft_noise(rates, self._exposures,
+             #                                           self._bkg_rate * self._exposures,
+              #                                          self._bkg_rate_err)
+        #else:
             # add 0 mean Gaussian White Noise
-            noisy_rates = rates + np.random.normal(scale=self._noise_std, size=len(rates))
+         #   noisy_rates = rates + np.random.normal(scale=self._noise_std, size=len(rates))
             #dy = np.sqrt(rates * self._exposures) / self._exposures
-            dy = self._noise_std * np.ones(len(rates))
+          #  dy = self._noise_std * np.ones(len(rates))
             #dy = errors[np.argsort(noisy_rates)]
 
         return noisy_rates, dy
@@ -267,53 +368,6 @@ def add_kraft_noise(rates, exposures, background_counts=None, bkg_rate_err=None,
     return net_rates, dy, upper_limits
 
 
-def add_kraft_noise_old_delete(rates, exposures, background_counts=None, bkg_rate_err=None, kraft_counts=15):
-    """Add Poisson/Kraft noise to a given count rates rates based on a real lightcurve and estimate the uncertainty
-
-    Parameters
-    ----------
-    rates: array
-        The count rates per second
-    bkg_counts: array
-        The number of background counts. None will assume 0s
-    exposures: array
-        In seconds
-    bkg_rate_err: array
-        Error on the background rate. None will assume 0s
-    kraft_counts: float
-        Threshold counts below which to use Kraft+91 posterior probability distribution
-    This method was tested for speed against a single for loop (instead of three list comprehension) and it was found to be faster using the lists (around 10% reduction in time from the for loop approach))
-    """
-    total_counts = rates * exposures + background_counts # here use the decimal values for the background np.round(
-
-    total_counts_poiss = np.random.poisson(total_counts)
-
-    # estimate uncertainties
-    dy = np.zeros(len(total_counts_poiss))
-    net_counts = np.zeros(len(total_counts_poiss))
-
-    expression = total_counts_poiss < kraft_counts
-
-    if bkg_rate_err is None:
-        bkg_rate_err = np.zeros(len(rates[~expression]))
-        dy[~expression] = np.sqrt((np.sqrt(total_counts_poiss[~expression]) / exposures[~expression])**2 + bkg_rate_err**2)
-    else:
-        dy[~expression] = np.sqrt((np.sqrt(total_counts_poiss[~expression]) / exposures[~expression])**2 + bkg_rate_err[~expression]**2)
-
-    if background_counts is None:
-        background_counts = np.zeros(len(rates))
-
-    net_counts[~expression] = total_counts_poiss[~expression] - background_counts[~expression]
-
-    pdf = kraft_pdf(a=0, b=35) # store pdf in memory
-    # Replace by kraft+91 pdf where necessary
-    dists = [pdf(counts, bkg_counts_) for counts, bkg_counts_ in zip(np.round(total_counts_poiss[expression]), np.ceil(background_counts[expression]))]
-    net_counts[expression] = [dist.median() for dist in dists]
-    dy[expression] = [(dist.ppf(0.84) - dist.ppf(0.16)) / 2 for dist in dists] # if subtract the two is equivalent to subtract the 50% value and doing the mean, this is faster than using "interval" / 2
-    dy[expression] /=  exposures[expression]
-    return net_counts / exposures, dy
-
-
 def draw_positive(pdf):
     """Dummy method to ensure all samples of count rates are positively defined
     pdf: scipy.stats.rv_continuous
@@ -326,10 +380,6 @@ def draw_positive(pdf):
     """
     value = pdf.rvs()
     return(value if value>0 else draw_positive(pdf))
-
-
-def PoissonModel(x, lamb, amplitude):
-    return amplitude * poisson.pmf(x, lamb)
 
 
 def fit_pdf(time_series, nbins=20):
@@ -392,32 +442,6 @@ def fit_pdf(time_series, nbins=20):
         return out_fit_2, ["pdf1", "pdf2"]
 
 
-def get_fft_slow(N, dt, model):
-    """Get DFT
-    Parameters
-    ----------
-    N: int
-        Number of datapoints
-    dt: float
-        Binning in time in seconds
-    model: astropy.model
-        The model for the PSD
-    """
-    freqs = np.fft.rfftfreq(N, dt) * 2 * np.pi
-    #generate real and complex parts from gaussian distributions
-    real, im = np.random.normal(0, size=(2, N // 2 + 1))
-    complex_fft = np.empty(len(freqs), dtype=np.cfloat)
-    complex_fft[1:] = (real + im * 1j)[1:] * np.sqrt(.5 * model(freqs[1:]))
-
-    # assign whatever real number to the 0, it does not matter as the lightcurve is normalized later
-    complex_fft[0] = 1
-    # In case of even number of data points f_nyquist is only real (see e.g. Emmanoulopoulos+2013 or Timmer & Koening+95)
-    if N % 2 == 0:
-        complex_fft[-1] = np.real(complex_fft[-1])
-    return complex_fft
-
-
-
 def get_fft(N, dt, model):
     """Get DFT
     Parameters
@@ -441,41 +465,6 @@ def get_fft(N, dt, model):
     if N % 2 == 0:
         complex_fft[-1] = np.real(complex_fft[-1])
     return complex_fft
-
-
-def simulate_lightcurve_numpy(timestamps, psd_model, dt, extension_factor=25):
-    """Simulate a lightcurve regularly sampled N times longer than original using the algorithm of Timmer & Koenig+95
-
-    Parameters
-    ----------
-    timestamps: array
-        Timestamps in same units as dt
-    psd_model: astropy.model
-        The model for the PSD
-    dt: float
-        Binning with which simulate the lightcurve, same units as timestamps
-    extension_factor: int
-        How many times longer than original
-    """
-    if extension_factor < 1:
-        raise ValueError("Extension factor needs to be higher than 1")
-
-    duration = timestamps[-1] - timestamps[0]
-    # generate timesctamps sampled at the median exposure longer than input lightcurve by extending the end
-    sim_timestamps = np.arange(timestamps[0] - 2 * dt,
-                               timestamps[0] + duration * extension_factor + dt,
-                               dt)
-
-    n_datapoints = len(sim_timestamps)
-
-    complex_fft = get_fft_slow(n_datapoints, dt, psd_model)
-
-    counts = np.fft.irfft(complex_fft, n=n_datapoints)
-    # the power gets diluted due to the sampling, bring it back by applying this factor
-    # the sqrt(2pi) factor enters because of celerite
-    counts *= sqrt(n_datapoints) * sqrt(dt) * sqrt(sqrt(2 * np.pi))
-
-    return Lightcurve(sim_timestamps, counts, input_counts=True, skip_checks=True, dt=dt)
 
 
 def simulate_lightcurve(timestamps, psd_model, dt, extension_factor=25):
@@ -771,301 +760,6 @@ def E13_sim_TK95(lc, timestamps, pdfs=[norm(0, 1)], weights=[1], exposures=None,
     downsampled_rates = downsample(lc, timestamps, exposures)
 
     return downsampled_rates
-
-
-def E13_sim_TK95_wrong(tk_rate, pdfs=[norm(0, 1)], weights=[1], max_iter=100):
-    """Simulate lightcurve using the method from Emmanolopoulos+2013
-    lc: Lightcurve
-        Regularly sampled TK95 generated lightcurve with the desired PSD (and taking into account, if desired, rednoise leakage and aliasing effects)
-    timestmaps: array
-        New desired timestmaps (in seconds)
-    pdfs: array_like
-        Probability density distribution to be matched
-    weights: array_like
-        Array containing the weights of each of the input distributions
-    half_bins: array
-        Exposures in seconds (so new desired dt, it can be array or scalar)
-     max_iter: int
-        Number of iterations for the lightcurve creation if convergence is not reached (Greater beta values requirer larger max_iter e.g. 100 for beta < 1, 200 beta = 1, 500 or more for beta >=2)
-    """
-    check_pdfs(weights, pdfs)
-
-    n_datapoints = len(tk_rate)
-    # step ii draw from distribution
-    draw = np.random.choice(np.arange(len(weights)), n_datapoints, p=weights)
-    xsim = np.array([pdfs[i].rvs() for i in draw])
-    dft_sim = np.fft.rfft(xsim)
-    phases_sim = np.angle(dft_sim)
-
-    complex_fft = np.fft.rfft(tk_rate)
-
-    amplitudes_norm = np.absolute(complex_fft) / (n_datapoints // 2 + 1) # see Equation A2 from Emmanolopoulos+13
-
-    # step iii
-    dft_adjust = amplitudes_norm * np.exp(1j * phases_sim)
-    xsim_adjust = pyfftw.interfaces.numpy_fft.irfft(dft_adjust, n=n_datapoints)
-    # step iv
-    xsim_adjust[np.argsort(-xsim_adjust)] = xsim[np.argsort(-xsim)]
-
-    iteration = 0
-    pyfftw.interfaces.cache.enable()
-    # start loop
-    while (not np.allclose(xsim, xsim_adjust, rtol=1e-02) and iteration < max_iter):
-        xsim = xsim_adjust
-        # step ii Fourier transform of xsim
-        dft_sim = pyfftw.interfaces.numpy_fft.rfft(xsim)
-        phases_sim = np.angle(dft_sim)
-        # replace amplitudes
-        dft_adjust = ne.evaluate("amplitudes_norm * exp(1j * phases_sim)")
-        # inverse fourier transform the spectrally adjusted time series
-        xsim_adjust = pyfftw.interfaces.numpy_fft.irfft(dft_adjust, n=n_datapoints)
-        # iv amplitude adjustment --> ranking sorted values
-        xsim_adjust[np.argsort(-xsim_adjust)] = xsim[np.argsort(-xsim)]
-
-        #diff = np.sum((xsim - xsim_adjust) ** 2)
-        #plt.scatter(iteration, diff, color="black")
-        iteration += 1
-    if iteration == max_iter:
-        print("Lightcurve did not converge after %d iterations, PDF might be inaccurate. Try increase the maximum number of iterations" % iteration)
-    return xsim
-
-
-def E13_sim_wrong(timestamps, psd_model, pdfs=[norm(0, 1)], weights=1, sim_dt=None, extension_factor=50,
-            bin_exposures=None, max_iter=500):
-    """Simulate lightcurve using the method from Emmanolopoulos+2013
-    timestamps: array_like or Quantity
-        Timestamps of the desired time series
-    psd_model: astropy.model
-        The model for the PSD
-    pdfs: array_like
-        Probability density distribution to be matched
-    weights: array_like
-        Array containing the weights of each of the input distributions
-    sim_dt: float or Quantity
-        Time sampling to use when simulating the data
-    extension_factor: float
-        Factor by which to extend the original lightcurve to introduce rednoise leakage.
-     max_iter: int
-        Number of iterations for the lightcurve creation if convergence is not reached (Greater beta values requirer larger max_iter e.g. 100 for beta < 1, 200 beta = 1, 500 or more for beta >=2)
-    """
-
-    if extension_factor < 1:
-        raise ValueError("Extension factor needs to be higher than 1")
-
-    weights = np.asarray(weights)
-    pdfs = np.asarray(pdfs)
-    if pdfs.size != weights.size:
-        raise ValueError("Number of weights must match number of pdfs")
-
-    if round(np.sum(weights),5) > 1:
-        raise ValueError("Weights for the probability density distributions must be = 1. (%.20f)" % np.sum(weights))
-
-
-    if sim_dt is None:
-        sim_dt = np.mean(np.diff(timestamps))
-
-    n_datapoints = len(timestamps)
-    # step ii draw from distribution (we do this first to get the mean and std)
-    draw = np.random.choice(np.arange(len(weights)), n_datapoints, p=weights)
-    xsim = np.array([pdfs[i].rvs() for i in draw])
-    dft_sim = np.fft.rfft(xsim)
-    phases_sim = np.angle(dft_sim)
-
-    # step i
-    mean, std = np.mean(xsim), np.std(xsim)
-    tk_rate = tk95_sim(timestamps, psd_model, mean, std, sim_dt, bin_exposures=bin_exposures,
-                       extension_factor=extension_factor) # aliasing and rednoise leakage effects are taken into account here
-
-    complex_fft = np.fft.rfft(tk_rate)
-
-    amplitudes_norm = np.absolute(complex_fft) / (n_datapoints // 2 + 1) # see Equation A2 from Emmanolopoulos+13
-
-    # step iii
-    dft_adjust = amplitudes_norm * np.exp(1j * phases_sim)
-    xsim_adjust = np.fft.irfft(dft_adjust, n=n_datapoints)
-    # step iv
-    xsim_adjust[np.argsort(-xsim_adjust)] = xsim[np.argsort(-xsim)]
-
-    iteration = 0
-    #plt.figure()
-    # start loop
-    while (not np.allclose(xsim, xsim_adjust, rtol=1e-02) and iteration < max_iter):
-        xsim = xsim_adjust
-        # step ii Fourier transform of xsim
-        dft_sim = pyfftw.interfaces.numpy_fft.rfft(xsim)
-        phases_sim = np.angle(dft_sim)
-        # replace amplitudes
-        dft_adjust = ne.evaluate("amplitudes_norm * exp(1j * phases_sim)")
-        # inverse fourier transform the spectrally adjusted time series
-        xsim_adjust = pyfftw.interfaces.numpy_fft.irfft(dft_adjust, n=n_datapoints)
-        # iv amplitude adjustment --> ranking sorted values
-        xsim_adjust[np.argsort(-xsim_adjust)] = xsim[np.argsort(-xsim)]
-
-        #diff = np.sum((xsim - xsim_adjust) ** 2)
-        #plt.scatter(iteration, diff, color="black")
-        iteration += 1
-    if iteration == max_iter:
-        print("Lightcurve did not converge after %d iterations, PDF might be inaccurate. Try increase the maximum number of iterations" % iteration)
-
-    return xsim
-
-
-def E13_sim_TK95_numpy(lc, timestamps, pdfs=[norm(0, 1)], weights=[1], half_bins=None, max_iter=100):
-    """Simulate lightcurve using the method from Emmanolopoulos+2013
-    lc: Lightcurve
-        Regularly sampled TK95 generated lightcurve with the desired PSD (and taking into account, if desired, rednoise leakage and aliasing effects)
-    timestmaps: array
-        New desired timestmaps (in seconds)
-    pdfs: array_like
-        Probability density distribution to be matched
-    weights: array_like
-        Array containing the weights of each of the input distributions
-    half_bins: array
-        Exposures in seconds (so new desired dt, it can be array or scalar)
-     max_iter: int
-        Number of iterations for the lightcurve creation if convergence is not reached (Greater beta values requirer larger max_iter e.g. 100 for beta < 1, 200 beta = 1, 500 or more for beta >=2)
-    """
-    check_pdfs(weights, pdfs)
-
-    if half_bins is None:
-        half_bins = lc.dt
-
-    n_datapoints = len(lc)
-    # step ii draw from distribution
-    draw = np.random.choice(np.arange(len(weights)), n_datapoints, p=weights)
-    xsim = np.array([pdfs[i].rvs() for i in draw])
-    dft_sim = np.fft.rfft(xsim)
-    phases_sim = np.angle(dft_sim)
-
-    complex_fft = np.fft.rfft(lc.countrate)
-
-    amplitudes_norm = np.absolute(complex_fft) / (n_datapoints // 2 + 1) # see Equation A2 from Emmanolopoulos+13
-
-    # step iii
-    dft_adjust = ne.evaluate("amplitudes_norm * exp(1j * phases_sim)")
-    xsim_adjust = np.fft.irfft(dft_adjust, n=n_datapoints)
-    # step iv
-    xsim_adjust[np.argsort(-xsim_adjust)] = xsim[np.argsort(-xsim)]
-
-    iteration = 0
-    #plt.figure()
-    # start loop
-    while (not np.allclose(xsim, xsim_adjust, rtol=1e-02) and iteration < max_iter):
-        xsim = xsim_adjust
-        # step ii Fourier transform of xsim
-        dft_sim = np.fft.rfft(xsim)
-
-        phases_sim = np.angle(dft_sim)
-        # replace amplitudes
-        dft_adjust = ne.evaluate("amplitudes_norm * exp(1j * phases_sim)")
-        # inverse fourier transform the spectrally adjusted time series
-        xsim_adjust = np.fft.irfft(dft_adjust, n=n_datapoints)
-        # iv amplitude adjustment --> ranking sorted values
-        xsim_adjust[np.argsort(-xsim_adjust)] = xsim[np.argsort(-xsim)]
-
-        #diff = np.sum((xsim - xsim_adjust) ** 2)
-        #plt.scatter(iteration, diff, color="black")
-        iteration += 1
-    if iteration == max_iter:
-        print("Lightcurve did not converge after %d iterations, PDF might be inaccurate. Try increase the maximum number of iterations" % iteration)
-    # UNTIL HERE IT WORKS METHOD TESTED!!
-    lc.countrate = xsim
-
-    downsampled_rates = downsample(lc, timestamps, 2 * half_bins)
-
-    return downsampled_rates
-
-
-def E13_sim_unused(timestamps, psd_model, pdfs=[norm(0, 1)], weights=1, sim_dt=None, extension_factor=50, bin_exposures=None, max_iter=500):
-    """Simulate lightcurve using the method from Emmanolopoulos+2013
-
-    timestamps: array_like or Quantity
-        Timestamps of the desired time series
-    psd_model: astropy.model
-        The model for the PSD
-    pdfs: array_like
-        Probability density distribution to be matched
-    weights: array_like
-        Array containing the weights of each of the input distributions
-    sim_dt: float or Quantity
-        Time sampling to use when simulating the data
-    extension_factor: float
-        Factor by which to extend the original lightcurve to introduce rednoise leakage.
-    max_iter: int
-        Number of iterations for the lightcurve creation if convergence is not reached (Greater beta values requirer larger max_iter e.g. 100 for beta < 1, 200 beta = 1, 500 or more for beta >=2)
-    """
-
-    if extension_factor < 1:
-        raise ValueError("Extension factor needs to be higher than 1")
-
-    weights = np.asarray(weights)
-    pdfs = np.asarray(pdfs)
-    if pdfs.size != weights.size:
-        raise ValueError("Number of weights must match number of pdfs")
-
-    if round(np.sum(weights),5) > 1:
-        raise ValueError("Weights for the probability density distributions must be = 1. (%.20f)" % np.sum(weights))
-
-
-    if sim_dt is None:
-        sim_dt = np.mean(np.diff(timestamps))
-
-    if bin_exposures is None:
-        bin_exposures = np.mean(np.diff(timestamps))
-
-    duration = timestamps[-1] - timestamps[0]
-
-    # generate timestamps sampled at the median exposure longer than input lightcurve by extending the end
-    sim_timestamps = np.arange(timestamps[0],
-                               timestamps[0] + duration * extension_factor + sim_dt,
-                               sim_dt)
-
-    n_datapoints = len(sim_timestamps)
-
-    complex_fft = get_fft(n_datapoints, sim_dt, psd_model)
-
-    amplitudes_norm = np.absolute(complex_fft) / (n_datapoints // 2 + 1) # see Equation A2 from Emmanolopoulos+13
-    # step ii draw from distribution
-    draw = np.random.choice(np.arange(len(weights)), n_datapoints, p=weights)
-    xsim = np.array([pdfs[i].rvs() for i in draw])
-
-    #mean, std = np.mean(xsim), np.std(xsim)
-    dft_sim = np.fft.rfft(xsim)
-    phases_sim = np.angle(dft_sim)
-    # step iii
-    dft_adjust = amplitudes_norm * np.exp(1j * phases_sim)
-    xsim_adjust = np.fft.irfft(dft_adjust, n_datapoints)
-    # step iv
-    xsim_adjust[np.argsort(-xsim_adjust)] = xsim[np.argsort(-xsim)]
-    xsim_2 = xsim_adjust
-    iteration = 0
-    #plt.figure()
-    # start loop
-    while (not np.allclose(xsim, xsim_2, rtol=1e-02) and iteration < max_iter):
-        xsim = xsim_2
-        # step ii Fourier transform of xsim
-        dft_sim = np.fft.rfft(xsim)
-        phases_sim = np.angle(dft_sim)
-        # replace amplitudes
-        dft_adjust = amplitudes_norm * np.exp(1j * phases_sim)
-        # inverse fourier transform the spectrally adjusted time series
-        xsim_adjust = np.fft.irfft(dft_adjust, n_datapoints)
-        # iv amplitude adjustment --> ranking sorted values
-        xsim_adjust[np.argsort(-xsim_adjust)] = xsim[np.argsort(-xsim)]
-        xsim_2 = xsim_adjust
-        #diff = np.sum((xsim - xsim_2) ** 2)
-        #plt.scatter(iteration, diff, color="black")
-        iteration += 1
-    if iteration == max_iter:
-        print("Lightcurve did not converge after %d iterations, PDF might be inaccurate. Try increase the maximum number of iterations" % iteration)
-    # use ``input_counts=False`` to input the count range, i.e. counts/second, otherwise use counts/bin
-    # in this case we have counts/bin
-    lc = Lightcurve(sim_timestamps, xsim, skip_checks=True, dt=sim_dt, input_counts=True)
-    return lc
-
-
-def gauss_white_noise_sim(mean, std, N):
-    samples = np.random.normal(mean, std, N)
 
 
 def _normalize(time_series, mean, std):
