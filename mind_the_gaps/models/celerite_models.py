@@ -28,6 +28,9 @@ class Lorentzian(Term):
             #np.ones(2) * 0.5 * w0/Q, #c
             #[w0, -w0], #d
         )
+    
+    def __repr__(self):
+        return "Lorentzian({0.log_S0}, {0.log_Q}, {0.log_omega0})".format(self)
 
 class Cosinus(Term):
     parameter_names = ("log_S0", "log_omega0")
@@ -60,6 +63,8 @@ class DampedRandomWalk(Term):
             S0,  # S0 * np.ones(2),
             0.5 * w0/Q # 0.5*w0/Q * np.ones(2)
         )
+    def __repr__(self):
+        return "DampedRandomWalk({0.log_S0}, {0.log_omega0})".format(self)
 
 
 class BendingPowerlaw(Term):
