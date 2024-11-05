@@ -4,7 +4,7 @@
 # @Last modified by:   agurpide
 # @Last modified time: 28-03-2022
 import unittest
-from mind_the_gaps.models.psd_models import BendingPowerlaw, SHO, Matern32, Lorentzian
+from mind_the_gaps.models.psd_models import BendingPowerlaw, SHO, Matern32, Lorentzian, Matern, Matern52
 from mind_the_gaps.models.celerite_models import DampedRandomWalk as DRW_celerite
 from mind_the_gaps.models.celerite_models import Lorentzian as celerite_Lorentzian
 from celerite.terms import SHOTerm, Matern32Term
@@ -34,7 +34,7 @@ class TestSimulator(unittest.TestCase):
             astropy_SHO = SHO(S0=S_0, omega0=w_0, Q=Q)
             np.testing.assert_array_almost_equal(astropy_SHO(frequencies), cel_SHO.get_psd(frequencies))
 
-    def test_matern(self):
+    def test_materns(self):
         sigma = 10
         rhos = [1, 10, 20]
         frequencies = np.arange(1, 1000)
@@ -42,6 +42,20 @@ class TestSimulator(unittest.TestCase):
             cel_mattern = Matern32Term(log_sigma=np.log(sigma), log_rho=np.log(rho), eps=1e-15)
             astropy_mattern = Matern32(sigma=sigma, rho=rho)
             np.testing.assert_array_almost_equal(astropy_mattern(frequencies), cel_mattern.get_psd(frequencies))
+
+
+            matern52 = Matern52(sigma=sigma, rho=rho)
+            matern522 = Matern(frequencies, sigma=sigma, rho=rho, n=1, nu=5/2)
+            np.testing.assert_array_almost_equal(matern52(frequencies), matern522)
+
+
+            matern32 = Matern32(sigma=sigma, rho=rho)
+            matern322 = Matern(frequencies, sigma=sigma, rho=rho, n=1, nu=3/2)
+            np.testing.assert_array_almost_equal(matern32(frequencies), matern322)
+
+   
+        
+
 
     def test_Lorentzian(self):
         Qs = [10, 1, 1 / np.sqrt(2), 0.1]
