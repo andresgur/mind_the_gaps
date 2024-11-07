@@ -273,12 +273,18 @@ class GPModelling:
         return initial_samples
     
 
-    def standarized_residuals(self,):
-        """Returns the standarized residuals (see e.g. Kelly et al. 2011) Eq. 49
-        
+    def standarized_residuals(self, include_noise=True):
+        """Returns the standarized residuals (see e.g. Kelly et al. 2011) Eq. 49.
         You should set the gp parameters to your best or mean (median) parameter values prior to calling this method
+
+        Parameters
+        ----------
+        include_noise: bool,
+            True to include any jitter term into the standard deviation calculation. False ignores this contribution.
         """
         pred_mean, pred_var = self.gp.predict(self._lightcurve.y, return_var=True, return_cov=False)
+        if include_noise:
+            pred_var+= self.gp.kernel.jitter
         std_res = (self._lightcurve.y - pred_mean) / np.sqrt(pred_var)
         return std_res
 
@@ -377,7 +383,7 @@ class GPModelling:
         return self._tau
 
 
-    def generate_from_posteriors(self, nsims=10, cpus=8, pdf="Gaussian", extension_factor=2):
+    def generate_from_posteriors(self, nsims=10, cpus=8, pdf="Gaussian", extension_factor=2, sigma_noise=None):
         """Generates lightcurves by sampling from the MCMC posteriors
 
         nsims: int,
@@ -399,14 +405,14 @@ class GPModelling:
         param_samples = self._mcmc_samples[np.random.randint(len(self._mcmc_samples), size=nsims)]
         warnings.simplefilter('ignore')
         with Pool(processes=cpus, initializer=np.random.seed) as pool:
-            lightcurves = pool.map(partial(self._generate_lc_from_params, pdf=pdf, extension_factor=extension_factor), param_samples)
+            lightcurves = pool.map(partial(self._generate_lc_from_params, pdf=pdf, extension_factor=extension_factor, sigma_noise=sigma_noise), param_samples)
         return lightcurves
     
-    def _generate_lc_from_params(self, parameters, pdf, extension_factor):
+    def _generate_lc_from_params(self, parameters, pdf, extension_factor, sigma_noise):
         self.gp.set_parameter_vector(parameters)
         psd_model = self.gp.kernel.get_psd
-        simulator = self._lightcurve.get_simulator(psd_model, pdf)
-        rates = simulator.generate_lightcurve(2)
+        simulator = self._lightcurve.get_simulator(psd_model, pdf, sigma_noise=sigma_noise)
+        rates = simulator.generate_lightcurve(extension_factor)
         noisy_rates, dy = simulator.add_noise(rates)
         lc = GappyLightcurve(self._lightcurve.times, noisy_rates, dy)
         return lc
