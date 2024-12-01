@@ -32,3 +32,19 @@ Tests are included in the `tests/` directory and can be run as:
 python setup.py test
 ```
 **Warning:** Tests currently are not passing. Please check the [issues](https://github.com/andresgur/mind_the_gaps/issues/13) on the respository to see the current status.
+
+# Citation
+```
+@software{andres_gurpide_lasheras_2024_14253754,
+  author       = {Andrés Gúrpide Lasheras and
+                  Sam Mangham},
+  title        = {{andresgur/mind\_the\_gaps: Initial Release for 
+                   Zenodo}},
+  month        = dec,
+  year         = 2024,
+  publisher    = {Zenodo},
+  version      = {v1.0.0-beta},
+  doi          = {10.5281/zenodo.14253754},
+  url          = {https://doi.org/10.5281/zenodo.14253754}
+}
+```
