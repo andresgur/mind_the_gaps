@@ -9,7 +9,7 @@ authors:
   given-names: "Sam"
   affiliation: "University of Southampton"
   orcid: 0000-0001-7511-5652
-title:mind_the_gaps
+title: "mind_the_gaps"
 version: v1.0.0-beta
 date-released: 2024-12-01
 url: "https://doi.org/10.5281/zenodo.14253753"
