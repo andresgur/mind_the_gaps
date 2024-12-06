@@ -137,7 +137,7 @@ def fit_lomb_scargle(frequencies, powers, sigma=1):
     return psd_slope, psd_slope_err, psd_norm, psd_norm_err
 
 
-def fit_psd_powerlaw(frequencies, powers, sigma=1):
+def fit_psd_powerlaw(frequencies, powers):
     """Fit the PSD using the method from Vaughan+2005.
     The 0 frequency and power and the Nyquist frequency and power (only for even datasets) should be removed prior to calling this method. uncertanties are estimated using the analytical formulae
     given in the quoted paper.
@@ -148,8 +148,6 @@ def fit_psd_powerlaw(frequencies, powers, sigma=1):
         Frequencies of the power spectrum, without the 0-frequency term (and the Nyquist term for even datasets).
     powers: array-like or Quantity
         Powers of the PSD with the same length as frequencies
-    sigma: float
-        Sigma confidence level for the uncertainty estimation. Set to 0 to skip uncertainty estimation
     Returns
     -------
     psd_slope:float
