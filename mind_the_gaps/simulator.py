@@ -153,16 +153,17 @@ class E13Simulator(BaseSimulatorMethod):
         super().__init__(psd_model, timestamps, exposures, sim_dt, sim_duration, mean)
         self.pdf = pdf
         self.max_iter = max_iter
+        if self.pdf == "lognormal":
+            self.pdfmethod = create_log_normal
+        elif self.pdf== "uniform":
+            self.pdfmethod = create_uniform_distribution
+        elif self.pdf=="gaussian":
+            self.pdfmethod = norm
 
 
     def simulate(self, segment):
-        sample_variance = np.var(segment.countrate)
-        if self.pdf == "lognormal":
-            pdf = create_log_normal(self.meanrate, sample_variance)
-        elif self.pdf== "uniform":
-            pdf = create_uniform_distribution(self.meanrate, sample_variance)
-        elif self.pdf=="gaussian":
-            pdf = norm(loc=self.meanrate, scale=sqrt(sample_variance))
+        sample_std = np.std(segment.countrate)
+        pdf = self.pdfmethod(self.meanrate, sample_std)
         # Implementation of E13 simulation with additional parameters pdf and max_iter
         lc_rates = E13_sim_TK95(segment, self.timestamps, [pdf], [1],
                                 exposures=self.exposures, max_iter=self.max_iter)
@@ -213,11 +214,11 @@ class Simulator:
         if pdf.lower() not in ["gaussian", "lognormal", "uniform"]:
             raise ValueError("%s not implemented! Currently implemented: Gaussian, Uniform or Lognormal")
         elif pdf.lower()=="gaussian":
-            print("Simulator will use TK95 algorithm with %s pdf" %pdf)
+            #print("Simulator will use TK95 algorithm with %s pdf" %pdf)
             self.simulator = TK95Simulator(psd_model, times, exposures, sim_dt, sim_duration,
                                            mean)
         else:
-            print("Simulator will use E13 algorithm with %s pdf" % pdf)
+            #print("Simulator will use E13 algorithm with %s pdf" % pdf)
             self.simulator = E13Simulator(psd_model, times, exposures, sim_dt, sim_duration,
                                           mean, pdf.lower(), max_iter=max_iter)
 
@@ -237,7 +238,7 @@ class Simulator:
                 self.noise = KraftNoise(exposures, bkg_rate * exposures, bkg_rate_err)
         else:
             self.noise = GaussianNoise(exposures, sigma_noise)
-        print("Simulator will use %s noise" % self.noise.name)
+        #print("Simulator will use %s noise" % self.noise.name)
 
     def __str__(self):
 
@@ -290,6 +291,31 @@ class Simulator:
         rates = self.simulator.simulate(segment)
 
         return rates
+
+    def imprint_sampling_pattern(lightcurve, timestamps, bin_exposures):
+        """Modify the input lightcurve to have the input sampling pattern (timestamps and exposures) provided
+        Parameters
+        ---------
+        lightcurve: stingray.lightcurve
+            Lightcurve to which imprint the given sampling pattern
+        timestamps: array
+            New timestamps of the new sampling
+        bin_exposures: array or scalar
+            Exposures of the timestamps. Either as a float or array (or 1 item array)
+        """
+        half_bins = bin_exposures / 2
+
+        if np.isscalar(half_bins):
+            gti = [(time - half_bins, time + half_bins) for time in timestamps]
+        elif len(half_bins) == len(timestamps):
+            gti = [(time - half_bin, time + half_bin) for time, half_bin in zip(timestamps, half_bins)]
+        else:
+            raise ValueError("Half bins length (%d) must have same length as timestamps (%d) or be a scalar." % (len(half_bins), len(timestamps)))
+
+        # get rid of all bins in between timestamps using Stingray
+        lc_split = lightcurve.split_by_gti(gti, min_points=0)
+        # get average count rates for the entire subsegment corresponding to each timestamps
+        return np.fromiter((lc.meanrate for lc in lc_split), dtype=float)
 
 
 def add_poisson_noise(rates, exposures, background_counts=None, bkg_rate_err=None):
