@@ -112,30 +112,32 @@ def chi_square_N(powers_data, model_power=None, std_power=None):
     return chi_square(N, powers_data, model_power, std_power)
 
 
-def create_log_normal(mean, var):
+def create_log_normal(mean, std):
     """Create a log normal with the desired mean and variance
     Parameters
     ----------
     mean: float,
         Mean
-    var: float,
-        Variance
+    std: float,
+        Standard deviation
     """
+    var = std**2
     mu = np.log((mean**2)/np.sqrt(var+mean**2))
     sigma = np.sqrt(np.log(var/(mean**2)+1))
     pdf = lognorm(sigma, scale=np.exp(mu))
     return pdf
 
 
-def create_uniform_distribution(mean, var):
+def create_uniform_distribution(mean, std):
     """Create a uniform with the desired mean and variance
     Parameters
     ----------
     mean: float,
         Mean
-    var: float,
-        Variance
+    std: float,
+        Standard deviation
     """
+    var = std**2
     b = np.sqrt(3 * var) + mean
     a = 2 * mean - b
     #In the standard form, the distribution is uniform on [0, 1]. Using the parameters loc and scale, one obtains the uniform distribution on [loc, loc + scale].
