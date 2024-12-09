@@ -52,11 +52,34 @@ class PoissonNoise(BaseNoise):
     
 class KraftNoise(PoissonNoise):
     def __init__(self, exposures, background_counts=None, bkg_rate_err=None, kraft_counts=15):
+        """Add Poisson/Kraft noise to a given count rates rates based on a real lightcurve and estimate the uncertainty
+
+        Parameters
+        ----------
+
+        bkg_counts: float or np.ndarray
+            The number of background counts. None will assume 0s
+        exposures: array
+            In seconds
+        bkg_rate_err: array
+            Error on the background rate. None will assume 0s
+        kraft_counts: float
+            Threshold counts below which to use Kraft+91 posterior probability distribution
+        """
         super().__init__(exposures, background_counts, bkg_rate_err)
         self.name = "Kraft"
-        self.kraft_counts = 15
+        self.kraft_counts = kraft_counts
 
     def add_noise(self, rates):
+        """Add Poisson/Kraft noise to a given count rates rates based on a real lightcurve and estimate the uncertainty
+
+        Parameters
+        ----------
+        rates: array
+            The count rates per second
+
+        This method was tested for speed against a single for loop (instead of three list comprehension) and it was found to be faster using the lists (around 10% reduction in time from the for loop approach))
+        """
         net_rates, dy = super().add_noise(rates)
         total_counts = net_rates * self.exposures + self.background_counts
 
