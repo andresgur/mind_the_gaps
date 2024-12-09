@@ -15,8 +15,6 @@ from mind_the_gaps.stats import create_log_normal, create_uniform_distribution
 from mind_the_gaps.noise_models import PoissonNoise, GaussianNoise, KraftNoise
 
 
-
-
 class BaseSimulatorMethod:
     def __init__(self, psd_model, timestamps, exposures,
                  mean):
@@ -140,6 +138,20 @@ class Simulator:
 
         if extension_factor < 1:
             raise ValueError("Extension factor must be greater than 1")
+
+        if pdf.lower() not in ["gaussian", "lognormal", "uniform"]:
+            raise ValueError("%s not implemented! Currently implemented: Gaussian, Uniform or Lognormal")
+        elif pdf.lower()=="gaussian":
+            #print("Simulator will use TK95 algorithm with %s pdf" %pdf)
+            self.simulator = TK95Simulator(psd_model, times, exposures,
+                                           mean)
+        else:
+            #print("Simulator will use E13 algorithm with %s pdf" % pdf)
+            self.simulator = E13Simulator(psd_model, times, exposures,
+                                          mean, pdf.lower(), max_iter=max_iter)
+
+        if np.any(exposures==0):
+            raise ValueError("Some exposure times are 0!")
         
         self.random_state = np.random.RandomState(random_state)
         self._exposures = np.array(exposures) if np.isscalar(exposures) else exposures
@@ -160,25 +172,8 @@ class Simulator:
         self.fftndatapoints = len(self.sim_timestamps)
         self.pdf = pdf
 
-        
-
-        if pdf.lower() not in ["gaussian", "lognormal", "uniform"]:
-            raise ValueError("%s not implemented! Currently implemented: Gaussian, Uniform or Lognormal")
-        elif pdf.lower()=="gaussian":
-            #print("Simulator will use TK95 algorithm with %s pdf" %pdf)
-            self.simulator = TK95Simulator(psd_model, times, exposures,
-                                           mean)
-        else:
-            #print("Simulator will use E13 algorithm with %s pdf" % pdf)
-            self.simulator = E13Simulator(psd_model, times, exposures,
-                                          mean, pdf.lower(), max_iter=max_iter)
-
-        if np.any(exposures==0):
-            raise ValueError("Some exposure times are 0!")
-
         self._psd_model = psd_model
         self._times = times
-        
         
         # noise
         if sigma_noise is None:
@@ -197,6 +192,20 @@ class Simulator:
             f"  PDF: {self.pdf}\n)"
             f" Noise: {self.noise.name}")
         return sim_info
+    
+    @property
+    def psd_model(self):
+        """Getter for the PSD model."""
+        return self._psd_model
+
+    @psd_model.setter
+    def psd_model(self, new_psd_model):
+        """Setter for the PSD model."""
+        if not callable(new_psd_model):
+            raise ValueError("PSD model must be callable (e.g., a function or Astropy model).")
+        self._psd_model = new_psd_model
+        # Update the simulator with the new PSD model
+        self.simulator.psd_model = new_psd_model
 
 
     def set_psd_params(self, psd_params):
@@ -276,56 +285,6 @@ def add_poisson_noise(rates, exposures, background_counts=None, bkg_rate_err=Non
     dy = np.sqrt((np.sqrt(total_counts_poiss) / exposures)**2 + bkg_rate_err**2)
 
     return net_counts  / exposures, dy
-
-
-def add_kraft_noise(rates, exposures, background_counts=None, bkg_rate_err=None, kraft_counts=15):
-    """Add Poisson/Kraft noise to a given count rates rates based on a real lightcurve and estimate the uncertainty
-
-    Parameters
-    ----------
-    rates: array
-        The count rates per second
-    bkg_counts: float or np.ndarray
-        The number of background counts. None will assume 0s
-    exposures: array
-        In seconds
-    bkg_rate_err: array
-        Error on the background rate. None will assume 0s
-    kraft_counts: float
-        Threshold counts below which to use Kraft+91 posterior probability distribution
-
-    This method was tested for speed against a single for loop (instead of three list comprehension) and it was found to be faster using the lists (around 10% reduction in time from the for loop approach))
-    """
-    if bkg_rate_err is None:
-        bkg_rate_err = np.zeros(len(rates))
-
-    if background_counts is None:
-        background_counts = np.zeros(len(rates), dtype=int)
-
-
-    net_rates, dy = add_poisson_noise(rates, exposures, background_counts, bkg_rate_err)
-    total_counts = net_rates * exposures + background_counts
-
-    #  frequentists bins
-    net_counts = total_counts - background_counts #  frequentists
-    upper_limits = net_rates / bkg_rate_err < 1 # frequentists upper limit
-
-    # bayesian bins
-    expression = total_counts < kraft_counts
-    if np.any(expression):
-        # calculate the medians
-        pdf = kraft_pdf(a=0, b=35)
-        net_counts[expression] = [pdf(counts, bkg_counts_).median() for counts, bkg_counts_ in zip(np.round(total_counts[expression]).astype(int), background_counts[expression])]
-        net_rates[expression] = net_counts[expression] / exposures[expression]
-
-        # uncertainties (round to nearest integer number of counts)
-        lower_confs, upper_confs = poisson_conf_interval(total_counts[expression].astype(int), "kraft-burrows-nousek",
-                                            background=background_counts[expression], confidence_level=0.68)
-        dy[expression] = (upper_confs - lower_confs) / 2 / exposures[expression] # bayesian
-
-        upper_limits[expression] = lower_confs==0 # bayesian upper limit
-
-    return net_rates, dy, upper_limits
 
 
 def draw_positive(pdf):
