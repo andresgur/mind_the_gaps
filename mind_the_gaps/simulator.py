@@ -105,39 +105,58 @@ class GaussianNoise(BaseNoise):
 
 
 class BaseSimulatorMethod:
-    def __init__(self, psd_model, timestamps, exposures, sim_dt, sim_duration,
+    def __init__(self, psd_model, timestamps, exposures,
                  mean):
         self.psd_model = psd_model
         self.timestamps = timestamps
         self.exposures = exposures
         self.meanrate = mean
-        self.sim_dt = sim_dt
-        self.sim_duration = sim_duration
+        half_bins = self.exposures / 2
+        self.gti = [(time - half_bin, time + half_bin) for time, half_bin in zip(self.timestamps, half_bins)]
+        
 
     def set_psd_params(self, psd_params):
         for par in psd_params.keys():
             setattr(self.psd_model, par, psd_params[par])
 
-    def prepare_segment(self, extension_factor=10):
-        """This generates a TK95 long segment to be post processed later by one of the simulator methods
-        Parameters
-        ----------
-        extension_factor: float,
-            Factor x lightcurve_length by which generate the lightcurve in order
-            to introduce red noise leakage
-        """
-        lc = simulate_lightcurve(self.timestamps, self.psd_model, self.sim_dt,
-                                    extension_factor=extension_factor)
-        segment = cut_random_segment(lc, self.sim_duration)
-        return segment
 
     def simulate(self, segment):
         raise NotImplementedError("This method should be implemented by subclasses")
 
+     
+    def downsample(self, lc, timestamps, bin_exposures):
+        """Downsample the lightcurve into the new binning (regular or not)
+        Parameters
+        ----------
+        lc: Lightcurve
+            With the old binning
+        timestmaps: array
+            The new timestamps for the lightcurve
+        bin_exposures: array
+            Exposure times of each new bin in same units as timestamps
+        Returns the downsampled count rates
+        """
+        # return the lightcurve as it is
+        if len(lc.time) == len(timestamps):
+            return lc.countrate
+
+        if np.isscalar(bin_exposures):
+            start_time = timestamps[0] - bin_exposures
+        else:
+            start_time = timestamps[0] - bin_exposures[0]
+        # shif the starting time to match the input timestamps
+        shifted_lc = lc.shift(-lc.time[0] + start_time)
+        # split by gti derived from the original timestamps
+        lc_split = shifted_lc.split_by_gti(self.gti, min_points=0)
+
+        downsampled_rates = np.fromiter((lc.meanrate for lc in lc_split), dtype=float)
+
+        return downsampled_rates   
+
 
 class TK95Simulator(BaseSimulatorMethod):
-    def __init__(self, psd_model, timestamps, exposures, sim_dt, sim_duration, mean, random_state=None):
-        super().__init__(psd_model, timestamps, exposures, sim_dt, sim_duration, mean)
+    def __init__(self, psd_model, timestamps, exposures, mean, random_state=None):
+        super().__init__(psd_model, timestamps, exposures, mean)
 
     def simulate(self, segment):
         # Implementation of TK95 simulation
@@ -148,9 +167,9 @@ class TK95Simulator(BaseSimulatorMethod):
 
 class E13Simulator(BaseSimulatorMethod):
 
-    def __init__(self, psd_model, timestamps, exposures, sim_dt, sim_duration, mean, pdf,
+    def __init__(self, psd_model, timestamps, exposures, mean, pdf,
                  max_iter=1000, random_state=None):
-        super().__init__(psd_model, timestamps, exposures, sim_dt, sim_duration, mean)
+        super().__init__(psd_model, timestamps, exposures, mean)
         self.pdf = pdf
         self.max_iter = max_iter
         if self.pdf == "lognormal":
@@ -175,7 +194,7 @@ class Simulator:
     A class to simulate lightcurves from a given power spectral densities and flux probability density function
     """
     def __init__(self, psd_model, times, exposures, mean, pdf="gaussian", bkg_rate=None,
-                 bkg_rate_err=None, sigma_noise=None, aliasing_factor=2, max_iter=400, random_state=None):
+                 bkg_rate_err=None, sigma_noise=None, aliasing_factor=2, extension_factor=10, max_iter=400, random_state=None):
         """
         Parameters
         ----------
@@ -186,7 +205,7 @@ class Simulator:
               Currently implemented: Gaussian, Lognormal and Uniform distributions.
         times:array_like,
             Timestamps of the lightcurve (i.e. times at the "center" of the sampling). Always in seconds
-        exposures:
+        exposures:array_like or float
             Exposure time of each datapoint in seconds
         mean: float,
             Desired mean for the lightcurve
@@ -199,36 +218,54 @@ class Simulator:
         aliasing_factor: float,
             This defines the grid of the original, regularly-sampled lightcurve produced
             prior to resampling as min(exposure) / aliasing_factor
+        extension_factor: float,
+            Factor by which extend the initially generated lightcurve, to introduce rednoise leakage. 10 times by default
         max_inter: int,
             Maximum number of iterations for the E13 method. Not use if method is TK95 (Gaussian PDF)
         random_state: int,
         """
 
+        if extension_factor < 1:
+            raise ValueError("Extension factor must be greater than 1")
+        
         self.random_state = np.random.RandomState(random_state)
-        start_time = times[0] - exposures[0]
-        end_time = times[-1] + 1.5 * exposures[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
-        sim_dt = np.min(exposures) / aliasing_factor
-        sim_duration = end_time - start_time
+        self._exposures = np.array(exposures) if np.isscalar(exposures) else exposures
+        self.sim_dt = np.min(self._exposures) / aliasing_factor
+                
+        start_time = times[0] - self._exposures[0]
+        end_time = times[-1] + 1.5 * self._exposures[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
+        self.sim_duration = end_time - start_time
+
+        # duration of the regularly and finely sampled lightcurve
+        duration = (times[-1] - times[0]) * extension_factor
+
+        # generate timesctamps for the regular, finely sampled grid and longer than input lightcurve by extending the end
+        self.sim_timestamps = np.arange(times[0] - 2 * self.sim_dt,
+                                times[0] + duration + self.sim_dt,
+                                self.sim_dt)
+        # variable for the fft
+        self.fftndatapoints = len(self.sim_timestamps)
         self.pdf = pdf
+
+        
 
         if pdf.lower() not in ["gaussian", "lognormal", "uniform"]:
             raise ValueError("%s not implemented! Currently implemented: Gaussian, Uniform or Lognormal")
         elif pdf.lower()=="gaussian":
             #print("Simulator will use TK95 algorithm with %s pdf" %pdf)
-            self.simulator = TK95Simulator(psd_model, times, exposures, sim_dt, sim_duration,
+            self.simulator = TK95Simulator(psd_model, times, exposures,
                                            mean)
         else:
             #print("Simulator will use E13 algorithm with %s pdf" % pdf)
-            self.simulator = E13Simulator(psd_model, times, exposures, sim_dt, sim_duration,
+            self.simulator = E13Simulator(psd_model, times, exposures,
                                           mean, pdf.lower(), max_iter=max_iter)
 
         if np.any(exposures==0):
             raise ValueError("Some exposure times are 0!")
-        
 
         self._psd_model = psd_model
         self._times = times
-        self._exposures = exposures
+        
         
         # noise
         if sigma_noise is None:
@@ -281,41 +318,25 @@ class Simulator:
 
         return noisy_rates, dy
 
-    def generate_lightcurve(self, extension_factor=10):
+    def generate_lightcurve(self):
         """Generates lightcurve with the last input PSD parameteres given. Note every call to this method will
         generate a different realization, even if the input parameters remain unchanged.
-        extension_factor: float
-            Factor by which extend the initially generated lightcurve, to introduce rednoise leakage
+        All parameters are specified during the Simulator creation    
         """
-        segment = self.simulator.prepare_segment(extension_factor)
+        # get a new realization of the PSD
+        complex_fft = get_fft(self.fftndatapoints, self.sim_dt, self._psd_model)
+        # invert it
+        counts = pyfftw.interfaces.numpy_fft.irfft(complex_fft, n=self.fftndatapoints) # it does seem faster than numpy although only slightly
+        # the power gets diluted due to the sampling, bring it back by applying this factor
+        # the sqrt(2pi) factor enters because of celerite
+        counts *= sqrt(self.fftndatapoints * self.sim_dt * sqrt(2 * np.pi))
+
+        lc = Lightcurve(self.sim_timestamps, counts, input_counts=True, skip_checks=True, dt=self.sim_dt, err_dist="gauss") # gauss is needed as some counts will be negative
+        # cut a slightly longer segment than the original ligthcurve
+        segment = cut_random_segment(lc, self.sim_duration)
+        # finally call the appropiate simulator
         rates = self.simulator.simulate(segment)
-
         return rates
-
-    def imprint_sampling_pattern(lightcurve, timestamps, bin_exposures):
-        """Modify the input lightcurve to have the input sampling pattern (timestamps and exposures) provided
-        Parameters
-        ---------
-        lightcurve: stingray.lightcurve
-            Lightcurve to which imprint the given sampling pattern
-        timestamps: array
-            New timestamps of the new sampling
-        bin_exposures: array or scalar
-            Exposures of the timestamps. Either as a float or array (or 1 item array)
-        """
-        half_bins = bin_exposures / 2
-
-        if np.isscalar(half_bins):
-            gti = [(time - half_bins, time + half_bins) for time in timestamps]
-        elif len(half_bins) == len(timestamps):
-            gti = [(time - half_bin, time + half_bin) for time, half_bin in zip(timestamps, half_bins)]
-        else:
-            raise ValueError("Half bins length (%d) must have same length as timestamps (%d) or be a scalar." % (len(half_bins), len(timestamps)))
-
-        # get rid of all bins in between timestamps using Stingray
-        lc_split = lightcurve.split_by_gti(gti, min_points=0)
-        # get average count rates for the entire subsegment corresponding to each timestamps
-        return np.fromiter((lc.meanrate for lc in lc_split), dtype=float)
 
 
 def add_poisson_noise(rates, exposures, background_counts=None, bkg_rate_err=None):

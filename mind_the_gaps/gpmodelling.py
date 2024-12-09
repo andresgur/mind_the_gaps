@@ -411,8 +411,8 @@ class GPModelling:
     def _generate_lc_from_params(self, parameters, pdf, extension_factor, sigma_noise):
         self.gp.set_parameter_vector(parameters)
         psd_model = self.gp.kernel.get_psd
-        simulator = self._lightcurve.get_simulator(psd_model, pdf, sigma_noise=sigma_noise)
-        rates = simulator.generate_lightcurve(extension_factor)
+        simulator = self._lightcurve.get_simulator(psd_model, pdf, sigma_noise=sigma_noise, extension_factor=extension_factor)
+        rates = simulator.generate_lightcurve()
         noisy_rates, dy = simulator.add_noise(rates)
         lc = GappyLightcurve(self._lightcurve.times, noisy_rates, dy)
         return lc
