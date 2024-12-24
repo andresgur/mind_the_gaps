@@ -403,16 +403,18 @@ class GPModelling:
 
         # get some parameter combinations at random
         param_samples = self._mcmc_samples[np.random.randint(len(self._mcmc_samples), size=nsims)]
+        # generate the simulator object, with a dummy kernel params for now
+        simulator = self._lightcurve.get_simulator(self.gp.kernel.get_psd, pdf, sigma_noise=sigma_noise, extension_factor=extension_factor)
         warnings.simplefilter('ignore')
         with Pool(processes=cpus, initializer=np.random.seed) as pool:
-            lightcurves = pool.map(partial(self._generate_lc_from_params, pdf=pdf, extension_factor=extension_factor, sigma_noise=sigma_noise), param_samples)
+            lightcurves = pool.map(partial(self._generate_lc_from_params, simulator=simulator), param_samples)
         return lightcurves
     
-    def _generate_lc_from_params(self, parameters, pdf, extension_factor, sigma_noise):
+    def _generate_lc_from_params(self, parameters, simulator):
         self.gp.set_parameter_vector(parameters)
-        psd_model = self.gp.kernel.get_psd
-        simulator = self._lightcurve.get_simulator(psd_model, pdf, sigma_noise=sigma_noise)
-        rates = simulator.generate_lightcurve(extension_factor)
+        # set the new PSD with update params
+        simulator.psd_model = self.gp.kernel.get_psd
+        rates = simulator.generate_lightcurve()
         noisy_rates, dy = simulator.add_noise(rates)
         lc = GappyLightcurve(self._lightcurve.times, noisy_rates, dy)
         return lc

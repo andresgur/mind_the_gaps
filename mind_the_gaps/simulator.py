@@ -1,6 +1,6 @@
 # @Author: Andrés Gúrpide <agurpide>
 # @Date:   28-03-2022
-# @Email:  agurpidelash@irap.omp.eu
+# @Email:  a.gurpide-lasheras@soton.ac.uk
 # @Last modified by:   agurpide
 # @Last modified time: 28-03-2022
 import numpy as np
@@ -8,136 +8,66 @@ import warnings
 from lmfit.models import LognormalModel
 from scipy.stats import norm
 from stingray import Lightcurve
-from mind_the_gaps.stats import kraft_pdf
 import numexpr as ne
 import pyfftw
 from math import sqrt, log
-from astropy.stats import poisson_conf_interval
 from mind_the_gaps.stats import create_log_normal, create_uniform_distribution
-
-
-class BaseNoise:
-    def __init__(self, name):
-        self.name = name
-
-    def add_noise(self, rates):
-        """Randomize the input rates and calculate uncertainties"""
-        raise NotImplementedError("This method should be implemented by subclasses")
-
-class PoissonNoise(BaseNoise):
-    def __init__(self, exposures, background_counts=None, bkg_rate_err=None):
-        super().__init__(name="Poisson")
-
-        self.exposures = exposures
-        if background_counts is None:
-            self.background_counts = np.zeros(len(exposures), dtype=int)
-        else:
-            self.background_counts = background_counts
-        if bkg_rate_err is None:
-            self.bkg_rate_err = np.zeros(len(exposures))
-        else:
-            self.bkg_rate_err = bkg_rate_err
-
-
-    def add_noise(self, rates):
-        """Add Poisson noise and estimate uncertainties
-        rates: array_like
-            Array of count rates
-        exposures: array_like or float
-            Exposure time at each bin (or a single value if same everywhere)
-
-        Return the array of new Poissonian modified rates and its uncertainties
-        """
-
-        total_counts = rates * self.exposures + self.background_counts
-
-        total_counts_poiss = np.random.poisson(total_counts)
-
-        net_counts = total_counts_poiss - self.background_counts #  frequentists
-
-        dy = np.sqrt((np.sqrt(total_counts_poiss) / self.exposures)**2 + self.bkg_rate_err**2)
-
-        return net_counts  / self.exposures, dy
-    
-class KraftNoise(PoissonNoise):
-    def __init__(self, exposures, background_counts=None, bkg_rate_err=None, kraft_counts=15):
-        super().__init__(exposures, background_counts, bkg_rate_err)
-        self.name = "Kraft"
-        self.kraft_counts = 15
-
-    def add_noise(self, rates):
-        net_rates, dy = super().add_noise(rates)
-        total_counts = net_rates * self.exposures + self.background_counts
-
-        #  frequentists bins
-        net_counts = total_counts - self.background_counts #  frequentists
-        upper_limits = net_rates / self.bkg_rate_err < 1 # frequentists upper limit
-
-        # bayesian bins
-        expression = total_counts < self.kraft_counts
-        if np.any(expression):
-            # calculate the medians
-            pdf = kraft_pdf(a=0, b=35)
-            net_counts[expression] = [pdf(counts, bkg_counts_).median() for counts, bkg_counts_ in zip(np.round(total_counts[expression]).astype(int), self.background_counts[expression])]
-            net_rates[expression] = net_counts[expression] / self.exposures[expression]
-
-            # uncertainties (round to nearest integer number of counts)
-            lower_confs, upper_confs = poisson_conf_interval(total_counts[expression].astype(int), "kraft-burrows-nousek",
-                                                background=self.background_counts[expression], confidence_level=0.68)
-            dy[expression] = (upper_confs - lower_confs) / 2 / self.exposures[expression] # bayesian
-
-            upper_limits[expression] = lower_confs==0 # bayesian upper limit
-
-        return net_rates, dy
-    
-class GaussianNoise(BaseNoise):
-    def __init__(self, exposures, sigma_noise):
-        super().__init__(name="Gaussian")
-
-        self.sigma_noise = sigma_noise
-
-    def add_noise(self, rates):
-        noisy_rates = rates + np.random.normal(scale=self.sigma_noise, size=len(rates))
-        #dy = np.sqrt(rates * self._exposures) / self._exposures
-        dy = self.sigma_noise * np.ones(len(rates))
-        return noisy_rates, dy
-
+from mind_the_gaps.noise_models import PoissonNoise, GaussianNoise, KraftNoise
 
 
 class BaseSimulatorMethod:
-    def __init__(self, psd_model, timestamps, exposures, sim_dt, sim_duration,
+    def __init__(self, psd_model, timestamps, exposures,
                  mean):
         self.psd_model = psd_model
         self.timestamps = timestamps
         self.exposures = exposures
         self.meanrate = mean
-        self.sim_dt = sim_dt
-        self.sim_duration = sim_duration
+        half_bins = self.exposures / 2
+        self.gti = [(time - half_bin, time + half_bin) for time, half_bin in zip(self.timestamps, half_bins)]
+        
 
     def set_psd_params(self, psd_params):
         for par in psd_params.keys():
             setattr(self.psd_model, par, psd_params[par])
 
-    def prepare_segment(self, extension_factor=10):
-        """This generates a TK95 long segment to be post processed later by one of the simulator methods
-        Parameters
-        ----------
-        extension_factor: float,
-            Factor x lightcurve_length by which generate the lightcurve in order
-            to introduce red noise leakage
-        """
-        lc = simulate_lightcurve(self.timestamps, self.psd_model, self.sim_dt,
-                                    extension_factor=extension_factor)
-        segment = cut_random_segment(lc, self.sim_duration)
-        return segment
 
     def simulate(self, segment):
         raise NotImplementedError("This method should be implemented by subclasses")
 
+     
+    def downsample(self, lc, timestamps, bin_exposures):
+        """Downsample the lightcurve into the new binning (regular or not)
+        Parameters
+        ----------
+        lc: Lightcurve
+            With the old binning
+        timestmaps: array
+            The new timestamps for the lightcurve
+        bin_exposures: array
+            Exposure times of each new bin in same units as timestamps
+        Returns the downsampled count rates
+        """
+        # return the lightcurve as it is
+        if len(lc.time) == len(timestamps):
+            return lc.countrate
+
+        if np.isscalar(bin_exposures):
+            start_time = timestamps[0] - bin_exposures
+        else:
+            start_time = timestamps[0] - bin_exposures[0]
+        # shif the starting time to match the input timestamps
+        shifted_lc = lc.shift(-lc.time[0] + start_time)
+        # split by gti derived from the original timestamps
+        lc_split = shifted_lc.split_by_gti(self.gti, min_points=0)
+
+        downsampled_rates = np.fromiter((lc.meanrate for lc in lc_split), dtype=float)
+
+        return downsampled_rates   
+
 
 class TK95Simulator(BaseSimulatorMethod):
-    def __init__(self, psd_model, timestamps, exposures, sim_dt, sim_duration, mean, random_state=None):
-        super().__init__(psd_model, timestamps, exposures, sim_dt, sim_duration, mean)
+    def __init__(self, psd_model, timestamps, exposures, mean, random_state=None):
+        super().__init__(psd_model, timestamps, exposures, mean)
 
     def simulate(self, segment):
         # Implementation of TK95 simulation
@@ -148,21 +78,22 @@ class TK95Simulator(BaseSimulatorMethod):
 
 class E13Simulator(BaseSimulatorMethod):
 
-    def __init__(self, psd_model, timestamps, exposures, sim_dt, sim_duration, mean, pdf,
+    def __init__(self, psd_model, timestamps, exposures, mean, pdf,
                  max_iter=1000, random_state=None):
-        super().__init__(psd_model, timestamps, exposures, sim_dt, sim_duration, mean)
+        super().__init__(psd_model, timestamps, exposures, mean)
         self.pdf = pdf
         self.max_iter = max_iter
+        if self.pdf == "lognormal":
+            self.pdfmethod = create_log_normal
+        elif self.pdf== "uniform":
+            self.pdfmethod = create_uniform_distribution
+        elif self.pdf=="gaussian":
+            self.pdfmethod = norm
 
 
     def simulate(self, segment):
-        sample_variance = np.var(segment.countrate)
-        if self.pdf == "lognormal":
-            pdf = create_log_normal(self.meanrate, sample_variance)
-        elif self.pdf== "uniform":
-            pdf = create_uniform_distribution(self.meanrate, sample_variance)
-        elif self.pdf=="gaussian":
-            pdf = norm(loc=self.meanrate, scale=sqrt(sample_variance))
+        sample_std = np.std(segment.countrate)
+        pdf = self.pdfmethod(self.meanrate, sample_std)
         # Implementation of E13 simulation with additional parameters pdf and max_iter
         lc_rates = E13_sim_TK95(segment, self.timestamps, [pdf], [1],
                                 exposures=self.exposures, max_iter=self.max_iter)
@@ -174,7 +105,7 @@ class Simulator:
     A class to simulate lightcurves from a given power spectral densities and flux probability density function
     """
     def __init__(self, psd_model, times, exposures, mean, pdf="gaussian", bkg_rate=None,
-                 bkg_rate_err=None, sigma_noise=None, aliasing_factor=2, max_iter=400, random_state=None):
+                 bkg_rate_err=None, sigma_noise=None, aliasing_factor=2, extension_factor=10, max_iter=400, random_state=None):
         """
         Parameters
         ----------
@@ -185,7 +116,7 @@ class Simulator:
               Currently implemented: Gaussian, Lognormal and Uniform distributions.
         times:array_like,
             Timestamps of the lightcurve (i.e. times at the "center" of the sampling). Always in seconds
-        exposures:
+        exposures:array_like or float
             Exposure time of each datapoint in seconds
         mean: float,
             Desired mean for the lightcurve
@@ -198,36 +129,51 @@ class Simulator:
         aliasing_factor: float,
             This defines the grid of the original, regularly-sampled lightcurve produced
             prior to resampling as min(exposure) / aliasing_factor
+        extension_factor: float,
+            Factor by which extend the initially generated lightcurve, to introduce rednoise leakage. 10 times by default
         max_inter: int,
             Maximum number of iterations for the E13 method. Not use if method is TK95 (Gaussian PDF)
         random_state: int,
         """
 
-        self.random_state = np.random.RandomState(random_state)
-        start_time = times[0] - exposures[0]
-        end_time = times[-1] + 1.5 * exposures[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
-        sim_dt = np.min(exposures) / aliasing_factor
-        sim_duration = end_time - start_time
-        self.pdf = pdf
+        if extension_factor < 1:
+            raise ValueError("Extension factor must be greater than 1")
 
         if pdf.lower() not in ["gaussian", "lognormal", "uniform"]:
             raise ValueError("%s not implemented! Currently implemented: Gaussian, Uniform or Lognormal")
         elif pdf.lower()=="gaussian":
-            print("Simulator will use TK95 algorithm with %s pdf" %pdf)
-            self.simulator = TK95Simulator(psd_model, times, exposures, sim_dt, sim_duration,
+            #print("Simulator will use TK95 algorithm with %s pdf" %pdf)
+            self.simulator = TK95Simulator(psd_model, times, exposures,
                                            mean)
         else:
-            print("Simulator will use E13 algorithm with %s pdf" % pdf)
-            self.simulator = E13Simulator(psd_model, times, exposures, sim_dt, sim_duration,
+            #print("Simulator will use E13 algorithm with %s pdf" % pdf)
+            self.simulator = E13Simulator(psd_model, times, exposures,
                                           mean, pdf.lower(), max_iter=max_iter)
 
         if np.any(exposures==0):
             raise ValueError("Some exposure times are 0!")
         
+        self.random_state = np.random.RandomState(random_state)
+        self._exposures = np.array(exposures) if np.isscalar(exposures) else exposures
+        self.sim_dt = np.min(self._exposures) / aliasing_factor
+                
+        start_time = times[0] - self._exposures[0]
+        end_time = times[-1] + 1.5 * self._exposures[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
+        self.sim_duration = end_time - start_time
+
+        # duration of the regularly and finely sampled lightcurve
+        duration = (times[-1] - times[0]) * extension_factor
+
+        # generate timesctamps for the regular, finely sampled grid and longer than input lightcurve by extending the end
+        self.sim_timestamps = np.arange(times[0] - 2 * self.sim_dt,
+                                times[0] + duration + self.sim_dt,
+                                self.sim_dt)
+        # variable for the fft
+        self.fftndatapoints = len(self.sim_timestamps)
+        self.pdf = pdf
 
         self._psd_model = psd_model
         self._times = times
-        self._exposures = exposures
         
         # noise
         if sigma_noise is None:
@@ -237,7 +183,7 @@ class Simulator:
                 self.noise = KraftNoise(exposures, bkg_rate * exposures, bkg_rate_err)
         else:
             self.noise = GaussianNoise(exposures, sigma_noise)
-        print("Simulator will use %s noise" % self.noise.name)
+        #print("Simulator will use %s noise" % self.noise.name)
 
     def __str__(self):
 
@@ -246,6 +192,20 @@ class Simulator:
             f"  PDF: {self.pdf}\n)"
             f" Noise: {self.noise.name}")
         return sim_info
+    
+    @property
+    def psd_model(self):
+        """Getter for the PSD model."""
+        return self._psd_model
+
+    @psd_model.setter
+    def psd_model(self, new_psd_model):
+        """Setter for the PSD model."""
+        if not callable(new_psd_model):
+            raise ValueError("PSD model must be callable (e.g., a function or Astropy model).")
+        self._psd_model = new_psd_model
+        # Update the simulator with the new PSD model
+        self.simulator.psd_model = new_psd_model
 
 
     def set_psd_params(self, psd_params):
@@ -280,15 +240,24 @@ class Simulator:
 
         return noisy_rates, dy
 
-    def generate_lightcurve(self, extension_factor=10):
+    def generate_lightcurve(self):
         """Generates lightcurve with the last input PSD parameteres given. Note every call to this method will
         generate a different realization, even if the input parameters remain unchanged.
-        extension_factor: float
-            Factor by which extend the initially generated lightcurve, to introduce rednoise leakage
+        All parameters are specified during the Simulator creation    
         """
-        segment = self.simulator.prepare_segment(extension_factor)
-        rates = self.simulator.simulate(segment)
+        # get a new realization of the PSD
+        complex_fft = get_fft(self.fftndatapoints, self.sim_dt, self._psd_model)
+        # invert it
+        counts = pyfftw.interfaces.numpy_fft.irfft(complex_fft, n=self.fftndatapoints) # it does seem faster than numpy although only slightly
+        # the power gets diluted due to the sampling, bring it back by applying this factor
+        # the sqrt(2pi) factor enters because of celerite
+        counts *= sqrt(self.fftndatapoints * self.sim_dt * sqrt(2 * np.pi))
 
+        lc = Lightcurve(self.sim_timestamps, counts, input_counts=True, skip_checks=True, dt=self.sim_dt, err_dist="gauss") # gauss is needed as some counts will be negative
+        # cut a slightly longer segment than the original ligthcurve
+        segment = cut_random_segment(lc, self.sim_duration)
+        # finally call the appropiate simulator
+        rates = self.simulator.simulate(segment)
         return rates
 
 
@@ -316,56 +285,6 @@ def add_poisson_noise(rates, exposures, background_counts=None, bkg_rate_err=Non
     dy = np.sqrt((np.sqrt(total_counts_poiss) / exposures)**2 + bkg_rate_err**2)
 
     return net_counts  / exposures, dy
-
-
-def add_kraft_noise(rates, exposures, background_counts=None, bkg_rate_err=None, kraft_counts=15):
-    """Add Poisson/Kraft noise to a given count rates rates based on a real lightcurve and estimate the uncertainty
-
-    Parameters
-    ----------
-    rates: array
-        The count rates per second
-    bkg_counts: float or np.ndarray
-        The number of background counts. None will assume 0s
-    exposures: array
-        In seconds
-    bkg_rate_err: array
-        Error on the background rate. None will assume 0s
-    kraft_counts: float
-        Threshold counts below which to use Kraft+91 posterior probability distribution
-
-    This method was tested for speed against a single for loop (instead of three list comprehension) and it was found to be faster using the lists (around 10% reduction in time from the for loop approach))
-    """
-    if bkg_rate_err is None:
-        bkg_rate_err = np.zeros(len(rates))
-
-    if background_counts is None:
-        background_counts = np.zeros(len(rates), dtype=int)
-
-
-    net_rates, dy = add_poisson_noise(rates, exposures, background_counts, bkg_rate_err)
-    total_counts = net_rates * exposures + background_counts
-
-    #  frequentists bins
-    net_counts = total_counts - background_counts #  frequentists
-    upper_limits = net_rates / bkg_rate_err < 1 # frequentists upper limit
-
-    # bayesian bins
-    expression = total_counts < kraft_counts
-    if np.any(expression):
-        # calculate the medians
-        pdf = kraft_pdf(a=0, b=35)
-        net_counts[expression] = [pdf(counts, bkg_counts_).median() for counts, bkg_counts_ in zip(np.round(total_counts[expression]).astype(int), background_counts[expression])]
-        net_rates[expression] = net_counts[expression] / exposures[expression]
-
-        # uncertainties (round to nearest integer number of counts)
-        lower_confs, upper_confs = poisson_conf_interval(total_counts[expression].astype(int), "kraft-burrows-nousek",
-                                            background=background_counts[expression], confidence_level=0.68)
-        dy[expression] = (upper_confs - lower_confs) / 2 / exposures[expression] # bayesian
-
-        upper_limits[expression] = lower_confs==0 # bayesian upper limit
-
-    return net_rates, dy, upper_limits
 
 
 def draw_positive(pdf):
