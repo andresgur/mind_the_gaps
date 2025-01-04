@@ -1,4 +1,4 @@
-[![DOI](https://zenodo.org/badge/727285474.svg)](https://doi.org/10.5281/zenodo.14253753)
+[![DOI](https://zenodo.org/badge/727285474.svg)](https://doi.org/10.5281/zenodo.14600069)
 
 Gaussian Processes time series modelling with focus on period detection on irregularly-sampled stochastically-varying astronomical time series
 
@@ -38,13 +38,12 @@ python setup.py test
 @software{andres_gurpide_lasheras_2024_14253754,
   author       = {Andrés Gúrpide Lasheras and
                   Sam Mangham},
-  title        = {{andresgur/mind\_the\_gaps: Initial Release for 
-                   Zenodo}},
-  month        = dec,
-  year         = 2024,
+  title        = {{andresgur/mind\_the\_gaps: Release for paper}},
+  month        = jan,
+  year         = 2025,
   publisher    = {Zenodo},
-  version      = {v1.0.0-beta},
-  doi          = {10.5281/zenodo.14253754},
-  url          = {https://doi.org/10.5281/zenodo.14253754}
+  version      = {v1.2.0-beta},
+  doi          = {10.5281/zenodo.14600069},
+  url          = {https://doi.org/10.5281/zenodo.14600069}
 }
 ```
