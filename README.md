@@ -18,7 +18,7 @@ Users are welcome to use/test the code and provide feedback but beware, the code
 ## Usage
 The code can be used as a standalone to generate lightcurves or as it is desineg for, to test for a periodicity in a lightcurve. At a minimum your lightcurve should have timestamps, rates, uncertainties and exposures, and it can also contain background rates and uncertainties on the background.
 
-Usually the first task is to identify the null hypothesis (a stochastic-only model) and the alternative model, which contains the periodic component (stochastic model + periodic component). To see how to go about model selection, see the notebook in [tutorials](https://github.com/andresgur/mind_the_gaps/tree/main/notebooks). Once you've established these two (note you can also have several sets of null hypothesis and alternative model) we follow the method outlined by [Protassov et al. 2002](https://pages.github.com/](https://ui.adsabs.harvard.edu/abs/2002ApJ...571..545P/abstract))
+Usually the first task is to identify the null hypothesis (a stochastic-only model) and the alternative model, which contains the periodic component (stochastic model + periodic component). To see how to go about model selection, see the notebook in [tutorials](https://github.com/andresgur/mind_the_gaps/tree/main/notebooks). Once you've established these two (note you can also have several sets of null hypothesis and alternative model) we follow the method outlined by [Protassov et al. 2002](https://ui.adsabs.harvard.edu/abs/2002ApJ...571..545P/abstract)
 1. Fit the observed data using the two null and alternative models
 2. Generate lightcurves from the posteriors of the stochastic model
 3. Fit the generated lightcurves using both models
