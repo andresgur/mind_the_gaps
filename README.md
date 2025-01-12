@@ -4,7 +4,7 @@ Gaussian Processes time series modelling with focus on period detection on irreg
 
 ![Mind The Gaps](https://github.com/andresgur/mind_the_gaps/blob/main/docs/mind_the_gaps.jpg)
 
-The method effectively combines Gaussian Process modelling with the likelihood ratio test outline in [Protassov et al. 2002](https://pages.github.com/](https://ui.adsabs.harvard.edu/abs/2002ApJ...571..545P/abstract)). At present, the code uses the **celerite** kernels proposed by [Foreman-Mackey et al. 2017](https://iopscience.iop.org/article/10.3847/1538-3881/aa9332)
+The method effectively combines Gaussian Process modelling with the likelihood ratio test outline in [Protassov et al. 2002](https://ui.adsabs.harvard.edu/abs/2002ApJ...571..545P/abstract). At present, the code uses the **celerite** kernels proposed by [Foreman-Mackey et al. 2017](https://iopscience.iop.org/article/10.3847/1538-3881/aa9332)
 
 
 # Installation
