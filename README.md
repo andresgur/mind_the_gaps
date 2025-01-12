@@ -4,6 +4,8 @@ Gaussian Processes time series modelling with focus on period detection on irreg
 
 ![Mind The Gaps](https://github.com/andresgur/mind_the_gaps/blob/main/docs/mind_the_gaps.jpg)
 
+The method effectively combines Gaussian Process modelling with the likelihood ratio test outline in [Protassov et al. 2002](https://pages.github.com/](https://ui.adsabs.harvard.edu/abs/2002ApJ...571..545P/abstract)). At present, the code uses the **celerite** kernels proposed by [Foreman-Mackey et al. 2017](https://iopscience.iop.org/article/10.3847/1538-3881/aa9332)
+
 
 # Installation
 To install the repository, first clone to your compute:
@@ -15,15 +17,17 @@ Users are welcome to use/test the code and provide feedback but beware, the code
 # Usage
 See the jupyter-notebook tutorial in the notebooks folder
 
-## Workflow
+## Usage
 
-An example workflow is included in [docs/workflow.md](docs/workflow.md).
+The code can be used as a standalone to generate lightcurves or as it is desineg for, to test for a periodicity in a lightcurve. At a minimum your lightcurve should have timestamps, rates, uncertainties and exposures, and it can also contain background rates and uncertainties on the background.
 
-Usually the user will a stochastic model and a stochastic + periodic component model (let's call them null_hypothesis.config and alternative_model.config). The workflow to determine whether the periodic component is required (i.e. whether there is periodic variability in the lightcurve) would look like this (see [Protassov et al. 2002](https://pages.github.com/](https://ui.adsabs.harvard.edu/abs/2002ApJ...571..545P/abstract))):
-1. Fit the observed data using the two config files and `celerite_script.py' (it can be parallelized)
-2. Generate lightcurves from the posteriors of the stochastic model fit using `generate_lcs_significance.py' (it can be parallelized)
-3. Fit the generated lightcurves using `fit_lcs.py' (it can be parallelized) using both models (i.e. one run for each null_hypothesis and alternative_model config files).
-4. Build a histogram of the fit-improvements (delta likelihoods) found for the simulated lightcurves and check where the value observed in the data falls in the histogram. An outlier (say p<0.05) suggest the fit-improvement observed in the data is highly unlikely. High p-values indicate the fit-improvement is simply due to noise
+Usually the first task is to identify the null hypothesis (a stochastic-only model) and the alternative model, which contains the periodic component (stochastic model + periodic component). To see how to go about model selection, see the notebook in [tutorials](https://github.com/andresgur/mind_the_gaps/tree/main/notebooks). Once you've established these two (note you can also have several sets of null hypothesis and alternative model) we follow the method outlined by [Protassov et al. 2002](https://pages.github.com/](https://ui.adsabs.harvard.edu/abs/2002ApJ...571..545P/abstract))
+1. Fit the observed data using the two null and alternative models
+2. Generate lightcurves from the posteriors of the stochastic model
+3. Fit the generated lightcurves using both models
+4. Build a histogram of the fit-improvements (LRT) found for the simulated lightcurves and check where the value observed in the data falls in the histogram. An outlier (say p<0.05) suggest the fit-improvement observed in the data is highly unlikely. High p-values indicate the fit-improvement is simply due to noise.
+
+Another notebook in [tutorials](https://github.com/andresgur/mind_the_gaps/tree/main/notebooks) shows how to implement this process using functions and objects from the package.
 
 
 # Tests
