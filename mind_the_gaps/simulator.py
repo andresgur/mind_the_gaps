@@ -375,7 +375,7 @@ def get_fft(N, dt, model):
     freqs = np.fft.rfftfreq(N, dt) * 2 * np.pi
     #generate real and complex parts from gaussian distributions
     real, im = np.random.normal(0, size=(2, N // 2 + 1))
-    complex_fft = np.empty(len(freqs), dtype=np.cfloat)
+    complex_fft = np.empty(len(freqs), dtype=complex)
     complex_fft[1:] = (real + im * 1j)[1:] * np.sqrt(.5 * model(freqs[1:]))
 
     # assign whatever real number to the total number of photons, it does not matter as the lightcurve is normalized later
