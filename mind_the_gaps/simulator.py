@@ -109,14 +109,14 @@ class Simulator:
         """
         Parameters
         ----------
-        psd_model: function
+        psd_model: function or astropy.model
             PSD model to use for the lightcurve simulations. Astropy model or a function taking in angular frequencies and returning the power
         pdf: str
             String defining the flux probability density function desired for the ligthcurve. If Gaussian, uses Timmer & König 1995 algorithm, otherwise uses Emmanolopoulos et al. 2013.
               Currently implemented: Gaussian, Lognormal and Uniform distributions.
         times:array_like,
             Timestamps of the lightcurve (i.e. times at the "center" of the sampling). Always in seconds
-        exposures:array_like or float
+        exposures:array_like or float,
             Exposure time of each datapoint in seconds
         mean: float,
             Desired mean for the lightcurve
@@ -139,6 +139,9 @@ class Simulator:
         if extension_factor < 1:
             raise ValueError("Extension factor must be greater than 1")
 
+        if np.any(exposures==0):
+            raise ValueError("Some exposure times are 0!")
+
         if pdf.lower() not in ["gaussian", "lognormal", "uniform"]:
             raise ValueError("%s not implemented! Currently implemented: Gaussian, Uniform or Lognormal")
         elif pdf.lower()=="gaussian":
@@ -150,12 +153,16 @@ class Simulator:
             self.simulator = E13Simulator(psd_model, times, exposures,
                                           mean, pdf.lower(), max_iter=max_iter)
 
-        if np.any(exposures==0):
-            raise ValueError("Some exposure times are 0!")
-        
         self.random_state = np.random.RandomState(random_state)
         self._exposures = np.array(exposures) if np.isscalar(exposures) else exposures
         self.sim_dt = np.min(self._exposures) / aliasing_factor
+
+        epsilon = 0.99 # to avoid numerically distinct but equal
+        # check that the sampling is consistent with the exposure times of each timestamp
+        wrong = np.count_nonzero(np.diff(times) < self.sim_dt * epsilon)
+        if wrong > 0:
+            raise ValueError("%d timestamps differences are below the exposure integration time! Either reduce the exposure times, or space your observations" % wrong)
+
                 
         start_time = times[0] - self._exposures[0]
         end_time = times[-1] + 1.5 * self._exposures[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
