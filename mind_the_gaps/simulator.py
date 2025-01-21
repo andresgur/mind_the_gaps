@@ -141,20 +141,22 @@ class Simulator:
 
         if np.any(exposures==0):
             raise ValueError("Some exposure times are 0!")
+        else:
+            # convert to array if scalar
+            self._exposures = np.full(len(times), exposures) if np.isscalar(exposures) else exposures
 
         if pdf.lower() not in ["gaussian", "lognormal", "uniform"]:
             raise ValueError("%s not implemented! Currently implemented: Gaussian, Uniform or Lognormal")
         elif pdf.lower()=="gaussian":
             #print("Simulator will use TK95 algorithm with %s pdf" %pdf)
-            self.simulator = TK95Simulator(psd_model, times, exposures,
+            self.simulator = TK95Simulator(psd_model, times, self._exposures,
                                            mean)
         else:
             #print("Simulator will use E13 algorithm with %s pdf" % pdf)
-            self.simulator = E13Simulator(psd_model, times, exposures,
+            self.simulator = E13Simulator(psd_model, times, self._exposures,
                                           mean, pdf.lower(), max_iter=max_iter)
 
         self.random_state = np.random.RandomState(random_state)
-        self._exposures = np.array(exposures) if np.isscalar(exposures) else exposures
         self.sim_dt = np.min(self._exposures) / aliasing_factor
 
         epsilon = 0.99 # to avoid numerically distinct but equal
@@ -185,11 +187,11 @@ class Simulator:
         # noise
         if sigma_noise is None:
             if bkg_rate is None or np.all(bkg_rate==0):
-                self.noise = PoissonNoise(exposures)
+                self.noise = PoissonNoise(self._exposures)
             else:
-                self.noise = KraftNoise(exposures, bkg_rate * exposures, bkg_rate_err)
+                self.noise = KraftNoise(self._exposures, bkg_rate * self._exposures, bkg_rate_err)
         else:
-            self.noise = GaussianNoise(exposures, sigma_noise)
+            self.noise = GaussianNoise(self._exposures, sigma_noise)
         #print("Simulator will use %s noise" % self.noise.name)
 
     def __str__(self):
@@ -246,12 +248,9 @@ class Simulator:
             #dy = errors[np.argsort(noisy_rates)]
 
         return noisy_rates, dy
-
-    def generate_lightcurve(self):
-        """Generates lightcurve with the last input PSD parameteres given. Note every call to this method will
-        generate a different realization, even if the input parameters remain unchanged.
-        All parameters are specified during the Simulator creation    
-        """
+    
+    def simulate_regularly_sampled(self):
+        """Generates a regularly-sampled lightcurve, longer and at a temporal resolution higher than the final, unevenly-sampled lightcurve"""
         # get a new realization of the PSD
         complex_fft = get_fft(self.fftndatapoints, self.sim_dt, self._psd_model)
         # invert it
@@ -260,7 +259,15 @@ class Simulator:
         # the sqrt(2pi) factor enters because of celerite
         counts *= sqrt(self.fftndatapoints * self.sim_dt * sqrt(2 * np.pi))
 
-        lc = Lightcurve(self.sim_timestamps, counts, input_counts=True, skip_checks=True, dt=self.sim_dt, err_dist="gauss") # gauss is needed as some counts will be negative
+        return Lightcurve(self.sim_timestamps, counts, input_counts=True, skip_checks=True, dt=self.sim_dt, err_dist="gauss") # gauss is needed as some counts will be negative
+
+
+    def generate_lightcurve(self):
+        """Generates lightcurve with the last input PSD parameteres given. Note every call to this method will
+        generate a different realization, even if the input parameters remain unchanged.
+        All parameters are specified during the Simulator creation    
+        """
+        lc = self.simulate_regularly_sampled()
         # cut a slightly longer segment than the original ligthcurve
         segment = cut_random_segment(lc, self.sim_duration)
         # finally call the appropiate simulator
@@ -392,43 +399,6 @@ def get_fft(N, dt, model):
         complex_fft[-1] = np.real(complex_fft[-1])
     return complex_fft
 
-
-def simulate_lightcurve(timestamps, psd_model, dt, extension_factor=25):
-    """Simulate a lightcurve regularly sampled N times longer than original using the algorithm of Timmer & Koenig+95
-
-    Parameters
-    ----------
-    timestamps: array
-        Timestamps
-    psd_model: astropy.model
-        The model for the PSD. Has to take angular frequencies
-    dt: float
-        Binning to which simulate the lightcurve (same units as timestamps)
-    extension_factor: int
-        How many times longer than original
-    """
-    if extension_factor < 1:
-        raise ValueError("Extension factor must be greater than 1")
-
-    duration = (timestamps[-1] - timestamps[0]) * extension_factor
-    # generate timesctamps sampled at the median exposure longer than input lightcurve by extending the end
-    sim_timestamps = np.arange(timestamps[0] - 2 * dt,
-                               timestamps[0] + duration + dt,
-                               dt)
-
-    n_datapoints = len(sim_timestamps)
-
-    complex_fft = get_fft(n_datapoints, dt, psd_model)
-
-    counts = pyfftw.interfaces.numpy_fft.irfft(complex_fft, n=n_datapoints) # it does seem faster than numpy although only slightly
-
-    # the power gets diluted due to the sampling, bring it back by applying this factor
-    # the sqrt(2pi) factor enters because of celerite
-    counts *= sqrt(n_datapoints * dt * sqrt(2 * np.pi))
-
-    return Lightcurve(sim_timestamps, counts, input_counts=True, skip_checks=True, dt=dt, err_dist="gauss") # gauss is needed as some counts will be negative
-
-
 def get_segment(lc, duration, N):
     """Get N segment of the input lightcurve.
     N: int,
@@ -465,7 +435,7 @@ def imprint_sampling_pattern(lightcurve, timestamps, bin_exposures):
         raise ValueError("Half bins length (%d) must have same length as timestamps (%d) or be a scalar." % (len(half_bins), len(timestamps)))
 
     # get rid of all bins in between timestamps using Stingray
-    lc_split = lightcurve.split_by_gti(gti, min_points=0)
+    lc_split = lightcurve.split_by_gti(gti, min_points=1)
     # get average count rates for the entire subsegment corresponding to each timestamps
     return np.fromiter((lc.meanrate for lc in lc_split), dtype=float)
 
