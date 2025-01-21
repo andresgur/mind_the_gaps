@@ -15,7 +15,7 @@ class GappyLightcurve:
     """
     A class to store parameters of a irregularly-sampled lightcurve
     """
-    def __init__(self, times, y, dy, exposures=None, bkg_rate=None, bkg_rate_err=None):
+    def __init__(self, times, y, dy=None, exposures=None, bkg_rate=None, bkg_rate_err=None):
         """
 
         Parameters
@@ -25,7 +25,7 @@ class GappyLightcurve:
         y: array_like
             Observed flux or count rate
         dy: array-like
-            1 sigma uncertainty on y
+            1 sigma uncertainty on y. Optional, 
         exposures: scalar or array-like, optional
             Exposure time of each datapoint in seconds
         bkg_rate: array-like
@@ -37,21 +37,25 @@ class GappyLightcurve:
         self._times = times
         self._y = y
         self._dy = dy
-        if np.isscalar(exposures):
-            self._exposures = np.full(len(times), exposures)
-        elif exposures is not None:
-            self._exposures = exposures
+
+        # exposures were given
+        if exposures is not None:
+            if np.isscalar(exposures):
+                self._exposures = np.full(len(times), exposures)
+            else:
+                self._exposures = exposures
+            epsilon = 1.01 # to avoid numerically distinct but equal
+            wrong = np.count_nonzero(np.diff(self._times) < self._exposures[:-1] * epsilon / 2 )
+            if wrong >0:
+                raise ExposureTimeError("Some timestamps (%d) have a spacing below the exposure sampling time!" % wrong)
+        
         else:
             self._exposures = np.zeros(len(times))
 
         self._bkg_rate = bkg_rate if bkg_rate is not None else np.zeros(len(times))
         self._bkg_rate_err = bkg_rate_err if bkg_rate_err is not None else np.zeros(len(times))
         
-        epsilon = 1.01 # to avoid numerically distinct but equal
-        if exposures is not None:
-            wrong = np.count_nonzero(np.diff(self._times) < self._exposures[:-1] * epsilon / 2 )
-            if wrong >0:
-                raise ExposureTimeError("Some timestamps (%d) have a spacing below the exposure sampling time!" % wrong)
+        
 
     @property
     def times(self):
