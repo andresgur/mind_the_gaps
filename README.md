@@ -1,5 +1,5 @@
 [![DOI](https://zenodo.org/badge/727285474.svg)](https://doi.org/10.5281/zenodo.14600069)
-![Tests](https://github.com/andresgur/mind_the_gaps/test.yml/badge.svg)
+![Tests](https://github.com/andresgur/mind_the_gaps/actions/workflows/test.yml/badge.svg)
 
 Gaussian Processes time series modelling with focus on period detection on irregularly-sampled stochastically-varying astronomical time series
 

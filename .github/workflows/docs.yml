@@ -3,10 +3,10 @@ name: Documentation
 on:
   push:
     branches:
-      - abstract 
+      - abstract2 
   pull_request:
     branches:
-      - abstract 
+      - abstract2 
 
 jobs:
   build_docs:
@@ -28,8 +28,10 @@ jobs:
       - name: Install Dependencies
         run: |
           pip install -r requirements.txt
-          pip install -r ../requirements.txt
         working-directory: docs
+      - name: Install Dependencies
+        run: |
+          pip install .
       - name: Generate source
         run: |
           sphinx-apidoc -o source ../mind_the_gaps/
@@ -42,10 +44,20 @@ jobs:
 
       - name: Push changes
         uses: stefanzweifel/git-auto-commit-action@v5
+        id: auto-commit-action
         with:
-          commit_message: Apply php-cs-fixer changes
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: ${{ github.ref }}
+          commit_message: Push workflow built docs
+        #github_token: ${{ secrets.GITHUB_TOKEN }}
+        #branch: ${{ github.ref }}
+
+      - name: "Run if changes have been detected"
+        if: steps.auto-commit-action.outputs.changes_detected == 'true'
+        run: echo "Changes!"
+      
+      - name: "Run if no changes have been detected"
+        if: steps.auto-commit-action.outputs.changes_detected == 'false'
+        run: echo "No Changes!"
+
 
 #      - name: Deploy to Read the Docs
 #        uses: rtfd/readthedocs-github-action@v1

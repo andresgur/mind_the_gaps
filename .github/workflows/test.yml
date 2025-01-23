@@ -2,9 +2,9 @@ name: Run Tests
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "abstract2" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "abstract2" ]
 
 permissions:
   contents: read
@@ -20,12 +20,14 @@ jobs:
       uses: actions/setup-python@v3
       with:
         python-version: "3.11"
-    - name: Install pipenv
+    - name: Install depemdecies
       run: |
-        python -m pip install --upgrade pip
-        pip install pipenv pytest
+        pip install .
+       # python -m pip install --upgrade pip
+       # pip install pipenv pytest
     - name: Test with pytest
       run: |
-        pipenv install --dev
-        pipenv run pip install -e ./
-        pipenv run pytest
+        python -m unittest discover
+       # pipenv install --dev
+       # pipenv run pip install -e ./
+       # pipenv run pytest
