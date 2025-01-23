@@ -3,38 +3,39 @@
 # @Email:  a.gurpide-lasheras@soton.ac.uk
 # @Last modified by:   agurpide
 # @Last modified time: 28-03-2022
-import numpy as np
 import warnings
+from math import log, sqrt
+
+import numexpr as ne
+import numpy as np
+import pyfftw
 from lmfit.models import LognormalModel
 from scipy.stats import norm
 from stingray import Lightcurve
-import numexpr as ne
-import pyfftw
-from math import sqrt, log
-from mind_the_gaps.stats import create_log_normal, create_uniform_distribution
-from mind_the_gaps.noise_models import PoissonNoise, GaussianNoise, KraftNoise
+
+from mind_the_gaps.models.noise_models import GaussianNoise, KraftNoise, PoissonNoise
+from mind_the_gaps.utils.stats import create_log_normal, create_uniform_distribution
 
 
 class BaseSimulatorMethod:
-    def __init__(self, psd_model, timestamps, exposures,
-                 mean):
+    def __init__(self, psd_model, timestamps, exposures, mean):
         self.psd_model = psd_model
         self.timestamps = timestamps
         self.exposures = exposures
         self.meanrate = mean
         half_bins = self.exposures / 2
-        self.gti = [(time - half_bin, time + half_bin) for time, half_bin in zip(self.timestamps, half_bins)]
-        
+        self.gti = [
+            (time - half_bin, time + half_bin)
+            for time, half_bin in zip(self.timestamps, half_bins)
+        ]
 
     def set_psd_params(self, psd_params):
         for par in psd_params.keys():
             setattr(self.psd_model, par, psd_params[par])
 
-
     def simulate(self, segment):
         raise NotImplementedError("This method should be implemented by subclasses")
 
-     
     def downsample(self, lc, timestamps, bin_exposures):
         """Downsample the lightcurve into the new binning (regular or not)
         Parameters
@@ -62,7 +63,7 @@ class BaseSimulatorMethod:
 
         downsampled_rates = np.fromiter((lc.meanrate for lc in lc_split), dtype=float)
 
-        return downsampled_rates   
+        return downsampled_rates
 
 
 class TK95Simulator(BaseSimulatorMethod):
@@ -78,25 +79,38 @@ class TK95Simulator(BaseSimulatorMethod):
 
 class E13Simulator(BaseSimulatorMethod):
 
-    def __init__(self, psd_model, timestamps, exposures, mean, pdf,
-                 max_iter=1000, random_state=None):
+    def __init__(
+        self,
+        psd_model,
+        timestamps,
+        exposures,
+        mean,
+        pdf,
+        max_iter=1000,
+        random_state=None,
+    ):
         super().__init__(psd_model, timestamps, exposures, mean)
         self.pdf = pdf
         self.max_iter = max_iter
         if self.pdf == "lognormal":
             self.pdfmethod = create_log_normal
-        elif self.pdf== "uniform":
+        elif self.pdf == "uniform":
             self.pdfmethod = create_uniform_distribution
-        elif self.pdf=="gaussian":
+        elif self.pdf == "gaussian":
             self.pdfmethod = norm
-
 
     def simulate(self, segment):
         sample_std = np.std(segment.countrate)
         pdf = self.pdfmethod(self.meanrate, sample_std)
         # Implementation of E13 simulation with additional parameters pdf and max_iter
-        lc_rates = E13_sim_TK95(segment, self.timestamps, [pdf], [1],
-                                exposures=self.exposures, max_iter=self.max_iter)
+        lc_rates = E13_sim_TK95(
+            segment,
+            self.timestamps,
+            [pdf],
+            [1],
+            exposures=self.exposures,
+            max_iter=self.max_iter,
+        )
         return lc_rates
 
 
@@ -104,8 +118,22 @@ class Simulator:
     """
     A class to simulate lightcurves from a given power spectral densities and flux probability density function
     """
-    def __init__(self, psd_model, times, exposures, mean, pdf="gaussian", bkg_rate=None,
-                 bkg_rate_err=None, sigma_noise=None, aliasing_factor=2, extension_factor=10, max_iter=400, random_state=None):
+
+    def __init__(
+        self,
+        psd_model,
+        times,
+        exposures,
+        mean,
+        pdf="gaussian",
+        bkg_rate=None,
+        bkg_rate_err=None,
+        sigma_noise=None,
+        aliasing_factor=2,
+        extension_factor=10,
+        max_iter=400,
+        random_state=None,
+    ):
         """
         Parameters
         ----------
@@ -139,69 +167,81 @@ class Simulator:
         if extension_factor < 1:
             raise ValueError("Extension factor must be greater than 1")
 
-        if np.any(exposures==0):
+        if np.any(exposures == 0):
             raise ValueError("Some exposure times are 0!")
         else:
             # convert to array if scalar
-            self._exposures = np.full(len(times), exposures) if np.isscalar(exposures) else exposures
+            self._exposures = (
+                np.full(len(times), exposures) if np.isscalar(exposures) else exposures
+            )
 
         if pdf.lower() not in ["gaussian", "lognormal", "uniform"]:
-            raise ValueError("%s not implemented! Currently implemented: Gaussian, Uniform or Lognormal")
-        elif pdf.lower()=="gaussian":
-            #print("Simulator will use TK95 algorithm with %s pdf" %pdf)
-            self.simulator = TK95Simulator(psd_model, times, self._exposures,
-                                           mean)
+            raise ValueError(
+                "%s not implemented! Currently implemented: Gaussian, Uniform or Lognormal"
+            )
+        elif pdf.lower() == "gaussian":
+            # print("Simulator will use TK95 algorithm with %s pdf" %pdf)
+            self.simulator = TK95Simulator(psd_model, times, self._exposures, mean)
         else:
-            #print("Simulator will use E13 algorithm with %s pdf" % pdf)
-            self.simulator = E13Simulator(psd_model, times, self._exposures,
-                                          mean, pdf.lower(), max_iter=max_iter)
+            # print("Simulator will use E13 algorithm with %s pdf" % pdf)
+            self.simulator = E13Simulator(
+                psd_model, times, self._exposures, mean, pdf.lower(), max_iter=max_iter
+            )
 
         self.random_state = np.random.RandomState(random_state)
         self.sim_dt = np.min(self._exposures) / aliasing_factor
 
-        epsilon = 0.99 # to avoid numerically distinct but equal
+        epsilon = 0.99  # to avoid numerically distinct but equal
         # check that the sampling is consistent with the exposure times of each timestamp
         wrong = np.count_nonzero(np.diff(times) < self.sim_dt * epsilon)
         if wrong > 0:
-            raise ValueError("%d timestamps differences are below the exposure integration time! Either reduce the exposure times, or space your observations" % wrong)
+            raise ValueError(
+                "%d timestamps differences are below the exposure integration time! Either reduce the exposure times, or space your observations"
+                % wrong
+            )
 
-                
         start_time = times[0] - self._exposures[0]
-        end_time = times[-1] + 1.5 * self._exposures[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
+        end_time = (
+            times[-1] + 1.5 * self._exposures[-1]
+        )  # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
         self.sim_duration = end_time - start_time
 
         # duration of the regularly and finely sampled lightcurve
         duration = (times[-1] - times[0]) * extension_factor
 
         # generate timesctamps for the regular, finely sampled grid and longer than input lightcurve by extending the end
-        self.sim_timestamps = np.arange(times[0] - 2 * self.sim_dt,
-                                times[0] + duration + self.sim_dt,
-                                self.sim_dt)
+        self.sim_timestamps = np.arange(
+            times[0] - 2 * self.sim_dt, times[0] + duration + self.sim_dt, self.sim_dt
+        )
         # variable for the fft
         self.fftndatapoints = len(self.sim_timestamps)
         self.pdf = pdf
 
         self._psd_model = psd_model
         self._times = times
-        
+
         # noise
         if sigma_noise is None:
-            if bkg_rate is None or np.all(bkg_rate==0):
+            if bkg_rate is None or np.all(bkg_rate == 0):
                 self.noise = PoissonNoise(self._exposures)
             else:
-                self.noise = KraftNoise(self._exposures, bkg_rate * self._exposures, bkg_rate_err)
+                self.noise = KraftNoise(
+                    self._exposures, bkg_rate * self._exposures, bkg_rate_err
+                )
         else:
             self.noise = GaussianNoise(self._exposures, sigma_noise)
-        #print("Simulator will use %s noise" % self.noise.name)
+        # print("Simulator will use %s noise" % self.noise.name)
 
     def __str__(self):
 
-        sim_info = (f"Simulator(\n"
+        sim_info = (
+            f"Simulator(\n"
             f"  PSD Model: {self._psd_model}\n"
             f"  PDF: {self.pdf}\n)"
-            f" Noise: {self.noise.name}")
+            f" Noise: {self.noise.name}"
+        )
         return sim_info
-    
+
     @property
     def psd_model(self):
         """Getter for the PSD model."""
@@ -211,11 +251,12 @@ class Simulator:
     def psd_model(self, new_psd_model):
         """Setter for the PSD model."""
         if not callable(new_psd_model):
-            raise ValueError("PSD model must be callable (e.g., a function or Astropy model).")
+            raise ValueError(
+                "PSD model must be callable (e.g., a function or Astropy model)."
+            )
         self._psd_model = new_psd_model
         # Update the simulator with the new PSD model
         self.simulator.psd_model = new_psd_model
-
 
     def set_psd_params(self, psd_params):
         """Set the parameters of the PSD
@@ -226,46 +267,53 @@ class Simulator:
         """
         self.simulator.set_psd_params(psd_params)
 
-
     def add_noise(self, rates):
         """Add noise to the input rates
 
         rates: array_like
         """
         noisy_rates, dy = self.noise.add_noise(rates)
-        #if self._noise_std is None:
-         #   if np.all(self._bkg_rate==0):
-          #      noisy_rates, dy = add_poisson_noise(rates, self._exposures)
-           # else:
-            #    noisy_rates, dy, upp_lims = add_kraft_noise(rates, self._exposures,
-             #                                           self._bkg_rate * self._exposures,
-              #                                          self._bkg_rate_err)
-        #else:
-            # add 0 mean Gaussian White Noise
-         #   noisy_rates = rates + np.random.normal(scale=self._noise_std, size=len(rates))
-            #dy = np.sqrt(rates * self._exposures) / self._exposures
-          #  dy = self._noise_std * np.ones(len(rates))
-            #dy = errors[np.argsort(noisy_rates)]
+        # if self._noise_std is None:
+        #   if np.all(self._bkg_rate==0):
+        #      noisy_rates, dy = add_poisson_noise(rates, self._exposures)
+        # else:
+        #    noisy_rates, dy, upp_lims = add_kraft_noise(rates, self._exposures,
+        #                                           self._bkg_rate * self._exposures,
+        #                                          self._bkg_rate_err)
+        # else:
+        # add 0 mean Gaussian White Noise
+        #   noisy_rates = rates + np.random.normal(scale=self._noise_std, size=len(rates))
+        # dy = np.sqrt(rates * self._exposures) / self._exposures
+        #  dy = self._noise_std * np.ones(len(rates))
+        # dy = errors[np.argsort(noisy_rates)]
 
         return noisy_rates, dy
-    
+
     def simulate_regularly_sampled(self):
         """Generates a regularly-sampled lightcurve, longer and at a temporal resolution higher than the final, unevenly-sampled lightcurve"""
         # get a new realization of the PSD
         complex_fft = get_fft(self.fftndatapoints, self.sim_dt, self._psd_model)
         # invert it
-        counts = pyfftw.interfaces.numpy_fft.irfft(complex_fft, n=self.fftndatapoints) # it does seem faster than numpy although only slightly
+        counts = pyfftw.interfaces.numpy_fft.irfft(
+            complex_fft, n=self.fftndatapoints
+        )  # it does seem faster than numpy although only slightly
         # the power gets diluted due to the sampling, bring it back by applying this factor
         # the sqrt(2pi) factor enters because of celerite
         counts *= sqrt(self.fftndatapoints * self.sim_dt * sqrt(2 * np.pi))
 
-        return Lightcurve(self.sim_timestamps, counts, input_counts=True, skip_checks=True, dt=self.sim_dt, err_dist="gauss") # gauss is needed as some counts will be negative
-
+        return Lightcurve(
+            self.sim_timestamps,
+            counts,
+            input_counts=True,
+            skip_checks=True,
+            dt=self.sim_dt,
+            err_dist="gauss",
+        )  # gauss is needed as some counts will be negative
 
     def generate_lightcurve(self):
         """Generates lightcurve with the last input PSD parameteres given. Note every call to this method will
         generate a different realization, even if the input parameters remain unchanged.
-        All parameters are specified during the Simulator creation    
+        All parameters are specified during the Simulator creation
         """
         lc = self.simulate_regularly_sampled()
         # cut a slightly longer segment than the original ligthcurve
@@ -294,11 +342,11 @@ def add_poisson_noise(rates, exposures, background_counts=None, bkg_rate_err=Non
 
     total_counts_poiss = np.random.poisson(total_counts)
 
-    net_counts = total_counts_poiss - background_counts #  frequentists
+    net_counts = total_counts_poiss - background_counts  #  frequentists
 
-    dy = np.sqrt((np.sqrt(total_counts_poiss) / exposures)**2 + bkg_rate_err**2)
+    dy = np.sqrt((np.sqrt(total_counts_poiss) / exposures) ** 2 + bkg_rate_err**2)
 
-    return net_counts  / exposures, dy
+    return net_counts / exposures, dy
 
 
 def draw_positive(pdf):
@@ -312,7 +360,7 @@ def draw_positive(pdf):
         One sample from the pdf
     """
     value = pdf.rvs()
-    return(value if value>0 else draw_positive(pdf))
+    return value if value > 0 else draw_positive(pdf)
 
 
 def fit_pdf(time_series, nbins=20):
@@ -341,21 +389,24 @@ def fit_pdf(time_series, nbins=20):
     x_values = bins[:-1] + np.diff(bins) / 2
 
     # Fit with one Gaussian Model
-    pdf_model = LognormalModel(prefix='pdf')
+    pdf_model = LognormalModel(prefix="pdf")
     # from the Log Normal distribution (see e.g. https://en.wikipedia.org/wiki/Log-normal_distribution)
-    sigma = sqrt(log(1 + (np.std(time_series_) / np.mean(time_series_))**2))
-    center = log(np.mean(time_series_)**2 / (sqrt(np.var(time_series_) + np.mean(time_series_)**2)))
+    sigma = sqrt(log(1 + (np.std(time_series_) / np.mean(time_series_)) ** 2))
+    center = log(
+        np.mean(time_series_) ** 2
+        / (sqrt(np.var(time_series_) + np.mean(time_series_) ** 2))
+    )
 
     pdf_model.set_param_hint("pdfcenter", value=center)
     pdf_model.set_param_hint("pdfsigma", value=sigma)
     pdf_model.set_param_hint("pdfamplitude", min=0, value=1)
-    #pars = pdf_model.guess(n, x=x_values) # causes a bogus functionality
+    # pars = pdf_model.guess(n, x=x_values) # causes a bogus functionality
     out_fit = pdf_model.fit(n, x=x_values)
     bic_1_gauss = out_fit.bic
     print(out_fit.fit_report())
     print("BIC value for one Lognormal model: %.2f" % bic_1_gauss)
     # Fit with two Gaussian components
-    pdf_model_2 = LognormalModel(prefix='pdf1') + LognormalModel(prefix='pdf2')
+    pdf_model_2 = LognormalModel(prefix="pdf1") + LognormalModel(prefix="pdf2")
     pdf_model_2.set_param_hint("pdf1center", value=center)
     pdf_model_2.set_param_hint("pdf2center", value=center)
     pdf_model_2.set_param_hint("pdf1sigma", value=sigma)
@@ -387,10 +438,10 @@ def get_fft(N, dt, model):
         The model for the PSD
     """
     freqs = np.fft.rfftfreq(N, dt) * 2 * np.pi
-    #generate real and complex parts from gaussian distributions
+    # generate real and complex parts from gaussian distributions
     real, im = np.random.normal(0, size=(2, N // 2 + 1))
     complex_fft = np.empty(len(freqs), dtype=complex)
-    complex_fft[1:] = (real + im * 1j)[1:] * np.sqrt(.5 * model(freqs[1:]))
+    complex_fft[1:] = (real + im * 1j)[1:] * np.sqrt(0.5 * model(freqs[1:]))
 
     # assign whatever real number to the total number of photons, it does not matter as the lightcurve is normalized later
     complex_fft[0] = 1e6
@@ -398,6 +449,7 @@ def get_fft(N, dt, model):
     if N % 2 == 0:
         complex_fft[-1] = np.real(complex_fft[-1])
     return complex_fft
+
 
 def get_segment(lc, duration, N):
     """Get N segment of the input lightcurve.
@@ -410,7 +462,7 @@ def get_segment(lc, duration, N):
 
 def cut_random_segment(lc, duration):
     """Cut segment from the input lightcurve of given duration"""
-    shift = np.random.uniform(lc.time[0], lc.time[-1] - duration)# - lc.time[0]
+    shift = np.random.uniform(lc.time[0], lc.time[-1] - duration)  # - lc.time[0]
     return lc.truncate(start=shift, stop=shift + duration, method="time")
 
 
@@ -430,9 +482,15 @@ def imprint_sampling_pattern(lightcurve, timestamps, bin_exposures):
     if np.isscalar(half_bins):
         gti = [(time - half_bins, time + half_bins) for time in timestamps]
     elif len(half_bins) == len(timestamps):
-        gti = [(time - half_bin, time + half_bin) for time, half_bin in zip(timestamps, half_bins)]
+        gti = [
+            (time - half_bin, time + half_bin)
+            for time, half_bin in zip(timestamps, half_bins)
+        ]
     else:
-        raise ValueError("Half bins length (%d) must have same length as timestamps (%d) or be a scalar." % (len(half_bins), len(timestamps)))
+        raise ValueError(
+            "Half bins length (%d) must have same length as timestamps (%d) or be a scalar."
+            % (len(half_bins), len(timestamps))
+        )
 
     # get rid of all bins in between timestamps using Stingray
     lc_split = lightcurve.split_by_gti(gti, min_points=1)
@@ -468,7 +526,9 @@ def downsample(lc, timestamps, bin_exposures):
     return downsampled_rates
 
 
-def tk95_sim(timestamps, psd_model, mean, sim_dt=None, extension_factor=20, bin_exposures=None):
+def tk95_sim(
+    timestamps, psd_model, mean, sim_dt=None, extension_factor=20, bin_exposures=None
+):
     """Simulate one lightcurve using the method from Timmer and Koenig+95 with the input sampling (timestamps) and using a red-noise powerlaw model.
 
     Parameters
@@ -490,10 +550,10 @@ def tk95_sim(timestamps, psd_model, mean, sim_dt=None, extension_factor=20, bin_
     if extension_factor < 1:
         raise ValueError("Extension factor needs to be higher than 1")
 
-    epsilon = 0.99 # to avoid numerically distinct but equal
+    epsilon = 0.99  # to avoid numerically distinct but equal
 
     wrong = np.count_nonzero(np.diff(timestamps) < sim_dt * epsilon)
-    if wrong >0:
+    if wrong > 0:
         raise ValueError("%d timestamps differences are below sampling time!" % wrong)
 
     if sim_dt is None:
@@ -512,7 +572,9 @@ def tk95_sim(timestamps, psd_model, mean, sim_dt=None, extension_factor=20, bin_
         end_time = timestamps[-1] + 1.5 * bin_exposures
     else:
         start_time = timestamps[0] - bin_exposures[0]
-        end_time = timestamps[-1] + 1.5 * bin_exposures[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
+        end_time = (
+            timestamps[-1] + 1.5 * bin_exposures[-1]
+        )  # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
 
     duration = end_time - start_time
 
@@ -528,14 +590,28 @@ def tk95_sim(timestamps, psd_model, mean, sim_dt=None, extension_factor=20, bin_
 def check_pdfs(weights, pdfs):
     """Check input pdf parameters"""
     if len(pdfs) != len(weights):
-        raise ValueError("Number of weights (%d) must match number of pdfs (%d)" % (weights.size, pdfs.size))
+        raise ValueError(
+            "Number of weights (%d) must match number of pdfs (%d)"
+            % (weights.size, pdfs.size)
+        )
 
-    if round(np.sum(weights),5) > 1:
-        raise ValueError("Weights for the probability density distributions must be = 1. (%.20f)" % np.sum(weights))
+    if round(np.sum(weights), 5) > 1:
+        raise ValueError(
+            "Weights for the probability density distributions must be = 1. (%.20f)"
+            % np.sum(weights)
+        )
 
 
-def E13_sim(timestamps, psd_model, pdfs=[norm(0, 1)], weights=[1], sim_dt=None, extension_factor=20,
-            bin_exposures=None, max_iter=300):
+def E13_sim(
+    timestamps,
+    psd_model,
+    pdfs=[norm(0, 1)],
+    weights=[1],
+    sim_dt=None,
+    extension_factor=20,
+    bin_exposures=None,
+    max_iter=300,
+):
     """Simulate lightcurve using the method from Emmanolopoulos+2013
 
     timestamps: array_like
@@ -569,14 +645,18 @@ def E13_sim(timestamps, psd_model, pdfs=[norm(0, 1)], weights=[1], sim_dt=None, 
         sim_dt = np.mean(np.diff(timestamps))
 
     # step i
-    lc = simulate_lightcurve(timestamps, psd_model, sim_dt, extension_factor=extension_factor) # aliasing and rednoise leakage effects are taken into account here
+    lc = simulate_lightcurve(
+        timestamps, psd_model, sim_dt, extension_factor=extension_factor
+    )  # aliasing and rednoise leakage effects are taken into account here
 
     if np.isscalar(half_bins):
         start_time = timestamps[0] - 2 * half_bins
         end_time = timestamps[-1] + 3 * half_bins
     else:
         start_time = timestamps[0] - 2 * half_bins[0]
-        end_time = timestamps[-1] + 3 * half_bins[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
+        end_time = (
+            timestamps[-1] + 3 * half_bins[-1]
+        )  # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
 
     duration = end_time - start_time
 
@@ -585,7 +665,9 @@ def E13_sim(timestamps, psd_model, pdfs=[norm(0, 1)], weights=[1], sim_dt=None, 
     return E13_sim_TK95(lc_cut, timestamps, pdfs, weights, bin_exposures, max_iter)
 
 
-def E13_sim_TK95(lc, timestamps, pdfs=[norm(0, 1)], weights=[1], exposures=None, max_iter=400):
+def E13_sim_TK95(
+    lc, timestamps, pdfs=[norm(0, 1)], weights=[1], exposures=None, max_iter=400
+):
     """Simulate lightcurve using the method from Emmanolopoulos+2013
     lc: Lightcurve
         Regularly sampled TK95 generated lightcurve with the desired PSD (and taking into account, if desired, rednoise leakage and aliasing effects)
@@ -620,7 +702,9 @@ def E13_sim_TK95(lc, timestamps, pdfs=[norm(0, 1)], weights=[1], exposures=None,
 
     complex_fft = pyfftw.interfaces.numpy_fft.rfft(lc.countrate)
 
-    amplitudes_norm = np.absolute(complex_fft) / (n_datapoints // 2 + 1) # see Equation A2 from Emmanolopoulos+13
+    amplitudes_norm = np.absolute(complex_fft) / (
+        n_datapoints // 2 + 1
+    )  # see Equation A2 from Emmanolopoulos+13
 
     # step iii
     dft_adjust = ne.evaluate("amplitudes_norm * exp(1j * phases_sim)")
@@ -631,9 +715,9 @@ def E13_sim_TK95(lc, timestamps, pdfs=[norm(0, 1)], weights=[1], exposures=None,
 
     iteration = 0
     pyfftw.interfaces.cache.enable()
-    #plt.figure()
+    # plt.figure()
     # start loop
-    while (not np.allclose(xsim, xsim_adjust, rtol=1e-03) and iteration < max_iter):
+    while not np.allclose(xsim, xsim_adjust, rtol=1e-03) and iteration < max_iter:
         xsim = xsim_adjust
         # step ii Fourier transform of xsim
         dft_sim = pyfftw.interfaces.numpy_fft.rfft(xsim)
@@ -645,11 +729,14 @@ def E13_sim_TK95(lc, timestamps, pdfs=[norm(0, 1)], weights=[1], exposures=None,
         # iv amplitude adjustment --> ranking sorted values
         xsim_adjust[np.argsort(-xsim_adjust)] = xsim[np.argsort(-xsim)]
 
-        #diff = np.sum((xsim - xsim_adjust) ** 2)
-        #plt.scatter(iteration, diff, color="black")
+        # diff = np.sum((xsim - xsim_adjust) ** 2)
+        # plt.scatter(iteration, diff, color="black")
         iteration += 1
     if iteration == max_iter:
-        warnings.warn("Lightcurve did not converge after %d iterations, PDF might be inaccurate. Try increase the maximum number of iterations" % iteration)
+        warnings.warn(
+            "Lightcurve did not converge after %d iterations, PDF might be inaccurate. Try increase the maximum number of iterations"
+            % iteration
+        )
     # tesed until here
     lc.countrate = xsim
 

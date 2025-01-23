@@ -1,2 +1,7 @@
-from .mean_models import LinearModel, GaussianModel, SineModel
-from .celerite_models import Lorentzian, Cosinus, DampedRandomWalk, BendingPowerlaw
+from .celerite.celerite_models import (
+    BendingPowerlaw,
+    Cosinus,
+    DampedRandomWalk,
+    Lorentzian,
+)
+from .celerite.mean_models import GaussianModel, LinearModel, SineModel
