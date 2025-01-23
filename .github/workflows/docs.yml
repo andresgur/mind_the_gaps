@@ -3,10 +3,10 @@ name: Documentation
 on:
   push:
     branches:
-      - abstract2 
+      - abstract
   pull_request:
     branches:
-      - abstract2 
+      - abstract 
 
 jobs:
   build_docs:
