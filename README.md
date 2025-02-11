@@ -35,7 +35,7 @@ python setup.py test
 **Warning:** Tests currently are not passing. Please check the [issues](https://github.com/andresgur/mind_the_gaps/issues/13) on the respository to see the current status.
 
 # Citation
-You can cite the [paper]([https://github.com/andresgur/mind_the_gaps/issues/13](https://academic.oup.com/mnras/advance-article/doi/10.1093/mnras/staf196/7994434)) or the code as given below:
+You can cite the [paper](https://academic.oup.com/mnras/advance-article/doi/10.1093/mnras/staf196/7994434) or the code as given below:
 ```
 @article{10.1093/mnras/staf196,
     author = {Gúrpide, Andrés and Middleton, Matthew},
