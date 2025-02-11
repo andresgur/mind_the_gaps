@@ -35,6 +35,25 @@ python setup.py test
 **Warning:** Tests currently are not passing. Please check the [issues](https://github.com/andresgur/mind_the_gaps/issues/13) on the respository to see the current status.
 
 # Citation
+You can cite the [paper]([https://github.com/andresgur/mind_the_gaps/issues/13](https://academic.oup.com/mnras/advance-article/doi/10.1093/mnras/staf196/7994434)) or the code as given below:
+```
+@article{10.1093/mnras/staf196,
+    author = {Gúrpide, Andrés and Middleton, Matthew},
+    title = {Mind the gaps: improved methods for the detection of periodicities in unevenly-sampled data},
+    journal = {Monthly Notices of the Royal Astronomical Society},
+    pages = {staf196},
+    year = {2025},
+    month = {01},
+    abstract = {The detection of periodic signals in irregularly-sampled time series is a problem commonly encountered in astronomy. Traditional tools used for periodic searches, such as the periodogram, have poorly defined statistical properties under irregular sampling, which complicate inferring the underlying aperiodic variability used for hypothesis testing. The problem is exacerbated in the presence of stochastic variability, which can be easily mistaken by genuine periodic behaviour, particularly in the case of poorly sampled lightcurves. Here we present a method based on Gaussian Processes (GPs) modelling for period searches and characterization, specifically developed to overcome these problems. We argue that in cases of irregularly-sampled time series, GPs offer an appealing alternative to traditional periodograms, because the known distribution of the data (correlated Gaussian) allows a well-defined likelihood to be constructed. We exploit this property and draw from existing statistical methods to perform traditional likelihood ratio tests for an additional, (quasi-)periodic component, using the aperiodic variability inferred from the data as the null hypothesis. Inferring the noise from the data allows the method to be fully generalizable, with the only condition that the data can be described as a Gaussian process. We demonstrate the method by applying it to a variety of objects showing varying levels of noise and data quality. Limitations of the method are discussed and a package implementing the proposed methodology is made publicly available.},
+    issn = {0035-8711},
+    doi = {10.1093/mnras/staf196},
+    url = {https://doi.org/10.1093/mnras/staf196},
+    eprint = {https://academic.oup.com/mnras/advance-article-pdf/doi/10.1093/mnras/staf196/61722589/staf196.pdf},
+}
+```
+
+
+
 ```
 @software{andres_gurpide_lasheras_2024_14253754,
   author       = {Andrés Gúrpide Lasheras and
