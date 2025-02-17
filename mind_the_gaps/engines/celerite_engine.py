@@ -437,7 +437,7 @@ class CeleriteGPEngine(BaseGPEngine):
         pdf: str = "Gaussian",
         sigma_noise: float = None,
     ) -> List[GappyLightcurve]:
-        """Generates lightcurves by sampling from the MCMC posteriors
+        """Generates lightcurves by sampling from the MCMC posteriors.
 
         Parameters
         ----------
