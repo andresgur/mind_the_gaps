@@ -15,6 +15,7 @@ import numpy as np
 from celerite2.jax.terms import Term
 from tinygp.kernels.base import Kernel
 
+from mind_the_gaps.engines.celerite2_engine import Celerite2GPEngine
 from mind_the_gaps.engines.celerite_engine import CeleriteGPEngine
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
 
@@ -109,7 +110,11 @@ class GPModelling:
                     fit_mean=fit_mean,
                 )
             elif callable(kernel) and getattr(kernel, "_return_type", None) is Term:
-                raise NotImplementedError(f"Celerite2GPEngine not implemented.")
+                return Celerite2GPEngine(
+                    kernel_fn=kernel,
+                    lightcurve=lightcurve,
+                    **modelling_kwargs,
+                )
             elif isinstance(kernel, Kernel):
                 raise NotImplementedError(f"TinyGPEngine not implemented.")
             else:
@@ -122,7 +127,11 @@ class GPModelling:
                 fit_mean=fit_mean,
             )
         elif model_type.lower() == "celerite2":
-            raise NotImplementedError(f"Celerite2GPEngine not implemented.")
+            return Celerite2GPEngine(
+                kernel_fn=kernel,
+                lightcurve=lightcurve,
+                **modelling_kwargs,
+            )
         elif model_type.lower() == "tinygp":
             raise NotImplementedError(f"TinyGPEngine not implemented.")
         else:

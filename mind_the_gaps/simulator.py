@@ -3,12 +3,14 @@
 # @Email:  a.gurpide-lasheras@soton.ac.uk
 # @Last modified by:   agurpide
 # @Last modified time: 28-03-2022
+import inspect
 import warnings
 from math import log, sqrt
 
 import numexpr as ne
 import numpy as np
 import pyfftw
+from celerite2.jax.terms import Term as Celerite2Term
 from lmfit.models import LognormalModel
 from scipy.stats import norm
 from stingray import Lightcurve
@@ -441,8 +443,17 @@ def get_fft(N, dt, model):
     # generate real and complex parts from gaussian distributions
     real, im = np.random.normal(0, size=(2, N // 2 + 1))
     complex_fft = np.empty(len(freqs), dtype=complex)
-    complex_fft[1:] = (real + im * 1j)[1:] * np.sqrt(0.5 * model(freqs[1:]))
+    if inspect.ismethod(model):
+        model_object = model.__self__
+        if isinstance(model_object, Celerite2Term):
+            temp = model(np.log(freqs[1:]))
+        else:
+            temp = np.sqrt(0.5 * model(freqs[1:]))
+    else:
+        temp = np.sqrt(0.5 * model(freqs[1:]))
 
+    complex_fft[1:] = (real + im * 1j)[1:] * temp  # np.sqrt(0.5 * model(freqs[1:]))
+    # complex_fft[1:] = (real + im * 1j)[1:] * np.sqrt(0.5 * model(freqs[1:]))
     # assign whatever real number to the total number of photons, it does not matter as the lightcurve is normalized later
     complex_fft[0] = 1e6
     # In case of even number of data points f_nyquist is only real (see e.g. Emmanoulopoulos+2013 or Timmer & Koening+95)
