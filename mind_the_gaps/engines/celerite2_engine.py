@@ -16,6 +16,7 @@ import numpy as np
 import numpyro
 from jaxopt import ScipyBoundedMinimize
 from numpyro.infer import AIES, ESS, MCMC, NUTS
+from numpyro.infer.initialization import init_to_value
 from scipy.optimize import minimize
 
 from mind_the_gaps.engines.gp_engine import BaseGPEngine
@@ -96,6 +97,38 @@ class Celerite2GPEngine(BaseGPEngine):
         self.setup_gp(params=opt_params, t=self.lightcurve.times, fit=False)
         return opt_params
 
+    def initialize_params(self, init_params, std_dev=0.1):
+        """
+        Generate multiple initial parameter values for NUTS sampling, ensuring they
+        respect bounds and have a Gaussian spread.
+
+        Args:
+            init_params (list or array): Initial parameter values.
+            num_chains (int): Number of MCMC chains.
+            bounds (dict): Dictionary with parameter names as keys and (min, max) tuples as values.
+            std_dev (float): Standard deviation for Gaussian noise.
+
+        Returns:
+            dict: Dictionary of JAX arrays with shape (num_chains, param_dim).
+        """
+        param_dict = {}
+
+        for i, (param_name, (low, high)) in enumerate(self.bounds.items()):
+            base_value = init_params[i]
+
+            # Generate Gaussian noise and spread initial values
+            spread_values = base_value + np.random.normal(
+                0, std_dev, size=self.num_chains
+            )
+
+            # Clip to ensure values stay within bounds
+            spread_values = np.clip(spread_values, low, high)
+
+            # Convert to JAX array and store
+            param_dict[param_name] = jnp.array(spread_values)
+
+        return param_dict
+
     def derive_posteriors(self, fit=True, seed=0):
 
         converged = False
@@ -103,10 +136,12 @@ class Celerite2GPEngine(BaseGPEngine):
         if fit:
             self.init_params = self.minimize()
 
+        fixed_params = self.initialize_params(self.init_params)
         kernel = NUTS(
             self.numpyro_model,
             adapt_step_size=True,
             dense_mass=True,
+            init_strategy=init_to_value(values=fixed_params),
         )
 
         mcmc = MCMC(
@@ -122,7 +157,7 @@ class Celerite2GPEngine(BaseGPEngine):
             self.rng_key,
             t=self.lightcurve.times,
             y=self.lightcurve.y,
-            params=self.init_params,
+            # params=self.init_params,
             fit=False,
         )
         state = mcmc.last_state
