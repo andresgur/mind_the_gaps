@@ -91,6 +91,15 @@ if __name__ == "__main__":
     alternative_model = GPModelling(kernel=alternative_kernel, lightcurve=input_lc)
 
     alternative_model.derive_posteriors(max_steps=50000, fit=True, cores=cpus)
+    print(alternative_model.parameters)
+    alternative_model.parameters = [
+        1.48072326,
+        -10.0,
+        -3.31933739,
+        4.80087424,
+        -1.22426842,
+    ]
+
     autocorr = alternative_model.autocorr
     fig = plt.figure()
     n = np.arange(1, len(autocorr) + 1)
@@ -110,3 +119,49 @@ if __name__ == "__main__":
         levels=(1 - np.exp(-0.5), 1 - np.exp(-0.5 * 2**2)),
     )  # plots 1 and 2 sigma levels
     corner_fig.savefig("corner_plot_celerite_alt.png", dpi=100)
+
+    nsims = 100  # typically 10,000
+    lcs = null_model.generate_from_posteriors(nsims=nsims)
+    likelihoods_null = []
+    likelihoods_alt = []
+
+    for i, lc in enumerate(lcs):
+        print("Processing lightcurve %d/%d" % (i + 1, len(lcs)), end="\r")
+        # fig = plt.figure()
+        # plt.errorbar(lc.times, lc.y, lc.dy)
+        # plt.xlabel("Time (days)")
+        # plt.ylabel("Rate (ct/s)")
+        # plt.savefig("%d.png" % i, dpi=100)
+
+        # Run a small MCMC to make sure we find the global maximum of the likelihood
+        # ideally we'd probably want to run more samples
+        null_modelling = GPModelling(kernel=null_kernel, lightcurve=lc)
+        null_modelling.derive_posteriors(
+            fit=True, cores=cpus, walkers=2 * cpus, max_steps=500, progress=False
+        )
+        likelihoods_null.append(null_modelling.max_loglikelihood)
+        alternative_modelling = GPModelling(kernel=alternative_kernel, lightcurve=lc)
+        alternative_modelling.derive_posteriors(
+            fit=True, cores=cpus, walkers=2 * cpus, max_steps=500, progress=False
+        )
+        likelihoods_alt.append(alternative_modelling.max_loglikelihood)
+
+    plt.figure()
+    T_dist = -2 * (np.array(likelihoods_null) - np.array(likelihoods_alt))
+    print(T_dist)
+    plt.hist(T_dist, bins=10)
+    T_obs = -2 * (null_model.max_loglikelihood - alternative_model.max_loglikelihood)
+    print("Observed LRT_stat: %.3f" % T_obs)
+    perc = percentileofscore(T_dist, T_obs)
+    print("p-value: %.4f" % (1 - perc / 100))
+    plt.axvline(T_obs, label="%.2f%%" % perc, ls="--", color="black")
+
+    sigmas = [95, 99.7]
+    colors = ["red", "green"]
+    for i, sigma in enumerate(sigmas):
+        plt.axvline(np.percentile(T_dist, sigma), ls="--", color=colors[i])
+    plt.legend()
+    # plt.axvline(np.percentile(T_dist, 99.97), color="green")
+    plt.xlabel("$T_\\mathrm{LRT}$")
+
+# plt.savefig("LRT_statistic.png", dpi=100)

@@ -73,11 +73,16 @@ class Celerite2GPEngine(BaseGPEngine):
     def negative_log_likelihood(self, params: jnp.array, fit=True):
         self.setup_gp(params, self.lightcurve.times, fit=fit)
         nll_value = -self.gp.log_likelihood(self.lightcurve.y)
+
         return nll_value
 
     def numpyro_model(self, t, y=None, params=None, fit=False):
+
         self.setup_gp(params, t, fit=fit)
+        log_likelihood = self.gp.log_likelihood(self.lightcurve.y)
+        numpyro.deterministic("log_likelihood", log_likelihood)
         numpyro.sample("obs", self.gp.numpyro_dist(), obs=self.lightcurve.y)
+        # numpyro.deterministic("psd", psd_model=self.gp.kernel.get_psd)
 
     def minimize(self):
 
@@ -180,7 +185,13 @@ class Celerite2GPEngine(BaseGPEngine):
             )
             mcmc.post_warmup_state = mcmc.last_state
             idata = az.from_numpyro(mcmc)
-            az_summary = az.summary(idata)
+            # az_summary = az.summary(idata)
+            az_summary = az.summary(
+                idata,
+                var_names=[
+                    v for v in idata.posterior.data_vars if "log_likelihood" not in v
+                ],
+            )
             if all(az_summary["r_hat"] < 1.05):  # and all(
                 # az_summary["ess_tail"] / self.converge_step > 0.1
                 # ):
@@ -191,13 +202,14 @@ class Celerite2GPEngine(BaseGPEngine):
                     f"MCMC not converged after {(iteration+1)*self.converge_step} steps."
                 )
                 print(
-                    f"{az_summary['r_hat']} {az_summary['ess_tail'] / self.converge_step}"
-                )
+                    f"{az_summary['r_hat']}"
+                )  # {az_summary['ess_tail'] / self.converge_step}"
 
         self.mcmc = mcmc
+        self._loglikelihoods = idata.posterior["log_likelihood"].values
 
-        # az.plot_autocorr(idata, var_names=list(idata.posterior.data_vars))
-        # plt.savefig("autocorrellation.png")
+        az.plot_autocorr(idata, var_names=list(idata.posterior.data_vars))
+        plt.savefig("autocorrellation.png")
 
         self.mcmc_samples = mcmc.get_samples()
 
@@ -214,25 +226,28 @@ class Celerite2GPEngine(BaseGPEngine):
 
         self.mcmc_samples = samples_thinned
 
-    def generate_from_posteriors(self, nsims=10):
+    def generate_from_posteriors(self):
 
         if self.mcmc_samples is None:
             raise RuntimeError(
                 "Posteriors have not been derived. Please run derive_posteriors prior to calling this method."
             )
-        if nsims >= len(next(iter(self.mcmc_samples.values()))):
+        if self.nsims >= len(next(iter(self.mcmc_samples.values()))):
             warnings.warn(
                 "The number of simulation requested (%d) is higher than the number of posterior samples (%d), so many samples will be drawn more than once"
             )
         lcs = []
 
         samples = np.column_stack(
-            [v[np.random.choice(len(v), nsims)] for v in self.mcmc_samples.values()]
+            [
+                v[np.random.choice(len(v), self.nsims)]
+                for v in self.mcmc_samples.values()
+            ]
         )
 
         for params in samples:
 
-            kernel = self.kernel_fn(params=params, fit=True, rng_key=self.rng_key)
+            kernel = self.kernel_fn(params=params[:-1], fit=True, rng_key=self.rng_key)
             gp_sample = celerite2.jax.GaussianProcess(kernel)  # , mean=sample["mean"])
             gp_sample.compute(self.lightcurve.times, check_sorted=False)
             psd_model = gp_sample.kernel.get_psd
@@ -243,3 +258,13 @@ class Celerite2GPEngine(BaseGPEngine):
             lcs.append(lc)
 
         return lcs
+
+    @property
+    def max_loglikelihood(self):
+        if self._loglikelihoods is None:
+            raise AttributeError(
+                "Posteriors have not been derived. Please run \
+                    derive_posteriors prior to populate the attributes."
+            )
+
+        return self._loglikelihoods.max()

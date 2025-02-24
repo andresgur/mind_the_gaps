@@ -172,7 +172,9 @@ class GPModelling:
             raise AttributeError(
                 "Posteriors have not been derived. Please run derive_posteriors prior to populate the attributes."
             )
-        return self._mcmc_samples[np.argmax(self._loglikelihoods)]
+        return self.modelling_engine._mcmc_samples[
+            np.argmax(self.modelling_engine._loglikelihoods)
+        ]
 
     @property
     def median_parameters(self):
@@ -197,3 +199,11 @@ class GPModelling:
                 "Posteriors have not been derived. Please run derive_posteriors prior to populate the attributes."
             )
         return self.modelling_engine._mcmc_samples
+
+    @property
+    def parameters(self):
+        return self.modelling_engine.gp.get_parameter_vector()
+
+    @parameters.setter
+    def parameters(self, value):
+        self.modelling_engine.gp.set_parameter_vector(value)
