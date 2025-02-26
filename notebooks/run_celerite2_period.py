@@ -74,7 +74,6 @@ if __name__ == "__main__":
         converge_step=1000,
         device="cpu",
         devices=10,
-        nsims=100,
         params=jnp.array([variance_drw, w_bend]),
         bounds=bounds_drw,
     )
@@ -98,7 +97,7 @@ if __name__ == "__main__":
 
     corner_fig.savefig("corner_plot_celerite2_period.png", dpi=100)
     nsims = 100  # typically 10,000
-    lcs = null_model.generate_from_posteriors()
+    lcs = null_model.generate_from_posteriors(nsims=nsims)
 
     c = 0.5 * w_qpo / Q
     log_c = np.log(c)
@@ -121,7 +120,6 @@ if __name__ == "__main__":
         converge_step=1000,
         device="cpu",
         devices=10,
-        nsims=100,
         params=jnp.array([variance_qpo, c, w_bend, variance_drw, w_bend]),
         bounds=bounds_qpo | bounds_drw,
     )
@@ -157,13 +155,12 @@ if __name__ == "__main__":
             lightcurve=lc,
             mean_model=None,
             fit_mean=True,
-            max_steps=500,
+            max_steps=1000,
             num_chains=6,
             num_warmup=500,
             converge_step=500,
             device="cpu",
             devices=10,
-            nsims=100,
             params=jnp.array([variance_drw, w_bend]),
             bounds=dict(a=np.exp((-10, 50)), c=np.exp((-10, 10))),
         )
@@ -181,7 +178,6 @@ if __name__ == "__main__":
             converge_step=500,
             device="cpu",
             devices=10,
-            nsims=100,
             params=jnp.array([variance_qpo, c, w_qpo, variance_drw, w_bend]),
             bounds=bounds_qpo | bounds_drw,
         )

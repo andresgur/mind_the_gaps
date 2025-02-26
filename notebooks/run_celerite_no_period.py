@@ -91,6 +91,7 @@ if __name__ == "__main__":
     alternative_model = GPModelling(kernel=alternative_kernel, lightcurve=input_lc)
 
     alternative_model.derive_posteriors(max_steps=50000, fit=True, cores=cpus)
+    # example of setting and getting params from model
     print(alternative_model.parameters)
     alternative_model.parameters = [
         1.48072326,

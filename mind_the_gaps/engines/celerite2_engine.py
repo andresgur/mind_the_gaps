@@ -39,7 +39,7 @@ class Celerite2GPEngine(BaseGPEngine):
         device: str,
         devices: int,
         params: float,
-        nsims: int = 10,
+        # nsims: int = 10,
         seed: int = 0,
         bounds: dict = None,
     ):
@@ -51,7 +51,7 @@ class Celerite2GPEngine(BaseGPEngine):
         self.num_chains = num_chains
         self.num_warmup = num_warmup
         self.converge_step = converge_step
-        self.nsims = nsims
+        # self.nsims = nsims
         self.rng_key = jax.random.PRNGKey(seed)
         self.init_params = jnp.array(params)
         self.bounds = bounds
@@ -208,8 +208,8 @@ class Celerite2GPEngine(BaseGPEngine):
         self.mcmc = mcmc
         self._loglikelihoods = idata.posterior["log_likelihood"].values
 
-        az.plot_autocorr(idata, var_names=list(idata.posterior.data_vars))
-        plt.savefig("autocorrellation.png")
+        # az.plot_autocorr(idata, var_names=list(idata.posterior.data_vars))
+        # plt.savefig("autocorrellation.png")
 
         self.mcmc_samples = mcmc.get_samples()
 
@@ -226,23 +226,20 @@ class Celerite2GPEngine(BaseGPEngine):
 
         self.mcmc_samples = samples_thinned
 
-    def generate_from_posteriors(self):
+    def generate_from_posteriors(self, nsims: int):
 
         if self.mcmc_samples is None:
             raise RuntimeError(
                 "Posteriors have not been derived. Please run derive_posteriors prior to calling this method."
             )
-        if self.nsims >= len(next(iter(self.mcmc_samples.values()))):
+        if nsims >= len(next(iter(self.mcmc_samples.values()))):
             warnings.warn(
                 "The number of simulation requested (%d) is higher than the number of posterior samples (%d), so many samples will be drawn more than once"
             )
         lcs = []
 
         samples = np.column_stack(
-            [
-                v[np.random.choice(len(v), self.nsims)]
-                for v in self.mcmc_samples.values()
-            ]
+            [v[np.random.choice(len(v), nsims)] for v in self.mcmc_samples.values()]
         )
 
         for params in samples:
