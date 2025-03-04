@@ -1,12 +1,16 @@
 from abc import ABCMeta, abstractmethod
+from typing import TypeVar
 
+import jax.numpy as jnp
 import numpy as np
+
+ArrayType = TypeVar("Array", np.ndarray, jnp.ndarray)
 
 
 class BaseGP(metaclass=ABCMeta):
 
     @abstractmethod
-    def compute(self, times: np.array, errors: np.array):
+    def compute(self, times: ArrayType, errors: ArrayType):
         raise NotImplementedError
 
     @abstractmethod
@@ -14,11 +18,11 @@ class BaseGP(metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
-    def set_parameter_vector(self, params: np.array):
+    def set_parameter_vector(self, params: ArrayType):
         raise NotImplementedError
 
     @abstractmethod
-    def log_likelihood(self, observations: np.array):
+    def log_likelihood(self, observations: ArrayType):
         raise NotImplementedError
 
     @abstractmethod

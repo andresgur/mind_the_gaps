@@ -92,85 +92,7 @@ class CeleriteGPEngine(BaseGPEngine):
 
         return -self.gp.log_likelihood(self._lightcurve.y)
 
-    def _build_mean_model(self, meanmodel: str) -> Tuple[Model, bool]:
-        """_summary_
-
-        Parameters
-        ----------
-        meanmodel : str
-            Mean model to construct. Valid options are "constant","linear","Gaussian". Defaults to Gaussian if meanmodel is None.
-
-        Returns
-        -------
-        Tuple[Model, bool]
-            Returns celerite.modelling.Model and a bool indicating whether to the mean model is fitted or not.
-
-        Raises
-        ------
-        ValueError
-            If meanmodel is not an accepted option.
-        """
-        maxy = np.max(self._lightcurve.y)
-
-        if meanmodel is None:
-            # no fitting case
-            meanmodel = ConstantModel(
-                self._lightcurve.mean, bounds=[(np.min(self._lightcurve.y), maxy)]
-            )
-            return meanmodel, False
-        elif meanmodel.lower() not in self.meanmodels:
-            raise ValueError(
-                "Input mean model %s not implemented! Only \n %s \n are available"
-                % (meanmodel, "\t".join(self.meanmodels))
-            )
-
-        elif meanmodel.lower() == "constant":
-            meanlabels = ["$\mu$"]
-
-        elif meanmodel.lower() == "linear":
-            slope_guess = np.sign(self._lightcurve.y[-1] - self._lightcurve.y[0])
-            minindex = np.argmin(self._lightcurve.times)
-            maxindex = np.argmax(self._lightcurve.times)
-            slope_bound = (
-                self._lightcurve.y[maxindex] - self._lightcurve.y[minindex]
-            ) / (self._lightcurve.times[maxindex] - self._lightcurve.times[minindex])
-            if slope_guess > 0:
-                min_slope = slope_bound
-                max_slope = -slope_bound
-            else:
-                min_slope = -slope_bound
-                max_slope = slope_bound
-            slope = np.cov(self._lightcurve.times, self._lightcurve.y)[0, 1] / np.var(
-                self._lightcurve.times
-            )
-            meanmodel = LinearModel(
-                0, 1.5, bounds=[(-np.inf, np.inf), (-np.inf, np.inf)]
-            )
-            meanlabels = ["$m$", "$b$"]
-
-        elif meanmodel.lower() == "gaussian":
-            sigma_guess = (self._lightcurve.duration) / 2
-            amplitude_guess = (maxy - np.min(y)) * np.sqrt(2 * np.pi) * sigma_guess
-            mean_guess = self._lightcurve.times[len(self._lightcurve.times) // 2]
-            meanmodel = GaussianModel(
-                mean_guess,
-                sigma_guess,
-                amplitude_guess,
-                bounds=[
-                    (self._lightcurve.times[0], self._lightcurve.times[-1]),
-                    (0, self._lightcurve.duration),
-                    (
-                        maxy * np.sqrt(2 * np.pi) * self._lightcurve.duration,
-                        50 * maxy * np.sqrt(2 * np.pi) * self._lightcurve.duration,
-                    ),
-                ],
-            )
-
-            meanlabels = ["$\mu$", "$\sigma$", "$A$"]
-
-        return meanmodel, True
-
-    def fit(self, initial_params: np.array = None) -> OptimizeResult:
+    def _fit(self, initial_params: np.array = None) -> OptimizeResult:
         """Fit the GP by running a minimization routine.
 
         Parameters
@@ -231,10 +153,10 @@ class CeleriteGPEngine(BaseGPEngine):
                 initial_params = self.initial_params
 
             else:
-                solution = self.fit(self.initial_params)
+                solution = self._fit(self.initial_params)
                 initial_params = solution.x
 
-            initial_chain_params = self.spread_walkers(
+            initial_chain_params = self._spread_walkers(
                 walkers, initial_params, np.array(self.gp.get_parameter_bounds())
             )
 
@@ -301,7 +223,7 @@ class CeleriteGPEngine(BaseGPEngine):
         self._mcmc_samples = sampler.get_chain(discard=discard, thin=thin, flat=True)
         self._sampler = sampler
 
-    def spread_walkers(
+    def _spread_walkers(
         self,
         walkers: int,
         parameters: np.array,
@@ -390,7 +312,7 @@ class CeleriteGPEngine(BaseGPEngine):
                 )[out_of_bounds_upper]
         return initial_samples
 
-    def get_rstat(self, burnin: int = None) -> np.array:
+    def _get_rstat(self, burnin: int = None) -> np.array:
         """Calculate convergence criterion from Gelman & Rubin 1992; Gelman et al. 2004.
         Values close to 1 indicate convergence.
 
@@ -521,27 +443,6 @@ class CeleriteGPEngine(BaseGPEngine):
         return lc
 
     @property
-    def loglikelihoods(self) -> np.array:
-        """_summary_
-
-        Returns
-        -------
-        np.array
-            Array containing likelihoods.
-
-        Raises
-        ------
-        AttributeError
-            _description_
-        """
-        if self._loglikelihoods is None:
-            raise AttributeError(
-                "Posteriors have not been derived. Please run \
-                    derive_posteriors prior to populate the attributes."
-            )
-        return self._loglikelihoods
-
-    @property
     def autocorr(self) -> List[float]:
         """Get the autocorrelation time.
 
@@ -550,7 +451,11 @@ class CeleriteGPEngine(BaseGPEngine):
         List[float]
             Autocorrelation time.
         """
-
+        if self._autocorr is None:
+            raise AttributeError(
+                "Posteriors have not been derived. Please run \
+                    derive_posteriors prior to populate the attributes."
+            )
         return self._autocorr
 
     @property
@@ -561,16 +466,6 @@ class CeleriteGPEngine(BaseGPEngine):
                     derive_posteriors prior to populate the attributes."
             )
         return self._sampler
-
-    @property
-    def mcmc_samples(self):
-
-        if self._mcmc_samples is None:
-            raise AttributeError(
-                "Posteriors have not been derived. Please run \
-                    derive_posteriors prior to populate the attributes."
-            )
-        return self._mcmc_samples
 
     @property
     def max_loglikelihood(self):
@@ -605,18 +500,6 @@ class CeleriteGPEngine(BaseGPEngine):
     @property
     def parameter_names(self):
         return self.gp.get_parameter_names()
-
-    @property
-    def k(self):
-        """
-        Number of variable parameters
-
-        Returns
-        -------
-        int
-            Number of variable parameters
-        """
-        return self._ndim
 
     @property
     def tau(self):

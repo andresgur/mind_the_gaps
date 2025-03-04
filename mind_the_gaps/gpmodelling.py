@@ -4,6 +4,7 @@
 # @Last modified by:   agurpide
 # @Last modified time: 28-05-2024
 
+import jax.numpy as jnp
 from jax import config
 
 config.update("jax_enable_x64", True)
@@ -24,8 +25,6 @@ class GPModelling:
     """
     The interface for Gaussian Process (GP) modeling.
     """
-
-    meanmodels = ["linear", "constant", "gaussian"]
 
     def __init__(
         self,
@@ -72,7 +71,7 @@ class GPModelling:
         mean_model: str,
         fit_mean: bool,
         **modelling_kwargs: Mapping[str, Any],
-    ) -> Union[CeleriteGPEngine]:
+    ) -> Union[CeleriteGPEngine | Celerite2GPEngine]:
         """Select GP  modelling engine.
 
         Parameters
@@ -155,12 +154,24 @@ class GPModelling:
         return self.modelling_engine.generate_from_posteriors(**engine_kwargs)
 
     @property
-    def loglikelihoods(self):
-        return self.modelling_engine.loglikelihoods
+    def parameters(self):
+        return self.modelling_engine.gp.get_parameter_vector()
+
+    @parameters.setter
+    def parameters(self, value):
+        self.modelling_engine.gp.set_parameter_vector(value)
 
     @property
-    def autocorr(self):
-        return self.modelling_engine.autocorr
+    def loglikelihoods(self) -> Union[np.array, jnp.array]:
+        return self.modelling_engine._loglikelihoods
+
+    @property
+    def autocorr(self) -> List[float]:
+        return self.modelling_engine._autocorr
+
+    @property
+    def mcmc_samples(self):
+        return self.modelling_engine._mcmc_samples
 
     @property
     def max_loglikelihood(self):
@@ -168,13 +179,7 @@ class GPModelling:
 
     @property
     def max_parameters(self):
-        if self.modelling_engine._mcmc_samples is None:
-            raise AttributeError(
-                "Posteriors have not been derived. Please run derive_posteriors prior to populate the attributes."
-            )
-        return self.modelling_engine._mcmc_samples[
-            np.argmax(self.modelling_engine._loglikelihoods)
-        ]
+        return self.modelling_engine.max_parameters
 
     @property
     def median_parameters(self):
@@ -182,7 +187,7 @@ class GPModelling:
 
     @property
     def parameter_names(self):
-        return self.modelling_engine.gp.get_parameter_names()
+        return self.modelling_engine.parameter_names
 
     @property
     def k(self):
@@ -191,19 +196,3 @@ class GPModelling:
     @property
     def tau(self):
         return self.modelling_engine.tau
-
-    @property
-    def mcmc_samples(self):
-        if self.modelling_engine._mcmc_samples is None:
-            raise AttributeError(
-                "Posteriors have not been derived. Please run derive_posteriors prior to populate the attributes."
-            )
-        return self.modelling_engine._mcmc_samples
-
-    @property
-    def parameters(self):
-        return self.modelling_engine.gp.get_parameter_vector()
-
-    @parameters.setter
-    def parameters(self, value):
-        self.modelling_engine.gp.set_parameter_vector(value)

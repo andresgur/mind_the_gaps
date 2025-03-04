@@ -25,38 +25,61 @@ class Celerite2GP(BaseGP):
         lightcurve: GappyLightcurve,
         mean: Union[float, Callable],
         params: jnp.array,
-        seed: int = 0,
+        rng_key: jnp.array,
         bounds: dict = None,
     ):
 
         self.kernel_fn = kernel_fn
         self._lightcurve = lightcurve
-        self.rng_key = jax.random.PRNGKey(seed)
+        self.rng_key = rng_key
         self.bounds = bounds
-        self.mean = mean
-        self.init_params = params
-        self.setup_gp(self.init_params, self._lightcurve.times, fit=False)
+        self.mean, self.fit_mean = self._build_mean_model(mean)
+        self.params = params
+        self.compute(self.params, self._lightcurve.times, fit=True)
 
-    def setup_gp(self, params: jnp.array, t: jnp.array, fit: bool):
+    def _build_mean_model(self, meanmodel: str):
+        if meanmodel is None:
+            return self._lightcurve.mean, False
+
+    def numpyro_dist(self):
+        self.gp.numpyro_dist()
+
+    def compute(self, params: jnp.array, t: jnp.array, fit: bool) -> None:
+        self.params = params
         kernel = self.kernel_fn(
             params=params, fit=fit, rng_key=self.rng_key, bounds=self.bounds
         )
         self.gp = celerite2.jax.GaussianProcess(kernel, mean=self.mean)
         self.gp.compute(t, yerr=self._lightcurve.dy, check_sorted=False)
 
-    def negative_log_likelihood(self, params: jnp.array, fit=True):
+    def get_psd(self):
+        kernel = self.kernel_fn(
+            params=self.params, fit=True, rng_key=self.rng_key, bounds=self.bounds
+        )
+        return kernel.get_psd
 
-        self.setup_gp(params=params, t=self._lightcurve.times, fit=fit)
-        jax.debug.print("params:{}", params)
+    def negative_log_likelihood(self, params: jnp.array, fit=True):
+        self.compute(params, self._lightcurve.times, fit=fit)
+        # jax.debug.print("params {params}", params=params)
+        # Should this be y with value passed through?
         nll_value = -self.gp.log_likelihood(self._lightcurve.y)
-        jax.debug.print("nll: {}", nll_value)
+        # jax.debug.print("nll_value: {nll_value}", nll_value=nll_value)
         return nll_value
 
-    def numpyro_model(self, t, y=None, params=None, fit=False):
-        self.setup_gp(params, t, fit=fit)
-        numpyro.sample("obs", self.gp.numpyro_dist(), obs=self._lightcurve.y)
+    def get_parameter_vector(self):
+        return self.params
 
+    def set_parameter_vector(self, params: jnp.array):
+        self.compute(params=params, t=self._lightcurve.times, fit=True)
 
-#    def compute(self) -> None:  # , times: np.array, errors: np.array):
+    def log_likelihood(self, observations: jnp.array):
+        return self.gp.log_likelihood(y=observations)
 
-# self.gp.compute(self._lightcurve.times, yerr=self._lightcurve.dy + 1e-12)
+    def get_parameter_bounds(self):
+        return self.bounds
+
+    def log_prior(self):
+        raise NotImplementedError
+
+    def get_parameter_names(self):
+        raise NotImplementedError

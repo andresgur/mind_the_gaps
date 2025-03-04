@@ -13,6 +13,7 @@ from mind_the_gaps.models.celerite.mean_models import (
 
 
 class CeleriteGP(BaseGP):
+    meanmodels = ["linear", "constant", "gaussian"]
 
     def __init__(
         self,
@@ -21,13 +22,10 @@ class CeleriteGP(BaseGP):
         fit_mean: bool,
         mean_model: str = None,
     ):
-        self.mean_model, self.fit_mean = self._build_mean_model(
-            lightcurve=lightcurve, mean_model=mean_model
-        )
         self._lightcurve = lightcurve
-        self.gp = celerite.GP(
-            kernel=kernel, mean=self.mean_model, fit_mean=self.fit_mean
-        )
+        self.mean_model, self.fit_mean = self._build_mean_model(meanmodel=mean_model)
+        self.fit_mean = fit_mean
+        self.gp = celerite.GP(kernel=kernel, mean=self.mean_model, fit_mean=fit_mean)
         self.kernel = kernel
         self.compute()
 
@@ -50,45 +48,89 @@ class CeleriteGP(BaseGP):
     def get_parameter_bounds(self) -> list:
         return self.gp.get_parameter_bounds()
 
-    def _build_mean_model(
-        self, lightcurve: GappyLightcurve, mean_model: str
-    ) -> tuple[Model, bool]:
-        maxy = np.max(lightcurve.y)
+    def _build_mean_model(self, meanmodel: str) -> tuple[Model, bool]:
+        """Construct the GP mean model based on lightcurve properties and
+        input string
 
-        if mean_model is None:
+        Parameters
+        ----------
+        meanmodel : str
+            Mean model to construct. Valid options are "constant","linear","Gaussian". Defaults to Gaussian if meanmodel is None.
+
+        Returns
+        -------
+        Tuple[Model, bool]
+            Returns celerite.modelling.Model and a bool indicating whether to the mean model is fitted or not.
+
+        Raises
+        ------
+        ValueError
+            If meanmodel is not an accepted option.
+        """
+
+        if meanmodel is None:
             # no fitting case
             meanmodel = ConstantModel(
-                lightcurve.mean, bounds=[(np.min(lightcurve.y), maxy)]
+                self._lightcurve.mean,
+                bounds=[(np.min(self._lightcurve.y), np.max(self._lightcurve.y))],
             )
             return meanmodel, False
 
-        elif mean_model.lower() == "linear":
+        elif meanmodel.lower() == "constant":
+            meanlabels = ["$\mu$"]
 
+        elif meanmodel.lower() == "linear":
+            slope_guess = np.sign(self._lightcurve.y[-1] - self._lightcurve.y[0])
+            minindex = np.argmin(self._lightcurve.times)
+            maxindex = np.argmax(self._lightcurve.times)
+            slope_bound = (
+                self._lightcurve.y[maxindex] - self._lightcurve.y[minindex]
+            ) / (self._lightcurve.times[maxindex] - self._lightcurve.times[minindex])
+            if slope_guess > 0:
+                min_slope = slope_bound
+                max_slope = -slope_bound
+            else:
+                min_slope = -slope_bound
+                max_slope = slope_bound
+            slope = np.cov(self._lightcurve.times, self._lightcurve.y)[0, 1] / np.var(
+                self._lightcurve.times
+            )
             meanmodel = LinearModel(
                 0, 1.5, bounds=[(-np.inf, np.inf), (-np.inf, np.inf)]
             )
-            return meanmodel, False  # ?
-        elif mean_model.lower() == "gaussian":
-            sigma_guess = (lightcurve.duration) / 2
-            amplitude_guess = (maxy - np.min(y)) * np.sqrt(2 * np.pi) * sigma_guess
-            mean_guess = lightcurve.times[len(lightcurve.times) // 2]
+            meanlabels = ["$m$", "$b$"]
+
+        elif meanmodel.lower() == "gaussian":
+            sigma_guess = (self._lightcurve.duration) / 2
+            amplitude_guess = (
+                (np.max(self._lightcurve.y) - np.min(self._lightcurve.y))
+                * np.sqrt(2 * np.pi)
+                * sigma_guess
+            )
+
+            mean_guess = self._lightcurve.times[len(self._lightcurve.times) // 2]
             meanmodel = GaussianModel(
                 mean_guess,
                 sigma_guess,
                 amplitude_guess,
                 bounds=[
-                    (lightcurve.times[0], lightcurve.times[-1]),
-                    (0, lightcurve.duration),
+                    (self._lightcurve.times[0], self._lightcurve.times[-1]),
+                    (0, self._lightcurve.duration),
                     (
-                        maxy * np.sqrt(2 * np.pi) * lightcurve.duration,
-                        50 * maxy * np.sqrt(2 * np.pi) * lightcurve.duration,
+                        np.max(self._lightcurve.y)
+                        * np.sqrt(2 * np.pi)
+                        * self._lightcurve.duration,
+                        50
+                        * np.max(self._lightcurve.y)
+                        * np.sqrt(2 * np.pi)
+                        * self._lightcurve.duration,
                     ),
                 ],
             )
 
-            return meanmodel, True
-        else:
-            raise
+            meanlabels = ["$\mu$", "$\sigma$", "$A$"]
+
+        return meanmodel, True
 
     def get_parameter_names(self) -> tuple:
         return self.gp.get_parameter_names()

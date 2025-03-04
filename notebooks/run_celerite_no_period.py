@@ -63,11 +63,11 @@ if __name__ == "__main__":
         title_fmt=".1f",
         quantiles=[0.16, 0.5, 0.84],
         show_titles=True,
-        truths=[np.log(variance_drw), np.log(w_bend)],
+        truths=[np.log(variance_drw), np.log(w_bend), mean],
         title_kwargs={"fontsize": 18},
         max_n_ticks=3,
         labelpad=0.08,
-        levels=(1 - np.exp(-0.5), 1 - np.exp(-0.5 * 2**2)),
+        levels=(1 - np.exp(-0.5), 1 - np.exp(-0.5 * 2**2), mean),
     )
     corner_fig.savefig("corner_plot_celerite.png", dpi=100)
     P = 10  # period of the QPO
@@ -138,12 +138,12 @@ if __name__ == "__main__":
         # ideally we'd probably want to run more samples
         null_modelling = GPModelling(kernel=null_kernel, lightcurve=lc)
         null_modelling.derive_posteriors(
-            fit=True, cores=cpus, walkers=2 * cpus, max_steps=500, progress=False
+            fit=False, cores=cpus, walkers=2 * cpus, max_steps=500, progress=False
         )
         likelihoods_null.append(null_modelling.max_loglikelihood)
         alternative_modelling = GPModelling(kernel=alternative_kernel, lightcurve=lc)
         alternative_modelling.derive_posteriors(
-            fit=True, cores=cpus, walkers=2 * cpus, max_steps=500, progress=False
+            fit=False, cores=cpus, walkers=2 * cpus, max_steps=500, progress=False
         )
         likelihoods_alt.append(alternative_modelling.max_loglikelihood)
 

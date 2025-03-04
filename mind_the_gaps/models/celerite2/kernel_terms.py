@@ -112,6 +112,9 @@ def complex_real_kernel_fn(
     if fit:
         a, c, d, a2, c2 = params
     else:
+
+        # with numpyro.plate("kernel_plate", num_kernels):
+
         log_a = numpyro.sample(
             "log_a",
             dist.Uniform(jnp.log(bounds["a"][0]), jnp.log(bounds["a"][1])),
