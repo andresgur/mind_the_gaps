@@ -118,9 +118,8 @@ class Celerite2GPEngine(BaseGPEngine):
 
         upper_bounds = jnp.array([values[1] for values in self.bounds.values()])
         lower_bounds = jnp.array([values[0] for values in self.bounds.values()])
-        mean_bound = jnp.array(self.gp.mean_model.bounds[0])
-        upper_bounds = jnp.concatenate([mean_bound, upper_bounds])
-        lower_bounds = jnp.concatenate([self.gp.mean_model.bounds[1], lower_bounds])
+        upper_bounds = jnp.concatenate([self.gp.mean_model.bounds[1], upper_bounds])
+        lower_bounds = jnp.concatenate([self.gp.mean_model.bounds[0], lower_bounds])
 
         solver = jaxopt.ScipyBoundedMinimize(
             method="l-bfgs-b",

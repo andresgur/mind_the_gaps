@@ -43,10 +43,13 @@ class Celerite2GP(BaseGP):
         self.compute(self.params, self._lightcurve.times, fit=True)
 
     def _build_mean_model(self, meanmodel: str):
-        # if meanmodel is None:
-        #    return self._lightcurve.mean, False
+
         if meanmodel is None:
-            return ConstantMean(lightcurve=self._lightcurve), False
+            return ConstantMean(lightcurve=self._lightcurve), True
+        elif meanmodel.lower() == "constant":
+            return self._lightcurve.mean()
+
+            meanlabels = ["$\mu$"]
 
     def numpyro_dist(self):
         self.gp.numpyro_dist()
@@ -64,8 +67,12 @@ class Celerite2GP(BaseGP):
         self.gp.compute(t, yerr=self._lightcurve.dy, check_sorted=False)
 
     def get_psd(self):
-        kernel = self.kernel_fn(
-            params=self.params, fit=True, rng_key=self.rng_key, bounds=self.bounds
+        kernel, _ = self.kernel_fn(
+            params=self.params,
+            fit=True,
+            rng_key=self.rng_key,
+            bounds=self.bounds,
+            mean_model=self.mean_model,
         )
         return kernel.get_psd
 

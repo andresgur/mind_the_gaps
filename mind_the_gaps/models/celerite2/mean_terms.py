@@ -12,12 +12,6 @@ class MeanFunction(ABC):
     def __init__(self, lightcurve: jnp.array):
         self._lightcurve = lightcurve
 
-    # @classmethod
-    # @abstractmethod
-    # def count_parameters(cls):
-    #    """Return the number of parameters required by this mean function."""
-    #    pass
-
     @abstractmethod
     def compute_mean(self, params: jnp.array, fit: bool, rng_key: int):
         """Compute the mean based on the function form and parameters."""
@@ -35,14 +29,9 @@ class ConstantMean(MeanFunction):
             [[jnp.min(self._lightcurve.y)], [jnp.max(self._lightcurve.y)]]
         )
 
-    # jnp.array(
-    #            jnp.array([jnp.min(self._lightcurve.y)]),
-    #            jnp.array([jnp.max(self._lightcurve.y)]),
-    #        )
-
     def compute_mean(self, params: jnp.array, fit: bool, rng_key: int):
         if fit:
-            return params[: self.no_parameters]  # Return the fixed constant
+            return params[: self.no_parameters]
         else:
             return numpyro.sample(
                 "mean",
@@ -58,18 +47,24 @@ class LinearMean(MeanFunction):
     def count_parameters(cls):
         return 2  # Linear mean has 2 parameters: slope (m) and intercept (b)
 
+    def __init__(self, lightcurve):
+        super().__init__(lightcurve=lightcurve)
+        self.bounds = jnp.array(
+            [[jnp.min(self._lightcurve.y)], [jnp.max(self._lightcurve.y)]]
+        )
+
     def compute_mean(self, params: jnp.array, fit: bool, rng_key: int, bounds: dict):
         if fit:
             m, b = params[: self.count_parameters]
 
         else:
             m = numpyro.sample(
-                "slope",
+                "m",
                 dist.Uniform(bounds["mean_params"][0][0], bounds["mean_params"][0][1]),
                 rng_key=rng_key,
             )
             b = numpyro.sample(
-                "intercept",
+                "b",
                 dist.Uniform(bounds["mean_params"][1][0], bounds["mean_params"][1][1]),
                 rng_key=rng_key,
             )

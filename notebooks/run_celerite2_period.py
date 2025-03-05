@@ -68,17 +68,18 @@ if __name__ == "__main__":
         lightcurve=input_lc,
         mean_model=None,
         fit_mean=True,
-        max_steps=5000,
-        num_chains=6,
-        num_warmup=500,
-        converge_step=1000,
-        device="cpu",
-        devices=10,
-        params=jnp.array([variance_drw, w_bend]),
+        cpus=10,
+        params=jnp.array([input_lc.mean, variance_drw, w_bend]),
         bounds=bounds_drw,
     )
 
-    null_model.derive_posteriors(fit=True)
+    null_model.derive_posteriors(
+        fit=True,
+        max_steps=5000,
+        num_chains=6,
+        num_warmup=500,
+        converge_steps=1000,
+    )
 
     samples = null_model.modelling_engine.mcmc_samples
     filtered_samples = {k: v for k, v in samples.items() if k != "log_likelihood"}
@@ -88,7 +89,7 @@ if __name__ == "__main__":
         title_fmt=".1f",
         quantiles=[0.16, 0.5, 0.84],
         show_titles=True,
-        truths=[np.log(variance_drw), np.log(w_bend)],
+        truths=[input_lc.mean, np.log(variance_drw), np.log(w_bend)],
         title_kwargs={"fontsize": 18},
         max_n_ticks=3,
         labelpad=0.08,
@@ -114,18 +115,19 @@ if __name__ == "__main__":
         lightcurve=input_lc,
         mean_model=None,
         fit_mean=True,
-        max_steps=5000,
-        num_chains=6,
-        num_warmup=500,
-        converge_step=1000,
-        device="cpu",
-        devices=10,
-        params=jnp.array([variance_qpo, c, w_bend, variance_drw, w_bend]),
+        cpus=10,
+        params=jnp.array([variance_qpo, c, w_qpo, variance_drw, w_bend]),
         bounds=bounds_qpo | bounds_drw,
     )
 
     print("Deriving posteriors for alternative model")
-    alternative_model.derive_posteriors(fit=True)
+    alternative_model.derive_posteriors(
+        fit=True,
+        max_steps=5000,
+        num_chains=6,
+        num_warmup=500,
+        converge_steps=1000,
+    )
     samples = alternative_model.modelling_engine.mcmc_samples
     filtered_samples = {k: v for k, v in samples.items() if k != "log_likelihood"}
     corner_fig = corner.corner(
@@ -155,16 +157,13 @@ if __name__ == "__main__":
             lightcurve=lc,
             mean_model=None,
             fit_mean=True,
-            max_steps=1000,
-            num_chains=6,
-            num_warmup=500,
-            converge_step=500,
-            device="cpu",
-            devices=10,
-            params=jnp.array([variance_drw, w_bend]),
+            cpus=10,
+            params=jnp.array([lc.mean, variance_drw, w_bend]),
             bounds=dict(a=np.exp((-10, 50)), c=np.exp((-10, 10))),
         )
-        null_modelling.derive_posteriors(fit=True)
+        null_modelling.derive_posteriors(
+            fit=True, max_steps=500, num_chains=6, num_warmup=500, converge_steps=500
+        )
         likelihoods_null.append(null_modelling.max_loglikelihood)
 
         alternative_modelling = GPModelling(
@@ -172,16 +171,17 @@ if __name__ == "__main__":
             lightcurve=lc,
             mean_model=None,
             fit_mean=True,
-            max_steps=500,
-            num_chains=6,
-            num_warmup=500,
-            converge_step=500,
-            device="cpu",
-            devices=10,
+            cpus=10,
             params=jnp.array([variance_qpo, c, w_qpo, variance_drw, w_bend]),
             bounds=bounds_qpo | bounds_drw,
         )
-        alternative_modelling.derive_posteriors(fit=True)
+        alternative_modelling.derive_posteriors(
+            fit=True,
+            max_steps=500,
+            num_chains=6,
+            num_warmup=500,
+            converge_steps=500,
+        )
         likelihoods_alt.append(alternative_modelling.max_loglikelihood)
     print("\nDone!")
 

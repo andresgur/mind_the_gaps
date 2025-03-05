@@ -44,6 +44,41 @@ def real_kernel_fn_norm(
     return jax_terms.RealTerm(a=a, c=c)
 
 
+def _handle_mean(mean_model, params, fit, rng_key):
+    """
+    Handles the mean logic for kernel functions.
+
+    Parameters:
+    ----------
+    mean_model : MeanFunction or float or jnp.ndarray
+        The mean function object or a fixed mean value.
+    params : jnp.array
+        Array of parameters.
+    fit : bool
+        Whether we are in fitting mode.
+    rng_key : int
+        Random number generator key.
+
+    Returns:
+    -------
+    tuple (mean_value, remaining_params)
+        mean_value: The computed or sampled mean.
+        remaining_params: The remaining parameters after extracting the mean parameters.
+    """
+    if isinstance(mean_model, MeanFunction):
+        mean_value = mean_model.compute_mean(params, fit, rng_key)
+        #
+    elif isinstance(mean_model, (float, jnp.ndarray)):
+        mean_value = mean_model  # Use the provided constant mean value
+    else:
+        mean_value = 0.0  # Default to zero mean
+
+    if fit:
+        params = params[mean_model.no_parameters :]
+
+    return mean_value, params
+
+
 @returns_type(Term)
 def real_kernel_fn(
     params=None,
@@ -71,12 +106,11 @@ def real_kernel_fn(
     celerite2.jax.terms.Term
         jax_terms.RealTerm(a=a, c=c)
     """
-    if mean_model:
-        mean_value = mean_model.compute_mean(params, fit, rng_key)
 
+    mean_value, params = _handle_mean(mean_model, params, fit, rng_key)
     if fit:
 
-        a, c = params[mean_model.no_parameters :]
+        a, c = params  # [mean_model.no_parameters :]
 
     else:
 
@@ -99,7 +133,11 @@ def real_kernel_fn(
 
 @returns_type(Term)
 def complex_real_kernel_fn(
-    params: jnp.array, fit: bool = False, rng_key: int = None, bounds: dict = None
+    params: jnp.array,
+    fit: bool = False,
+    rng_key: int = None,
+    bounds: dict = None,
+    mean_model: MeanFunction = None,
 ) -> Term:
     """Create a celerite2 kernel with parameters either fixed (for optimization)
     or sampled (for MCMC).
@@ -120,7 +158,7 @@ def complex_real_kernel_fn(
     celerite2.jax.terms.Term
         celerite2 ComplexTerm(a=a, c=c, d=d, b=0.0) + jax_terms.RealTerm(a=a2, c=c2)
     """
-
+    mean_value, params = _handle_mean(mean_model, params, fit, rng_key)
     if fit:
         a, c, d, a2, c2 = params
     else:
@@ -160,4 +198,7 @@ def complex_real_kernel_fn(
         a2 = jnp.exp(log_a2)
         c2 = jnp.exp(log_c2)
 
-    return jax_terms.ComplexTerm(a=a, c=c, d=d, b=0.0) + jax_terms.RealTerm(a=a2, c=c2)
+    return (
+        jax_terms.ComplexTerm(a=a, c=c, d=d, b=0.0) + jax_terms.RealTerm(a=a2, c=c2),
+        mean_value,
+    )

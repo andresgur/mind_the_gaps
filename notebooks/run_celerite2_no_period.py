@@ -62,7 +62,7 @@ if __name__ == "__main__":
         mean_model=None,
         fit_mean=True,
         cpus=10,
-        params=jnp.array([mean, variance_drw, w_bend]),
+        params=jnp.array([input_lc.mean, variance_drw, w_bend]),
         bounds=bounds_drw,
     )
 
@@ -82,7 +82,7 @@ if __name__ == "__main__":
         title_fmt=".1f",
         quantiles=[0.16, 0.5, 0.84],
         show_titles=True,
-        truths=[np.log(variance_drw), np.log(w_bend)],
+        truths=[input_lc.mean, np.log(variance_drw), np.log(w_bend)],
         title_kwargs={"fontsize": 18},
         max_n_ticks=3,
         labelpad=0.08,
@@ -105,7 +105,11 @@ if __name__ == "__main__":
         f"log variance of the QPO: {log_variance_qpo:.2f}, log_c: {log_c:.2f}, log omega: {log_d:.2f}"
     )
 
-    bounds_qpo = dict(a=np.exp((-10, 50)), c=np.exp((-10, 10)), d=np.exp((-5, 5)))
+    bounds_qpo = dict(
+        a=np.exp((-10, 50)),
+        c=np.exp((-10, 10)),
+        d=np.exp((-5, 5)),
+    )
     bounds_drw = dict(a2=np.exp((-10, 50)), c2=np.exp((-10, 10)))
 
     alternative_model = GPModelling(
@@ -114,7 +118,7 @@ if __name__ == "__main__":
         mean_model=None,
         fit_mean=True,
         cpus=10,
-        params=[variance_drw, c, w, variance_drw, w_bend],
+        params=jnp.array([input_lc.mean, variance_drw, c, w, variance_drw, w_bend]),
         bounds=bounds_qpo | bounds_drw,
     )
 
@@ -156,7 +160,7 @@ if __name__ == "__main__":
             mean_model=None,
             fit_mean=True,
             cpus=10,
-            params=jnp.array([variance_drw, w_bend]),
+            params=jnp.array([lc.mean, variance_drw, w_bend]),
             bounds=dict(a=np.exp((-10, 50)), c=np.exp((-10, 10))),
         )
         null_modelling.derive_posteriors(
@@ -170,7 +174,7 @@ if __name__ == "__main__":
             mean_model=None,
             fit_mean=True,
             cpus=10,
-            params=jnp.array([variance_drw, c, w, variance_drw, w_bend]),
+            params=jnp.array([lc.mean, variance_drw, c, w, variance_drw, w_bend]),
             bounds=bounds_qpo | bounds_drw,
         )
         alternative_modelling.derive_posteriors(
