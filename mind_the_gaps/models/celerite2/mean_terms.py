@@ -1,0 +1,110 @@
+from abc import ABC, abstractmethod
+
+import jax
+import jax.numpy as jnp
+import numpyro
+import numpyro.distributions as dist
+
+
+class MeanFunction(ABC):
+    """Base class for all mean functions."""
+
+    def __init__(self, lightcurve: jnp.array):
+        self._lightcurve = lightcurve
+
+    # @classmethod
+    # @abstractmethod
+    # def count_parameters(cls):
+    #    """Return the number of parameters required by this mean function."""
+    #    pass
+
+    @abstractmethod
+    def compute_mean(self, params: jnp.array, fit: bool, rng_key: int):
+        """Compute the mean based on the function form and parameters."""
+        pass
+
+
+class ConstantMean(MeanFunction):
+    """Constant mean function: m(t) = c"""
+
+    no_parameters = 1
+
+    def __init__(self, lightcurve):
+        super().__init__(lightcurve=lightcurve)
+        self.bounds = jnp.array(
+            [[jnp.min(self._lightcurve.y)], [jnp.max(self._lightcurve.y)]]
+        )
+
+    # jnp.array(
+    #            jnp.array([jnp.min(self._lightcurve.y)]),
+    #            jnp.array([jnp.max(self._lightcurve.y)]),
+    #        )
+
+    def compute_mean(self, params: jnp.array, fit: bool, rng_key: int):
+        if fit:
+            return params[: self.no_parameters]  # Return the fixed constant
+        else:
+            return numpyro.sample(
+                "mean",
+                dist.Uniform(jnp.min(self._lightcurve.y), jnp.max(self._lightcurve.y)),
+                rng_key=rng_key,
+            )
+
+
+class LinearMean(MeanFunction):
+    """Linear mean function: m(t) = mt + b"""
+
+    @classmethod
+    def count_parameters(cls):
+        return 2  # Linear mean has 2 parameters: slope (m) and intercept (b)
+
+    def compute_mean(self, params: jnp.array, fit: bool, rng_key: int, bounds: dict):
+        if fit:
+            m, b = params[: self.count_parameters]
+
+        else:
+            m = numpyro.sample(
+                "slope",
+                dist.Uniform(bounds["mean_params"][0][0], bounds["mean_params"][0][1]),
+                rng_key=rng_key,
+            )
+            b = numpyro.sample(
+                "intercept",
+                dist.Uniform(bounds["mean_params"][1][0], bounds["mean_params"][1][1]),
+                rng_key=rng_key,
+            )
+        return m * self.t + b  # Linear mean computation
+
+
+class GaussianMean(MeanFunction):
+    """Gaussian mean function: m(t) = A * exp(- (t - mu)^2 / (2 * sigma^2))"""
+
+    @classmethod
+    def count_parameters(cls):
+        return 3  # Gaussian mean has 3 parameters: A (amplitude), mu (mean), and sigma (stddev)
+
+    def compute_mean(
+        self, t: jnp.array, params: jnp.array, fit: bool, rng_key: int, bounds: dict
+    ):
+        if fit:
+            A, mu, sigma = params[: self.count_parameters]
+
+        else:
+            A = numpyro.sample(
+                "amplitude",
+                dist.Uniform(bounds["mean_params"][0][0], bounds["mean_params"][0][1]),
+                rng_key=rng_key,
+            )
+            mu = numpyro.sample(
+                "mu",
+                dist.Uniform(bounds["mean_params"][1][0], bounds["mean_params"][1][1]),
+                rng_key=rng_key,
+            )
+            sigma = numpyro.sample(
+                "sigma",
+                dist.Uniform(bounds["mean_params"][2][0], bounds["mean_params"][2][1]),
+                rng_key=rng_key,
+            )
+        return A * jnp.exp(
+            -((t - mu) ** 2) / (2 * sigma**2)
+        )  # Gaussian mean computation

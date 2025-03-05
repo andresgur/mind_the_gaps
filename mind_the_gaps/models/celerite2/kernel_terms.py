@@ -10,6 +10,8 @@ import numpyro.distributions as dist
 from celerite2.jax.terms import Term
 from jax import random
 
+from mind_the_gaps.models.celerite2.mean_terms import MeanFunction
+
 
 def returns_type(type_):
     def decorator(func):
@@ -43,7 +45,13 @@ def real_kernel_fn_norm(
 
 
 @returns_type(Term)
-def real_kernel_fn(params=None, fit=False, rng_key=None, bounds: dict = None):
+def real_kernel_fn(
+    params=None,
+    fit=False,
+    rng_key=None,
+    bounds: dict = None,
+    mean_model: MeanFunction = None,
+):
     """Create a celerite2 kernel with parameters either fixed (for optimization)
     or sampled (for MCMC).
 
@@ -63,9 +71,13 @@ def real_kernel_fn(params=None, fit=False, rng_key=None, bounds: dict = None):
     celerite2.jax.terms.Term
         jax_terms.RealTerm(a=a, c=c)
     """
+    if mean_model:
+        mean_value = mean_model.compute_mean(params, fit, rng_key)
+
     if fit:
 
-        a, c = params
+        a, c = params[mean_model.no_parameters :]
+
     else:
 
         log_a = numpyro.sample(
@@ -82,7 +94,7 @@ def real_kernel_fn(params=None, fit=False, rng_key=None, bounds: dict = None):
         a = jnp.exp(log_a)
         c = jnp.exp(log_c)
 
-    return jax_terms.RealTerm(a=a, c=c)
+    return jax_terms.RealTerm(a=a, c=c), mean_value
 
 
 @returns_type(Term)

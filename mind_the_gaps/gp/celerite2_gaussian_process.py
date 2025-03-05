@@ -8,6 +8,11 @@ import numpyro
 
 from mind_the_gaps.gp.gaussian_process import BaseGP
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
+from mind_the_gaps.models.celerite2.mean_terms import (
+    ConstantMean,
+    GaussianMean,
+    LinearMean,
+)
 
 # from mind_the_gaps.models.celerite2.kernel_terms import ConstantModel, Model
 from mind_the_gaps.models.celerite.mean_models import (
@@ -33,23 +38,29 @@ class Celerite2GP(BaseGP):
         self._lightcurve = lightcurve
         self.rng_key = rng_key
         self.bounds = bounds
-        self.mean, self.fit_mean = self._build_mean_model(mean)
+        self.mean_model, self.fit_mean = self._build_mean_model(mean)
         self.params = params
         self.compute(self.params, self._lightcurve.times, fit=True)
 
     def _build_mean_model(self, meanmodel: str):
+        # if meanmodel is None:
+        #    return self._lightcurve.mean, False
         if meanmodel is None:
-            return self._lightcurve.mean, False
+            return ConstantMean(lightcurve=self._lightcurve), False
 
     def numpyro_dist(self):
         self.gp.numpyro_dist()
 
     def compute(self, params: jnp.array, t: jnp.array, fit: bool) -> None:
         self.params = params
-        kernel = self.kernel_fn(
-            params=params, fit=fit, rng_key=self.rng_key, bounds=self.bounds
+        kernel, mean = self.kernel_fn(
+            params=params,
+            fit=fit,
+            rng_key=self.rng_key,
+            bounds=self.bounds,
+            mean_model=self.mean_model,
         )
-        self.gp = celerite2.jax.GaussianProcess(kernel, mean=self.mean)
+        self.gp = celerite2.jax.GaussianProcess(kernel, mean=mean)
         self.gp.compute(t, yerr=self._lightcurve.dy, check_sorted=False)
 
     def get_psd(self):

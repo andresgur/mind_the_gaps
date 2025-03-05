@@ -62,7 +62,7 @@ if __name__ == "__main__":
         mean_model=None,
         fit_mean=True,
         cpus=10,
-        params=jnp.array([variance_drw, w_bend]),
+        params=jnp.array([mean, variance_drw, w_bend]),
         bounds=bounds_drw,
     )
 
