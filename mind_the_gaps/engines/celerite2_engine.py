@@ -78,6 +78,7 @@ class Celerite2GPEngine(BaseGPEngine):
             rng_key=self.rng_key,
         )
         self.gp.compute(params, self._lightcurve.times, fit=False)
+        self._mcmc_samples = {}
 
     # def setup_gp(self, params: jnp.array, t: jnp.array, fit: bool):
 
@@ -239,7 +240,20 @@ class Celerite2GPEngine(BaseGPEngine):
                     v for v in idata.posterior.data_vars if "log_likelihood" not in v
                 ],
             )
-            if all(az_summary["r_hat"] < 1.05):  # and all(
+            samples = mcmc.get_samples()
+
+            if iteration == 0:
+                self._mcmc_samples = samples  # {key: samples[key] for key in samples}
+            else:
+                for key in samples:
+                    self._mcmc_samples[key] = jnp.concatenate(
+                        [self._mcmc_samples[key], samples[key]], axis=0
+                    )
+
+            tau = self._auto_corr_time(self._mcmc_samples, num_chains)
+
+            # auto = [self._auto_corr_time(samples[var]) for var in ["log_a", "log_c"]]
+            if all(az_summary["r_hat"] < 1.01):  # and all(
                 # az_summary["ess_tail"] / self.converge_step > 0.1
                 # ):
                 print(f"MCMC converged after {(iteration+1)*converge_steps} steps.")
@@ -256,7 +270,7 @@ class Celerite2GPEngine(BaseGPEngine):
         # az.plot_autocorr(idata, var_names=list(idata.posterior.data_vars))
         # plt.savefig("autocorrellation.png")
 
-        self._mcmc_samples = mcmc.get_samples()
+        # self._mcmc_samples = mcmc.get_samples()
 
     def _get_chains(self, discard=0, thin=1, flat=True):
         samples_discarded = {k: v[discard:] for k, v in self.posterior_samples.items()}
@@ -318,6 +332,87 @@ class Celerite2GPEngine(BaseGPEngine):
             lightcurves.append(self._generate_lc_from_params2(params=params))
 
         return lightcurves
+
+    def auto_window(self, taus, c):
+        m = np.arange(len(taus)) < c * taus
+        if np.any(m):
+            return np.argmin(m)
+        return len(taus) - 1
+
+    def function_1d(self, x):
+        """Estimate the normalized autocorrelation function of a 1-D series
+
+        Args:
+            x: The series as a 1-D numpy array.
+
+        Returns:
+            array: The autocorrelation function of the time series.
+
+        """
+
+        x = jnp.atleast_1d(x)
+        if len(x.shape) != 1:
+            raise ValueError("invalid dimensions for 1D autocorrelation function")
+        n = self.next_pow_two(len(x))
+
+        # Compute the FFT and then (from that) the auto-correlation function
+
+        f = jnp.fft.fft(x - jnp.mean(x), n=2 * n)
+        acf = jnp.fft.ifft(f * jnp.conjugate(f))[: len(x)].real
+        acf /= acf[0]
+        return acf
+
+    def next_pow_two(self, n):
+        """Returns the next power of two greater than or equal to `n`"""
+        i = 1
+        while i < n:
+            i = i << 1
+        return i
+
+    def _auto_corr_time(self, samples, num_chains, c=5, tol=50, quiet=False):
+
+        x = jnp.stack([samples[key] for key in samples.keys()], axis=-1)
+        x = jnp.repeat(x[:, np.newaxis, :], num_chains, axis=1)
+
+        x = jnp.atleast_1d(x)
+
+        if len(x.shape) == 2:
+            x = x[:, :, jnp.newaxis]
+        if len(x.shape) != 3:
+            raise ValueError("invalid dimensions")
+
+        n_t, n_c, n_d = x.shape
+        tau_est = jnp.empty(n_d)
+        windows = jnp.empty(n_d, dtype=int)
+
+        # Loop over parameters
+        for d in range(n_d):
+            f = jnp.zeros(n_t)
+            for c in range(n_c):
+                f += self.function_1d(x[:, c, d])
+            f /= n_c
+            taus = 2.0 * jnp.cumsum(f) - 1.0
+            # windows[d] = self.auto_window(taus, c)
+            windows = windows.at[d].set(self.auto_window(taus, c))
+            # tau_est[d] = taus[windows[d]]
+            tau_est = tau_est.at[d].set(taus[windows[d]])
+
+        # Check convergence
+        flag = tol * tau_est > n_t
+
+        # Warn or raise in the case of non-convergence
+        if jnp.any(flag):
+            msg = (
+                "The chain is shorter than {0} times the integrated "
+                "autocorrelation time for {1} parameter(s). Use this estimate "
+                "with caution and run a longer chain!\n"
+            ).format(tol, jnp.sum(flag))
+            msg += "N/{0} = {1:.0f};\ntau: {2}".format(tol, n_t / tol, tau_est)
+            if not quiet:
+                pass
+                # raise Exception
+
+        return tau_est
 
     @property
     def max_loglikelihood(self):

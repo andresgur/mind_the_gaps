@@ -69,7 +69,7 @@ if __name__ == "__main__":
     null_model.derive_posteriors(
         fit=True,
         max_steps=5000,
-        num_chains=6,
+        num_chains=10,
         num_warmup=500,
         converge_steps=1000,
     )
@@ -126,7 +126,7 @@ if __name__ == "__main__":
     alternative_model.derive_posteriors(
         fit=True,
         max_steps=5000,
-        num_chains=6,
+        num_chains=10,
         num_warmup=500,
         converge_steps=1000,
     )
