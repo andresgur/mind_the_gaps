@@ -71,6 +71,9 @@ class GPModelling:
 
         elif meanmodel.lower()=="constant":
             meanlabels = ["$\mu$"]
+            meanmodel = ConstantModel(self._lightcurve.mean,
+                        bounds=[(np.min(self._lightcurve.y), maxy)])
+            return meanmodel, True
 
         elif meanmodel.lower()=="linear":
             slope_guess = np.sign(self._lightcurve.y[-1] - self._lightcurve.y[0])
