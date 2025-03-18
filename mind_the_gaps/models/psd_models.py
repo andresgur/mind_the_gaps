@@ -13,6 +13,17 @@ def SHO(x, S0=1, Q=10, omega0=1):
 def Lorentzian(x, S0=1, Q=10, omega0=1):
     """Equation 11 from Foreman-Mackey+2017 (tested)
     x and omega0 need to be given in the same units
+
+    Parameters
+    ----------
+    x: array-like,
+        Angular frequencies
+    S0: float,
+        Variance
+    Q: float,
+        Coherence or quality factor
+    omega: float,
+        Frequency of the peak in angular units
     """
     a = S0
     c = omega0 / 2 / Q
