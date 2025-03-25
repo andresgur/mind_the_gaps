@@ -57,6 +57,13 @@ if __name__ == "__main__":
     )
     null_model = GPModelling(kernel=null_kernel, lightcurve=input_lc)
     null_model.derive_posteriors(max_steps=50000, fit=True, cores=cpus)
+    autocorr = null_model.autocorr
+    fig = plt.figure()
+    n = np.arange(1, len(autocorr) + 1)
+    plt.plot(n, autocorr, "-o")
+    plt.ylabel("Mean $\\tau$")
+    plt.xlabel("Number of steps")
+    plt.savefig("autocorr_celerite_alt.png", dpi=100)
     corner_fig = corner.corner(
         null_model.mcmc_samples,
         labels=null_model.parameter_names,
@@ -92,14 +99,6 @@ if __name__ == "__main__":
 
     alternative_model.derive_posteriors(max_steps=50000, fit=True, cores=cpus)
     # example of setting and getting params from model
-    print(alternative_model.parameters)
-    alternative_model.parameters = [
-        1.48072326,
-        -10.0,
-        -3.31933739,
-        4.80087424,
-        -1.22426842,
-    ]
 
     autocorr = alternative_model.autocorr
     fig = plt.figure()
@@ -107,7 +106,7 @@ if __name__ == "__main__":
     plt.plot(n, autocorr, "-o")
     plt.ylabel("Mean $\\tau$")
     plt.xlabel("Number of steps")
-    plt.savefig("autocorr.png", dpi=100)
+    plt.savefig("autocorr_celerite_alt.png", dpi=100)
     corner_fig = corner.corner(
         alternative_model.modelling_engine.mcmc_samples,
         labels=alternative_model.modelling_engine.gp.get_parameter_names(),

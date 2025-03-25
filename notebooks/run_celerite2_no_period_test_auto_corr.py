@@ -70,9 +70,17 @@ if __name__ == "__main__":
         fit=True,
         max_steps=5000,
         num_chains=10,
-        num_warmup=500,
-        converge_steps=1000,
+        num_warmup=100,
+        converge_steps=100,
     )
+
+    autocorr = null_model.autocorr
+    fig = plt.figure()
+    n = np.arange(1, len(autocorr) + 1)
+    plt.plot(n, autocorr, "-o")
+    plt.ylabel("Mean $\\tau$")
+    plt.xlabel("Number of steps")
+    plt.savefig("autocorr.png", dpi=100)
 
     samples = null_model.modelling_engine.mcmc_samples
     filtered_samples = {k: v for k, v in samples.items() if k != "log_likelihood"}
@@ -91,7 +99,6 @@ if __name__ == "__main__":
 
     corner_fig.savefig("corner_plot_celerite2.png", dpi=100)
     nsims = 100  # typically 10,000
-
     lcs = null_model.generate_from_posteriors(nsims=nsims)
 
     P = 10  # period of the QPO
@@ -129,8 +136,9 @@ if __name__ == "__main__":
         max_steps=5000,
         num_chains=10,
         num_warmup=500,
-        converge_steps=1000,
+        converge_steps=100,
     )
+
     samples = alternative_model.modelling_engine.mcmc_samples
     filtered_samples = {k: v for k, v in samples.items() if k != "log_likelihood"}
     corner_fig = corner.corner(
@@ -148,7 +156,13 @@ if __name__ == "__main__":
 
     likelihoods_null = []
     likelihoods_alt = []
-
+    autocorr = alternative_model.autocorr
+    fig = plt.figure()
+    n = np.arange(1, len(autocorr) + 1)
+    plt.plot(n, autocorr, "-o")
+    plt.ylabel("Mean $\\tau$")
+    plt.xlabel("Number of steps")
+    plt.savefig("autocorr_alts.png", dpi=100)
     for i, lc in enumerate(lcs):
         print("Processing lightcurve %d/%d" % (i + 1, len(lcs)), end="\r")
 

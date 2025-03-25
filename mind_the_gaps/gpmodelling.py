@@ -196,3 +196,73 @@ class GPModelling:
     @property
     def tau(self):
         return self.modelling_engine.tau
+
+    @property
+    def bounds(self):
+        return self.modelling_engine.gp.get_parameter_bounds()
+
+
+class GPModellingComparison:
+    """
+    The interface for Gaussian Process (GP) modeling.
+    """
+
+    def __init__(
+        self,
+        null_kernel: Union[celerite.modeling.Model, Kernel, Term],
+        alt_kernel: Union[celerite.modeling.Model, Kernel, Term],
+        lightcurve: GappyLightcurve,
+        **modelling_kwargs: Mapping[str, Any],
+    ):
+
+        self.null_kernel = null_kernel
+        self.alt_kernel = alt_kernel
+        self.lightcurve = lightcurve
+
+        self.likelihoods = []
+        self.null_modelling_kwargs = modelling_kwargs.pop("null_kwargs", {})
+        self.alt_modelling_kwargs = modelling_kwargs.pop("alt_kwargs", {})
+
+        self.null_model = GPModelling(
+            kernel=null_kernel,
+            lightcurve=lightcurve,
+            **self.null_modelling_kwargs,
+        )
+
+        self.alt_model = GPModelling(
+            kernel=alt_kernel, lightcurve=lightcurve, **self.alt_modelling_kwargs
+        )
+
+    def derive_posteriors(self, **engine_kwargs: Mapping[str, Any]):
+        self.engine_kwargs = engine_kwargs
+        self.null_model.derive_posteriors(**engine_kwargs)
+        self.alt_model.derive_posteriors(**engine_kwargs)
+
+    def generate_from_posteriors(self, nsims):
+        return self.null_model.generate_from_posteriors(nsims)
+        # self.alt_model.generate_from_posteriors(nsims)
+
+    def process_lightcurves(self, nsims, **engine_kwargs):
+        likelihoods_null = []
+        likelihoods_alt = []
+
+        lcs = self.null_model.generate_from_posteriors(nsims=nsims)
+
+        for i, lc in enumerate(lcs):
+            print("Processing lightcurve %d/%d" % (i + 1, len(lcs)), end="\r")
+
+            # Run a small MCMC to make sure we find the global maximum of the likelihood
+            # ideally we'd probably want to run more samples
+            # null_modelling = GPModelling(kernel=null_kernel,lightcurve=lc)
+
+            null_modelling = GPModelling(
+                kernel=self.null_kernel, lightcurve=lc, **self.null_modelling_kwargs
+            )
+            null_modelling.derive_posteriors(**engine_kwargs)
+            likelihoods_null.append(null_modelling.max_loglikelihood)
+
+            alternative_modelling = GPModelling(
+                kernel=self.alt_kernel, lightcurve=lc, **self.alt_modelling_kwargs
+            )
+            alternative_modelling.derive_posteriors(**engine_kwargs)
+            likelihoods_alt.append(alternative_modelling.max_loglikelihood)

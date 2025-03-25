@@ -79,6 +79,7 @@ class Celerite2GPEngine(BaseGPEngine):
         )
         self.gp.compute(params, self._lightcurve.times, fit=False)
         self._mcmc_samples = {}
+        self._autocorr = []
 
     # def setup_gp(self, params: jnp.array, t: jnp.array, fit: bool):
 
@@ -176,7 +177,7 @@ class Celerite2GPEngine(BaseGPEngine):
     ):
 
         converged = False
-
+        old_tau = jnp.inf
         if fit:
             self.params = self.minimize()
 
@@ -240,7 +241,8 @@ class Celerite2GPEngine(BaseGPEngine):
                     v for v in idata.posterior.data_vars if "log_likelihood" not in v
                 ],
             )
-            samples = mcmc.get_samples()
+            samples = mcmc.get_samples(group_by_chain=True)
+            self.samples2 = mcmc.get_samples()
 
             if iteration == 0:
                 self._mcmc_samples = samples  # {key: samples[key] for key in samples}
@@ -251,18 +253,16 @@ class Celerite2GPEngine(BaseGPEngine):
                     )
 
             tau = self._auto_corr_time(self._mcmc_samples, num_chains)
+            self._autocorr.append(jnp.mean(tau))
 
-            # auto = [self._auto_corr_time(samples[var]) for var in ["log_a", "log_c"]]
-            if all(az_summary["r_hat"] < 1.01):  # and all(
-                # az_summary["ess_tail"] / self.converge_step > 0.1
-                # ):
+            if jnp.all(tau * 100 < (iteration + 1) * converge_steps) and np.all(
+                np.abs(old_tau - tau) / tau < 0.01
+            ):
                 print(f"MCMC converged after {(iteration+1)*converge_steps} steps.")
                 break
             else:
                 print(f"MCMC not converged after {(iteration+1)*converge_steps} steps.")
-                print(
-                    f"{az_summary['r_hat']}"
-                )  # {az_summary['ess_tail'] / self.converge_step}"
+                print(f"{az_summary['r_hat']} \nmean tau: {tau}")
 
         self._mcmc = mcmc
         self._loglikelihoods = idata.posterior["log_likelihood"].values
@@ -313,6 +313,9 @@ class Celerite2GPEngine(BaseGPEngine):
         return lc
 
     def generate_from_posteriors(self, nsims: int):
+        flat_samples = {key: v.reshape(-1) for key, v in self._mcmc_samples.items()}
+
+        total_samples = len(next(iter(flat_samples.values())))
 
         if self._mcmc_samples is None:
             raise RuntimeError(
@@ -323,20 +326,28 @@ class Celerite2GPEngine(BaseGPEngine):
                 "The number of simulation requested (%d) is higher than the number of posterior samples (%d), so many samples will be drawn more than once"
             )
         lcs = []
+        sampled_indices = np.random.choice(total_samples, nsims, replace=True)
+        sampled_params = np.column_stack(
+            [v[sampled_indices] for v in flat_samples.values()]
+        )
 
         samples = np.column_stack(
             [v[np.random.choice(len(v), nsims)] for v in self._mcmc_samples.values()]
         )
+        samples2 = np.column_stack(
+            [v[np.random.choice(len(v), nsims)] for v in self.samples2.values()]
+        )
+
         lightcurves = []
-        for params in samples:
+        for params in sampled_params:
             lightcurves.append(self._generate_lc_from_params2(params=params))
 
         return lightcurves
 
     def auto_window(self, taus, c):
-        m = np.arange(len(taus)) < c * taus
-        if np.any(m):
-            return np.argmin(m)
+        m = jnp.arange(len(taus)) < c * taus
+        if jnp.any(m):
+            return jnp.argmin(m)
         return len(taus) - 1
 
     def function_1d(self, x):
@@ -371,9 +382,7 @@ class Celerite2GPEngine(BaseGPEngine):
 
     def _auto_corr_time(self, samples, num_chains, c=5, tol=50, quiet=False):
 
-        x = jnp.stack([samples[key] for key in samples.keys()], axis=-1)
-        x = jnp.repeat(x[:, np.newaxis, :], num_chains, axis=1)
-
+        x = jnp.stack([samples[key].T for key in samples.keys()], axis=-1)
         x = jnp.atleast_1d(x)
 
         if len(x.shape) == 2:
