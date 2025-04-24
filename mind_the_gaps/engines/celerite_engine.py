@@ -468,6 +468,15 @@ class CeleriteGPEngine(BaseGPEngine):
         return self._sampler
 
     @property
+    def loglikelihoods(self):
+        if self._loglikelihoods is None:
+            raise AttributeError(
+                "Posteriors have not been derived. Please run \
+                    derive_posteriors prior to populate the attributes."
+            )
+        return self._loglikelihoods
+
+    @property
     def max_loglikelihood(self):
         if self._loglikelihoods is None:
             raise AttributeError(
@@ -510,3 +519,25 @@ class CeleriteGPEngine(BaseGPEngine):
                 derive_posteriors prior to populate the attributes."
             )
         return self._tau
+
+    @property
+    def mcmc_samples(self):
+        """The mcmc samples"""
+        if self._mcmc_samples is None:
+            raise AttributeError(
+                "Posteriors have not been derived. Please run \
+                derive_posteriors prior to populate the attributes."
+            )
+        return self._mcmc_samples
+
+    @property
+    def k(self):
+        """
+        Number of variable parameters
+
+        Returns
+        -------
+        int
+            Number of variable parameters
+        """
+        return self._ndim

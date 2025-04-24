@@ -18,6 +18,17 @@ class MeanFunction(ABC):
         pass
 
 
+class FixedMean(MeanFunction):
+    no_parameters = 1
+
+    def __init__(self, lightcurve):
+        super().__init__(lightcurve=lightcurve)
+        self.mean_value = lightcurve.mean
+
+    def compute_mean(self, params, fit, rng_key):
+        return self.mean_value  # params[: self.no_parameters]
+
+
 class ConstantMean(MeanFunction):
     """Constant mean function: m(t) = c"""
 
@@ -45,7 +56,7 @@ class LinearMean(MeanFunction):
 
     @classmethod
     def count_parameters(cls):
-        return 2  # Linear mean has 2 parameters: slope (m) and intercept (b)
+        return 2
 
     def __init__(self, lightcurve):
         super().__init__(lightcurve=lightcurve)
@@ -68,7 +79,7 @@ class LinearMean(MeanFunction):
                 dist.Uniform(bounds["mean_params"][1][0], bounds["mean_params"][1][1]),
                 rng_key=rng_key,
             )
-        return m * self.t + b  # Linear mean computation
+        return m * self.t + b
 
 
 class GaussianMean(MeanFunction):
@@ -76,7 +87,7 @@ class GaussianMean(MeanFunction):
 
     @classmethod
     def count_parameters(cls):
-        return 3  # Gaussian mean has 3 parameters: A (amplitude), mu (mean), and sigma (stddev)
+        return 3
 
     def compute_mean(
         self, t: jnp.array, params: jnp.array, fit: bool, rng_key: int, bounds: dict
@@ -100,6 +111,4 @@ class GaussianMean(MeanFunction):
                 dist.Uniform(bounds["mean_params"][2][0], bounds["mean_params"][2][1]),
                 rng_key=rng_key,
             )
-        return A * jnp.exp(
-            -((t - mu) ** 2) / (2 * sigma**2)
-        )  # Gaussian mean computation
+        return A * jnp.exp(-((t - mu) ** 2) / (2 * sigma**2))

@@ -29,7 +29,7 @@ class CeleriteGP(BaseGP):
         self.kernel = kernel
         self.compute()
 
-    def compute(self) -> None:  # , times: np.array, errors: np.array):
+    def compute(self) -> None:
 
         self.gp.compute(self._lightcurve.times, self._lightcurve.dy + 1e-12)
 

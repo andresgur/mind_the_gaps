@@ -21,29 +21,6 @@ def returns_type(type_):
     return decorator
 
 
-@returns_type(Term)
-def real_kernel_fn_norm(
-    prior_sigma=0.1, params=None, fit=False, rng_key=None, bounds: dict = None
-):
-    if fit:
-
-        a, c = params
-    else:
-
-        log_a = numpyro.sample(
-            "log_a", dist.Normal(jnp.log(params[0]), prior_sigma), rng_key=rng_key
-        )
-
-        log_c = numpyro.sample(
-            "log_c", dist.Normal(jnp.log(params[1]), prior_sigma), rng_key=rng_key
-        )
-
-        a = jnp.exp(log_a)
-        c = jnp.exp(log_c)
-
-    return jax_terms.RealTerm(a=a, c=c)
-
-
 def _handle_mean(mean_model, params, fit, rng_key):
     """
     Handles the mean logic for kernel functions.
@@ -65,16 +42,22 @@ def _handle_mean(mean_model, params, fit, rng_key):
         mean_value: The computed or sampled mean.
         remaining_params: The remaining parameters after extracting the mean parameters.
     """
+    # if isinstance(mean_model, MeanFunction):
+    #    mean_value = mean_model.compute_mean(params, fit, rng_key)
+    #    if fit:
+    #        return mean_value, params[mean_model.no_parameters :]
+
+    # elif mean_model is None:
+    #    return params[0], params[1:]
+
     if isinstance(mean_model, MeanFunction):
         mean_value = mean_model.compute_mean(params, fit, rng_key)
-        #
-    elif isinstance(mean_model, (float, jnp.ndarray)):
-        mean_value = mean_model  # Use the provided constant mean value
-    else:
-        mean_value = 0.0  # Default to zero mean
+        # if fit:
+        #    params = params[mean_model.no_parameters :]
+    elif mean_model is None:
+        mean_value = None
 
-    if fit:
-        params = params[mean_model.no_parameters :]
+        # mean_value =
 
     return mean_value, params
 

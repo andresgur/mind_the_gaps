@@ -6,10 +6,15 @@
 
 import jax.numpy as jnp
 from jax import config
+import os
 
 config.update("jax_enable_x64", True)
 
 from typing import Any, List, Mapping, Union
+
+from matplotlib import pyplot as plt
+from scipy.stats import percentileofscore
+import corner
 
 import celerite
 import numpy as np
@@ -153,6 +158,36 @@ class GPModelling:
         """
         return self.modelling_engine.generate_from_posteriors(**engine_kwargs)
 
+    def plot_autocorrelation(self, path: str = "autocorr.png", dpi: int = 100) -> None:
+
+        path = os.path.abspath(path)
+
+        plt.figure()
+        n = np.arange(1, len(self.autocorr) + 1)
+        plt.plot(n, self.autocorr, "-o")
+        plt.ylabel("Mean $\\tau$")
+        plt.xlabel("Number of steps")
+        plt.savefig(fname=path, dpi=dpi)
+
+    def corner_plot_samples(
+        self, path: str = "corner_plot.png", dpi: int = 100
+    ) -> None:
+        samples = self.modelling_engine.mcmc_samples
+        if isinstance(self.modelling_engine, Celerite2GPEngine):
+            samples = {k: v for k, v in samples.items() if k != "log_likelihood"}
+        corner_fig = corner.corner(
+            samples,
+            labels=self.modelling_engine.gp.get_parameter_names(),
+            title_fmt=".1f",
+            quantiles=[0.16, 0.5, 0.84],
+            show_titles=True,
+            title_kwargs={"fontsize": 18},
+            max_n_ticks=3,
+            labelpad=0.08,
+            levels=(1 - np.exp(-0.5), 1 - np.exp(-0.5 * 2**2)),
+        )
+        corner_fig.savefig(path, dpi=100)
+
     @property
     def parameters(self):
         return self.modelling_engine.gp.get_parameter_vector()
@@ -163,7 +198,7 @@ class GPModelling:
 
     @property
     def loglikelihoods(self) -> Union[np.array, jnp.array]:
-        return self.modelling_engine._loglikelihoods
+        return self.modelling_engine.loglikelihoods
 
     @property
     def autocorr(self) -> List[float]:
@@ -171,7 +206,7 @@ class GPModelling:
 
     @property
     def mcmc_samples(self):
-        return self.modelling_engine._mcmc_samples
+        return self.modelling_engine.mcmc_samples
 
     @property
     def max_loglikelihood(self):
@@ -243,26 +278,46 @@ class GPModellingComparison:
         # self.alt_model.generate_from_posteriors(nsims)
 
     def process_lightcurves(self, nsims, **engine_kwargs):
-        likelihoods_null = []
-        likelihoods_alt = []
+        self.likelihoods_null = []
+        self.likelihoods_alt = []
 
         lcs = self.null_model.generate_from_posteriors(nsims=nsims)
 
         for i, lc in enumerate(lcs):
             print("Processing lightcurve %d/%d" % (i + 1, len(lcs)), end="\r")
 
-            # Run a small MCMC to make sure we find the global maximum of the likelihood
-            # ideally we'd probably want to run more samples
-            # null_modelling = GPModelling(kernel=null_kernel,lightcurve=lc)
-
             null_modelling = GPModelling(
                 kernel=self.null_kernel, lightcurve=lc, **self.null_modelling_kwargs
             )
             null_modelling.derive_posteriors(**engine_kwargs)
-            likelihoods_null.append(null_modelling.max_loglikelihood)
+            self.likelihoods_null.append(null_modelling.max_loglikelihood)
 
             alternative_modelling = GPModelling(
                 kernel=self.alt_kernel, lightcurve=lc, **self.alt_modelling_kwargs
             )
             alternative_modelling.derive_posteriors(**engine_kwargs)
-            likelihoods_alt.append(alternative_modelling.max_loglikelihood)
+            self.likelihoods_alt.append(alternative_modelling.max_loglikelihood)
+
+    def likelihood_ratio_test(self, path: str = "LRT.png") -> None:
+        path = os.path.abspath(path)
+        plt.figure()
+        T_dist = -2 * (np.array(self.likelihoods_null) - np.array(self.likelihoods_alt))
+        plt.hist(T_dist, bins=10)
+        T_obs = -2 * (
+            self.null_model.max_loglikelihood - self.alt_model.max_loglikelihood
+        )
+        print("Observed LRT_stat: %.3f" % T_obs)
+        perc = percentileofscore(T_dist, T_obs)
+        print("p-value: %.4f" % (1 - perc / 100))
+        plt.axvline(T_obs, label="%.2f%%" % perc, ls="--", color="black")
+
+        sigmas = [95, 99.7]
+        colors = ["red", "green"]
+        for i, sigma in enumerate(sigmas):
+            plt.axvline(np.percentile(T_dist, sigma), ls="--", color=colors[i])
+        plt.legend()
+        plt.xlabel("$T_\\mathrm{LRT}$")
+        plt.savefig(path, dpi=300, bbox_inches="tight")
+        plt.close()
+
+        print(f"Plot saved at: {path}")

@@ -2,7 +2,27 @@ import sys
 
 sys.path.append("/Users/connorourke/bin/src/mind_the_gaps")
 from dataclasses import fields
+import os
+import sys
 
+import celerite
+import corner
+import matplotlib.pyplot as plt
+import numpy as np
+from celerite.modeling import Model
+from scipy.stats import percentileofscore
+
+from mind_the_gaps import GPModelling
+from mind_the_gaps.lightcurves import GappyLightcurve
+from mind_the_gaps.models.celerite.celerite_models import Lorentzian as Lor
+from mind_the_gaps.models.psd_models import (
+    SHO,
+    BendingPowerlaw,
+    Jitter,
+    Lorentzian,
+    Matern32,
+)
+from mind_the_gaps.simulator import Simulator
 import arviz as az
 import celerite2
 import corner
@@ -54,65 +74,48 @@ if __name__ == "__main__":
 
     input_lc = GappyLightcurve(times, noisy_countrates, dy, exposures=dt)
 
+    bounds_drw = dict(log_a=(-10, 50), log_c=(-10, 10))
+    # you can use RealTerm from celerite or DampedRandomWalk from models.celerite_models
+    null_kernel = celerite.terms.RealTerm(
+        log_a=np.log(variance_drw), log_c=np.log(w_bend), bounds=bounds_drw
+    )
+
     bounds_drw = dict(a=np.exp((-10, 50)), c=np.exp((-10, 10)))
+
     P = 10  # period of the QPO
     w = 2 * np.pi / P
     # Define starting parameters
     log_variance_qpo = np.log(variance_drw)
     Q = 80  # coherence
-    c = 0.5 * w / Q
-    log_c = np.log(c)
+    log_c = np.log(0.5 * w / Q)
     log_d = np.log(w)
     print(
         f"log variance of the QPO: {log_variance_qpo:.2f}, log_c: {log_c:.2f}, log omega: {log_d:.2f}"
     )
 
-    bounds_qpo = dict(
-        a=np.exp((-10, 50)),
-        c=np.exp((-10, 10)),
-        d=np.exp((-5, 5)),
+    bounds_qpo = dict(log_a=(-10, 50), log_c=(-10, 10), log_d=(-5, 5))
+    alternative_kernel = celerite.terms.ComplexTerm(
+        log_a=log_variance_qpo, log_c=log_c, log_d=log_d, bounds=bounds_qpo
+    ) + celerite.terms.RealTerm(
+        log_a=np.log(variance_drw), log_c=np.log(w_bend), bounds=bounds_drw
     )
-    bounds_drw = dict(a2=np.exp((-10, 50)), c2=np.exp((-10, 10)))
-    bounds_real = dict(a=np.exp((-10, 50)), c=np.exp((-10, 10)))
 
     comparison_kwargs = {
         "null_kwargs": {
-            "params": jnp.array([input_lc.mean, variance_drw, w_bend]),
-            "bounds": bounds_real,
-            "mean_model": "Constant",
-            "fit_mean": False,
+            "fit_mean": True,
             "cpus": 10,
         },
         "alt_kwargs": {
-            "fit_mean": False,
+            "fit_mean": True,
             "cpus": 10,
-            "mean_model": "Constant",
-            "params": jnp.array(
-                [input_lc.mean, variance_drw, c, w, variance_drw, w_bend]
-            ),
-            "bounds": bounds_qpo | bounds_drw,
         },
     }
     gpmodel = GPModellingComparison(
-        null_kernel=real_kernel_fn,
-        alt_kernel=complex_real_kernel_fn,
+        null_kernel=null_kernel,
+        alt_kernel=alternative_kernel,
         lightcurve=input_lc,
         **comparison_kwargs,
     )
 
-    gpmodel.derive_posteriors(
-        fit=True, max_steps=10000, num_chains=10, num_warmup=500, converge_steps=500
-    )
-    gpmodel.process_lightcurves(
-        nsims=10,
-        fit=True,
-        max_steps=500,
-        num_chains=6,
-        num_warmup=500,
-        converge_steps=500,
-    )
-    gpmodel.likelihood_ratio_test()
-    gpmodel.null_model.plot_autocorrelation(path="autocorr_null.png")
-    gpmodel.alt_model.plot_autocorrelation(path="autocorr_alt.png")
-    gpmodel.null_model.corner_plot_samples(path="coner_plot_null.png")
-    gpmodel.alt_model.corner_plot_samples(path="coner_plot_alt.png")
+    gpmodel.derive_posteriors(fit=True, max_steps=50000, cores=cpus)
+    gpmodel.process_lightcurves(nsims=100, fit=True, max_steps=1000, cores=cpus)
