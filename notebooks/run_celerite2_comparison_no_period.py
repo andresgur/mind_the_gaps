@@ -79,14 +79,14 @@ if __name__ == "__main__":
         "null_kwargs": {
             "params": jnp.array([input_lc.mean, variance_drw, w_bend]),
             "bounds": bounds_real,
-            "mean_model": "Constant",
+            # "mean_model": "Constant",
             "fit_mean": False,
             "cpus": 10,
         },
         "alt_kwargs": {
             "fit_mean": False,
             "cpus": 10,
-            "mean_model": "Constant",
+            # "mean_model": "Constant",
             "params": jnp.array(
                 [input_lc.mean, variance_drw, c, w, variance_drw, w_bend]
             ),

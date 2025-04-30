@@ -52,12 +52,11 @@ def _handle_mean(mean_model, params, fit, rng_key):
 
     if isinstance(mean_model, MeanFunction):
         mean_value = mean_model.compute_mean(params, fit, rng_key)
-        # if fit:
-        #    params = params[mean_model.no_parameters :]
-    elif mean_model is None:
-        mean_value = None
-
-        # mean_value =
+    else:
+        raise ValueError(
+            f"Expected 'mean_model' to be an instance of MeanFunction, "
+            f"but got {type(mean_model).__name__} instead."
+        )
 
     return mean_value, params
 
@@ -185,3 +184,56 @@ def complex_real_kernel_fn(
         jax_terms.ComplexTerm(a=a, c=c, d=d, b=0.0) + jax_terms.RealTerm(a=a2, c=c2),
         mean_value,
     )
+
+
+@returns_type(Term)
+def kernel_term(
+    term_class,
+    priors: dict,
+    fit: bool = False,
+    params: list = None,
+    rng_key: jax.random.PRNGKey = None,
+    prefix: str = "",
+):
+    """
+    Build a celerite2.jax term using sampled or fixed parameters.
+
+    Parameters
+    ----------
+    term_class : callable
+        A celerite2.jax.terms class like RealTerm or ComplexTerm
+    priors : dict
+        Dictionary where each key is a param name, and each value is a tuple:
+        (distribution constructor, bounds tuple)
+    fit : bool
+        Whether to use fixed params (True) or sample from priors (False)
+    params : list
+        If fit=True, list of fixed param values to use
+    rng_key : jax.random.PRNGKey
+        PRNG key for numpyro sampling
+    prefix : str
+        Prefix for naming sampled parameters (helps avoid name collisions)
+
+    Returns
+    -------
+    term instance
+        A constructed kernel term (e.g., RealTerm(a=..., c=...))
+    """
+    term_kwargs = {}
+
+    if fit:
+        for i, name in enumerate(priors):
+            term_kwargs[name] = params[i]
+    else:
+        for name, (dist_class, bounds) in priors.items():
+            sample_name = f"{prefix}_{name}" if prefix else name
+            low, high = bounds
+            dist_obj = (
+                dist_class(jnp.log(low), jnp.log(high))
+                if "log_" in name
+                else dist_class(low, high)
+            )
+            val = numpyro.sample(sample_name, dist_obj, rng_key=rng_key)
+            term_kwargs[name] = jnp.exp(val) if "log_" in name else val
+
+    return term_class(**term_kwargs)

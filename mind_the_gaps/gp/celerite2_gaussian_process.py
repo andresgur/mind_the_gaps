@@ -93,11 +93,11 @@ class Celerite2GP(BaseGP):
             return GaussianMean(lightcurve=self._lightcurve), True
         else:
             raise ValueError(
-                f"Invalid mean model specified: '{meanmodel}'. Must be None, 'constant', 'linear', or 'gaussian'."
+                f"Invalid mean model specified: '{meanmodel}'. Must be None, 'fixed', 'constant', 'linear', or 'gaussian'."
             )
 
     def numpyro_dist(self):
-        self.gp.numpyro_dist()
+        return self.gp.numpyro_dist()
 
     def compute(self, params: jax.Array, t: jax.Array, fit: bool) -> None:
         """Set up the Celerite2 kernel, GaussianProcess and call compute on it with

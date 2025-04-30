@@ -4,21 +4,21 @@
 # @Last modified by:   agurpide
 # @Last modified time: 28-05-2024
 
+import os
+
 import jax.numpy as jnp
 from jax import config
-import os
 
 config.update("jax_enable_x64", True)
 
 from typing import Any, List, Mapping, Union
 
-from matplotlib import pyplot as plt
-from scipy.stats import percentileofscore
-import corner
-
 import celerite
+import corner
 import numpy as np
 from celerite2.jax.terms import Term
+from matplotlib import pyplot as plt
+from scipy.stats import percentileofscore
 from tinygp.kernels.base import Kernel
 
 from mind_the_gaps.engines.celerite2_engine import Celerite2GPEngine
@@ -77,7 +77,8 @@ class GPModelling:
         fit_mean: bool,
         **modelling_kwargs: Mapping[str, Any],
     ) -> Union[CeleriteGPEngine | Celerite2GPEngine]:
-        """Select GP  modelling engine.
+        """
+        Select GP  modelling engine.
 
         Parameters
         ----------

@@ -77,7 +77,7 @@ class Celerite2GPEngine(BaseGPEngine):
         numpyro.deterministic("log_likelihood", log_likelihood)
         numpyro.sample(
             "obs",
-            self.gp.gp.numpyro_dist(),
+            self.gp.numpyro_dist(),
             obs=self._lightcurve.y,
             rng_key=self.rng_key,
         )
