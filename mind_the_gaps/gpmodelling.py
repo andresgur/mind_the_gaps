@@ -24,6 +24,7 @@ from tinygp.kernels.base import Kernel
 from mind_the_gaps.engines.celerite2_engine import Celerite2GPEngine
 from mind_the_gaps.engines.celerite_engine import CeleriteGPEngine
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
+from mind_the_gaps.models.kernel import KernelSpec
 
 
 class GPModelling:
@@ -33,7 +34,8 @@ class GPModelling:
 
     def __init__(
         self,
-        kernel: Union[celerite.modeling.Model, Kernel, Term],
+        # kernel: Union[celerite.modeling.Model, Kernel, Term],
+        kernel_spec: KernelSpec,
         lightcurve: GappyLightcurve,
         mean_model: str = None,
         fit_mean: bool = True,
@@ -60,7 +62,7 @@ class GPModelling:
 
         self._lightcurve = lightcurve
         self.modelling_engine = self._select_modelling_engine(
-            kernel=kernel,
+            kernel_spec=kernel_spec,
             lightcurve=lightcurve,
             model_type=model_type,
             mean_model=mean_model,
@@ -70,7 +72,7 @@ class GPModelling:
 
     def _select_modelling_engine(
         self,
-        kernel: Union[celerite.modeling.Model, Kernel, Term],
+        kernel_spec: KernelSpec,  # Union[celerite.modeling.Model, Kernel, Term],
         lightcurve: GappyLightcurve,
         model_type: str,
         mean_model: str,
@@ -82,8 +84,8 @@ class GPModelling:
 
         Parameters
         ----------
-        kernel : Union[celerite.modeling.Model, Kernel, Term]
-            GP kernel/Model to be fitted.
+        kernel_spec : kernelSpec
+            Specification for kernel to be built.
         lightcurve : GappyLightcurve
             An instance of a lightcurve.
         mean_model : str, optional
@@ -107,33 +109,35 @@ class GPModelling:
 
         """
         if model_type.lower() == "auto":
-            if isinstance(kernel, celerite.modeling.Model):
+            if issubclass(kernel_spec.terms[0].term_class, celerite.modeling.Model):
                 return CeleriteGPEngine(
-                    kernel=kernel,
+                    kernel_spec=kernel_spec,
                     lightcurve=lightcurve,
                     mean_model=mean_model,
                     fit_mean=fit_mean,
                 )
-            elif callable(kernel) and getattr(kernel, "_return_type", None) is Term:
+            elif issubclass(kernel_spec.terms[0].term_class, Term):
                 return Celerite2GPEngine(
-                    kernel_fn=kernel,
+                    kernel_spec=kernel_spec,
                     lightcurve=lightcurve,
                     **modelling_kwargs,
                 )
-            elif isinstance(kernel, Kernel):
+            elif issubclass(kernel_spec.terms[0].term_class, Kernel):
                 raise NotImplementedError(f"TinyGPEngine not implemented.")
             else:
-                raise ValueError(f"Unrecognised kernel type: {type(kernel)}")
+                raise ValueError(
+                    f"Unrecognised kernel type: {type(kernel_spec.terms[0].term_class)}"
+                )
         elif model_type.lower() == "celerite":
             return CeleriteGPEngine(
-                kernel=kernel,
+                kernel_spec=kernel_spec,
                 lightcurve=lightcurve,
                 mean_model=mean_model,
                 fit_mean=fit_mean,
             )
         elif model_type.lower() == "celerite2":
             return Celerite2GPEngine(
-                kernel_fn=kernel,
+                kernel_spec=kernel_spec,
                 lightcurve=lightcurve,
                 **modelling_kwargs,
             )
@@ -245,14 +249,14 @@ class GPModellingComparison:
 
     def __init__(
         self,
-        null_kernel: Union[celerite.modeling.Model, Kernel, Term],
-        alt_kernel: Union[celerite.modeling.Model, Kernel, Term],
+        null_kernel_spec: KernelSpec,
+        alt_kernel_spec: KernelSpec,
         lightcurve: GappyLightcurve,
         **modelling_kwargs: Mapping[str, Any],
     ):
 
-        self.null_kernel = null_kernel
-        self.alt_kernel = alt_kernel
+        self.null_kernel_spec = null_kernel_spec
+        self.alt_kernel_spec = alt_kernel_spec
         self.lightcurve = lightcurve
 
         self.likelihoods = []
@@ -260,13 +264,15 @@ class GPModellingComparison:
         self.alt_modelling_kwargs = modelling_kwargs.pop("alt_kwargs", {})
 
         self.null_model = GPModelling(
-            kernel=null_kernel,
+            kernel_spec=null_kernel_spec,
             lightcurve=lightcurve,
             **self.null_modelling_kwargs,
         )
 
         self.alt_model = GPModelling(
-            kernel=alt_kernel, lightcurve=lightcurve, **self.alt_modelling_kwargs
+            kernel_spec=alt_kernel_spec,
+            lightcurve=lightcurve,
+            **self.alt_modelling_kwargs,
         )
 
     def derive_posteriors(self, **engine_kwargs: Mapping[str, Any]):
@@ -288,13 +294,17 @@ class GPModellingComparison:
             print("Processing lightcurve %d/%d" % (i + 1, len(lcs)), end="\r")
 
             null_modelling = GPModelling(
-                kernel=self.null_kernel, lightcurve=lc, **self.null_modelling_kwargs
+                kernel_spec=self.null_kernel_spec,
+                lightcurve=lc,
+                **self.null_modelling_kwargs,
             )
             null_modelling.derive_posteriors(**engine_kwargs)
             self.likelihoods_null.append(null_modelling.max_loglikelihood)
 
             alternative_modelling = GPModelling(
-                kernel=self.alt_kernel, lightcurve=lc, **self.alt_modelling_kwargs
+                kernel_spec=self.alt_kernel_spec,
+                lightcurve=lc,
+                **self.alt_modelling_kwargs,
             )
             alternative_modelling.derive_posteriors(**engine_kwargs)
             self.likelihoods_alt.append(alternative_modelling.max_loglikelihood)

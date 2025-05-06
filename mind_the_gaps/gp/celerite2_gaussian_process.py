@@ -1,20 +1,21 @@
-from typing import Callable, Union, Dict, List
+from typing import Callable, Dict, List, Union
 
 import celerite2
 import celerite2.jax
+import celerite2.jax.terms as j_terms
 import jax
 import jax.numpy as jnp
+import numpy as np
 import numpyro
 
 from mind_the_gaps.gp.gaussian_process import BaseGP
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
 from mind_the_gaps.models.celerite2.mean_terms import (
-    FixedMean,
     ConstantMean,
+    FixedMean,
     GaussianMean,
     LinearMean,
 )
-import numpy as np
 
 # from mind_the_gaps.models.celerite2.kernel_terms import ConstantModel, Model
 from mind_the_gaps.models.celerite.mean_models import (
@@ -22,6 +23,7 @@ from mind_the_gaps.models.celerite.mean_models import (
     LinearModel,
     SineModel,
 )
+from mind_the_gaps.models.kernel import KernelSpec
 
 
 class Celerite2GP(BaseGP):
@@ -35,12 +37,12 @@ class Celerite2GP(BaseGP):
 
     def __init__(
         self,
-        kernel_fn: Callable,
+        kernel_spec: KernelSpec,
         lightcurve: GappyLightcurve,
-        params: jnp.array,
         rng_key: jnp.array,
         bounds: dict = None,
         meanmodel: str = None,
+        mean_params: jax.Array = None,
     ):
         """Initialise the celerite2 Gaussian Process
 
@@ -60,16 +62,18 @@ class Celerite2GP(BaseGP):
             Mean model for the gaussian process either "Constant", "Linear" or "Gaussian", by default None
         """
 
-        self.kernel_fn = kernel_fn
+        self.kernel_spec = kernel_spec
         self._lightcurve = lightcurve
         self.rng_key = rng_key
-        self.bounds = bounds
-        self.meanmodel, self.fit_mean = self._build_mean_model(meanmodel)
-        self.params = params
-        self.compute(self.params, self._lightcurve.times, fit=self.fit_mean)
+        # self.bounds = bounds
+        self.mean_params = mean_params
+        self.meanmodel, self.fit_mean = self._build_mean_model(meanmodel, mean_params)
+
+        init_params = jnp.concatenate([mean_params, self.kernel_spec.get_param_array()])
+        self.compute(self._lightcurve.times, fit=True, params=init_params)
 
     def _build_mean_model(
-        self, meanmodel: str
+        self, meanmodel: str, mean_params: jax.Array
     ) -> Union[FixedMean, ConstantMean, GaussianMean, LinearMean, float]:
         """Return the mean model based on meanmodel. Can either be a
 
@@ -84,11 +88,20 @@ class Celerite2GP(BaseGP):
         """
 
         if meanmodel is None or meanmodel.lower() == "fixed":
-            return FixedMean(lightcurve=self._lightcurve), False
+            return (
+                FixedMean(lightcurve=self._lightcurve),
+                False,
+            )
         elif meanmodel.lower() == "constant":
-            return ConstantMean(lightcurve=self._lightcurve), True
+            return (
+                ConstantMean(lightcurve=self._lightcurve),
+                True,
+            )
         elif meanmodel.lower() == "linear":
-            return LinearMean(lightcurve=self._lightcurve), True
+            return (
+                LinearMean(lightcurve=self._lightcurve),
+                True,
+            )
         elif meanmodel.lower() == "gaussian":
             return GaussianMean(lightcurve=self._lightcurve), True
         else:
@@ -99,7 +112,7 @@ class Celerite2GP(BaseGP):
     def numpyro_dist(self):
         return self.gp.numpyro_dist()
 
-    def compute(self, params: jax.Array, t: jax.Array, fit: bool) -> None:
+    def compute(self, t: jax.Array, fit: bool, params: jax.Array = None) -> None:
         """Set up the Celerite2 kernel, GaussianProcess and call compute on it with
         the appropriate params.
 
@@ -113,16 +126,56 @@ class Celerite2GP(BaseGP):
         fit : bool
             Whether the GP is being fitted
         """
-        self.params = params
-        kernel, mean = self.kernel_fn(
-            params=params,
-            fit=fit,
-            rng_key=self.rng_key,
-            bounds=self.bounds,
-            mean_model=self.meanmodel,
-        )
+        # self.params = params
+        # kernel, mean = self.kernel_fn(
+        #    params=params,
+        #    fit=fit,
+        #    rng_key=self.rng_key,
+        #    bounds=self.bounds,
+        #    mean_model=self.meanmodel,
+        # )
+        # if params:
+        #    mean_params = params[: self.meanmodel.no_params]
+        #    kernel_params = params[self.meanmodel.no_params :]
+        # self.kernel_spec.update_params_from_array(kernel_params)
+        mean = self.meanmodel.compute_mean(params=params, rng_key=self.rng_key)
+
+        kernel = self._get_kernel(fit=fit)
+
         self.gp = celerite2.jax.GaussianProcess(kernel, mean=mean)
-        self.gp.compute(t, yerr=self._lightcurve.dy, check_sorted=False)
+        self.gp.compute(
+            t,
+            yerr=self._lightcurve.dy,
+            check_sorted=False,
+        )
+
+    def _get_kernel(self, fit=False):
+
+        rng_key = self.rng_key  # jax.random.PRNGKey(self.rng_key)
+        terms = []
+
+        for i, term in enumerate(self.kernel_spec.terms):
+            # term_cls = term_class
+            kwargs = {}
+
+            for name, param_spec in term.parameters.items():
+                full_name = f"term{i}_{name}"
+
+                if fit or param_spec.fixed:
+                    kwargs[name] = param_spec.value
+                else:
+                    dist_cls = param_spec.prior
+                    val = numpyro.sample(
+                        full_name, dist_cls(*param_spec.bounds), rng_key=rng_key
+                    )
+                    kwargs[name] = val
+
+            terms.append(term.term_class(**kwargs))
+
+        kernel = terms[0]
+        for t in terms[1:]:
+            kernel += t
+        return kernel
 
     def get_psd(self) -> np.ndarray:
         """Get the power spectral density for the kernel at the current parameters
@@ -156,7 +209,7 @@ class Celerite2GP(BaseGP):
         float
             Negative Log Likelihood
         """
-        self.compute(params, self._lightcurve.times, fit=fit)
+        self.compute(self._lightcurve.times, params=params, fit=fit)
         nll_value = -self.gp.log_likelihood(self._lightcurve.y)
         return nll_value
 

@@ -1,7 +1,7 @@
 import warnings
 from functools import partial
 from multiprocessing import Pool
-from typing import Callable, List, Dict
+from typing import Callable, Dict, List
 
 import arviz as az
 import celerite
@@ -21,6 +21,7 @@ from numpyro.infer.initialization import init_to_value
 from mind_the_gaps.engines.gp_engine import BaseGPEngine
 from mind_the_gaps.gp.celerite2_gaussian_process import Celerite2GP
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
+from mind_the_gaps.models.kernel import KernelSpec
 
 
 class Celerite2GPEngine(BaseGPEngine):
@@ -35,35 +36,44 @@ class Celerite2GPEngine(BaseGPEngine):
 
     def __init__(
         self,
-        kernel_fn: Callable,
+        kernel_spec: KernelSpec,
         lightcurve: GappyLightcurve,
         cpus: int,
-        params: float,
         meanmodel: str = None,
+        mean_params: jax.Array = None,
         seed: int = 0,
         bounds: dict = None,
     ):
 
-        self.kernel_fn = kernel_fn
+        self.kernel_spec = kernel_spec
         self._lightcurve = lightcurve
         self.seed = seed
         self.meanmodel = meanmodel
+        # self.mean_params = mean_params
         self.rng_key = jax.random.PRNGKey(self.seed)
-        self.bounds = bounds
+        # self.bounds = bounds
         self.cpus = cpus
 
         numpyro.enable_x64()
         numpyro.set_platform("cpu")
         numpyro.set_host_device_count(self.cpus)
         self.gp = Celerite2GP(
-            kernel_fn=self.kernel_fn,
+            kernel_spec=self.kernel_spec,
             lightcurve=self._lightcurve,
             meanmodel=self.meanmodel,
-            params=params,
-            bounds=self.bounds,
+            mean_params=mean_params,
+            # bounds=self.bounds,
             rng_key=self.rng_key,
         )
-        self.gp.compute(params, self._lightcurve.times, fit=False)
+        self.init_params = self.kernel_spec.get_param_array()
+        if self.gp.fit_mean:
+            self.init_params = jnp.concatenate([mean_params, self.init_params])
+
+        # self.gp.compute(
+        #    self._lightcurve.times,
+        #    fit=True,
+        #    params=self.init_params,
+        # )
         self._mcmc_samples = {}
         self._autocorr = []
 
@@ -71,7 +81,7 @@ class Celerite2GPEngine(BaseGPEngine):
         self, t: jax.Array, params: jax.Array = None, fit: bool = False
     ) -> None:
 
-        self.gp.compute(params, t, fit=fit)
+        self.gp.compute(t, params=params, fit=fit)
 
         log_likelihood = self.gp.log_likelihood(self._lightcurve.y)
         numpyro.deterministic("log_likelihood", log_likelihood)
@@ -84,15 +94,21 @@ class Celerite2GPEngine(BaseGPEngine):
 
     def minimize(self) -> jax.Array:
 
-        upper_bounds = jnp.array([values[1] for values in self.bounds.values()])
-        lower_bounds = jnp.array([values[0] for values in self.bounds.values()])
+        # upper_bounds = jnp.array([values[1] for values in self.bounds.values()])
+        # lower_bounds = jnp.array([values[0] for values in self.bounds.values()])
 
+        # [KernelTermSpec(term_class=<class 'celerite2.jax.terms.RealTerm'>, parameters=OrderedDict([('a', KernelParameterSpec(value=100.0, fixed=(False,), prior=<class 'numpyro.distributions.continuous.LogUniform'>, bounds=(-10, 50.0))), ('c', KernelParameterSpec(value=0.3141592653589793, fixed=(False,), prior=<class 'numpyro.distributions.continuous.LogUniform'>, bounds=(-10.0, 10.0)))]))]
+
+        #    init_params = self.gp.params
+        # elif self.meanmodel is None:
+        #    init_params = self.gp.params[1:]
+        # init_params = self.kernel_spec.get_param_array()
+        bounds = self.kernel_spec.get_bounds_array()
+        upper_bounds = jnp.array([values[1] for values in bounds])
+        lower_bounds = jnp.array([values[0] for values in bounds])
         if self.gp.fit_mean and self.meanmodel is not None:
             upper_bounds = jnp.concatenate([self.gp.meanmodel.bounds[1], upper_bounds])
             lower_bounds = jnp.concatenate([self.gp.meanmodel.bounds[0], lower_bounds])
-            init_params = self.gp.params
-        elif self.meanmodel is None:
-            init_params = self.gp.params[1:]
 
         solver = jaxopt.ScipyBoundedMinimize(
             method="l-bfgs-b",
@@ -101,15 +117,13 @@ class Celerite2GPEngine(BaseGPEngine):
         )
 
         opt_params, res = solver.run(
-            init_params=init_params,  # self.gp.params,
+            init_params=self.init_params,  # self.gp.params,
             bounds=(lower_bounds, upper_bounds),
         )
         self.gp.compute(params=opt_params, t=self._lightcurve.times, fit=False)
         return opt_params
 
-    def initialize_params(
-        self, init_params: jax.Array, num_chains: int, std_dev=0.1
-    ) -> Dict:
+    def initialize_params(self, num_chains: int, std_dev=0.1) -> Dict:
         """
         Generate multiple initial parameter values for NUTS sampling, ensuring they
         respect bounds and have a Gaussian spread.
@@ -124,16 +138,25 @@ class Celerite2GPEngine(BaseGPEngine):
             dict: Dictionary of JAX arrays with shape (num_chains, param_dim).
         """
         param_dict = {}
+        i = 0
+        for term in self.kernel_spec.terms:
+            for param_name, param_spec in term.parameters.items():
+                if param_spec.fixed:
+                    continue
 
-        for i, (param_name, (low, high)) in enumerate(self.bounds.items()):
-            base_value = init_params[i]
+                base_value = param_spec.value
+                low, high = param_spec.bounds
 
-            spread_values = base_value + np.random.normal(0, std_dev, size=num_chains)
+                spread_values = base_value + np.random.normal(
+                    0, std_dev, size=num_chains
+                )
 
-            spread_values = np.clip(spread_values, low, high)
+                # Clip to bounds
+                spread_values = np.clip(spread_values, float(low), float(high))
 
-            param_dict[param_name] = jnp.array(spread_values)
-
+                # Store in dict
+                param_dict[f"term{i}_{param_name}"] = jnp.array(spread_values)
+            i += 1
         return param_dict
 
     def derive_posteriors(
@@ -149,9 +172,10 @@ class Celerite2GPEngine(BaseGPEngine):
 
         old_tau = jnp.inf
         if fit:
-            self.params = self.minimize()
+            self.init_params = self.minimize()
+            self.kernel_spec.update_params_from_array(self.init_params)
 
-        fixed_params = self.initialize_params(self.params, num_chains=num_chains)
+        fixed_params = self.initialize_params(num_chains=num_chains)
 
         kernel = NUTS(
             self.numpyro_model,
@@ -172,7 +196,7 @@ class Celerite2GPEngine(BaseGPEngine):
         mcmc.run(
             self.rng_key,
             t=self._lightcurve.times,
-            params=self.params,
+            # params=self.kernel_spec.get_param_array(),
         )
         state = mcmc.last_state
 

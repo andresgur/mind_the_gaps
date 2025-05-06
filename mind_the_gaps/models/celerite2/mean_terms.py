@@ -24,9 +24,10 @@ class FixedMean(MeanFunction):
     def __init__(self, lightcurve):
         super().__init__(lightcurve=lightcurve)
         self.mean_value = lightcurve.mean
+        self.bounds = jnp.array([])
 
-    def compute_mean(self, params, fit, rng_key):
-        return self.mean_value  # params[: self.no_parameters]
+    def compute_mean(self, params: jax.Array = None, rng_key: int = None):
+        return self.mean_value
 
 
 class ConstantMean(MeanFunction):
@@ -40,8 +41,8 @@ class ConstantMean(MeanFunction):
             [[jnp.min(self._lightcurve.y)], [jnp.max(self._lightcurve.y)]]
         )
 
-    def compute_mean(self, params: jnp.array, fit: bool, rng_key: int):
-        if fit:
+    def compute_mean(self, params: jnp.array, rng_key: int):
+        if params:
             return params[: self.no_parameters]
         else:
             return numpyro.sample(
@@ -64,8 +65,8 @@ class LinearMean(MeanFunction):
             [[jnp.min(self._lightcurve.y)], [jnp.max(self._lightcurve.y)]]
         )
 
-    def compute_mean(self, params: jnp.array, fit: bool, rng_key: int, bounds: dict):
-        if fit:
+    def compute_mean(self, rng_key: int, params: jnp.array = None, bounds: dict = None):
+        if params:
             m, b = params[: self.count_parameters]
 
         else:
@@ -90,9 +91,9 @@ class GaussianMean(MeanFunction):
         return 3
 
     def compute_mean(
-        self, t: jnp.array, params: jnp.array, fit: bool, rng_key: int, bounds: dict
+        self, t: jnp.array, rng_key: int, params: jnp.array = None, bounds: dict = None
     ):
-        if fit:
+        if params:
             A, mu, sigma = params[: self.count_parameters]
 
         else:
