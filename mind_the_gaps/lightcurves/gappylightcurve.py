@@ -250,6 +250,10 @@ class GappyLightcurve:
         kwargs: dict,
             Arguments for the simulator (aliasing_factor, sigma_noise, etc)
 
+        Returns
+        -------
+        Simulator
+            An instance of the Simulator class initialized with the lightcurve properties.
         """
         return Simulator(psd_model, self._times, self._exposures, self.mean, pdf,
                          self._bkg_rate, self._bkg_rate_err, **kwargs)
