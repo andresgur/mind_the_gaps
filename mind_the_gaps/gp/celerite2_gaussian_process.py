@@ -10,6 +10,7 @@ import numpyro
 
 from mind_the_gaps.gp.gaussian_process import BaseGP
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
+from mind_the_gaps.models.celerite2.kernel_terms import real_kernel_fn
 from mind_the_gaps.models.celerite2.mean_terms import (
     ConstantMean,
     FixedMean,
@@ -141,6 +142,7 @@ class Celerite2GP(BaseGP):
         mean = self.meanmodel.compute_mean(params=params, rng_key=self.rng_key)
 
         kernel = self._get_kernel(fit=fit)
+        # kernel = get_kernel(rng_key=self.rng_key, kernel_spec=self.kernel_spec, fit=fit)
 
         self.gp = celerite2.jax.GaussianProcess(kernel, mean=mean)
         self.gp.compute(
@@ -149,7 +151,7 @@ class Celerite2GP(BaseGP):
             check_sorted=False,
         )
 
-    def _get_kernel(self, fit=False):
+    def _get_kernel(self, fit=True):
 
         rng_key = self.rng_key  # jax.random.PRNGKey(self.rng_key)
         terms = []
@@ -168,7 +170,12 @@ class Celerite2GP(BaseGP):
                     val = numpyro.sample(
                         full_name, dist_cls(*param_spec.bounds), rng_key=rng_key
                     )
+                    # if val.shape == ():
+                    # val is a scalar, just use it directly
                     kwargs[name] = val
+                    # else:
+                    # val is a 1D array with more than one element
+                    #    kwargs[name] = val[0] if val.shape[0] > 1 else val
 
             terms.append(term.term_class(**kwargs))
 
@@ -272,3 +279,32 @@ class Celerite2GP(BaseGP):
         """
 
         return list(self.bounds.keys())
+
+
+def get_kernel(rng_key, kernel_spec, fit=False):
+
+    # rng_key = self.rng_key  # jax.random.PRNGKey(self.rng_key)
+    terms = []
+
+    for i, term in enumerate(kernel_spec.terms):
+        # term_cls = term_class
+        kwargs = {}
+
+        for name, param_spec in term.parameters.items():
+            full_name = f"term{i}_{name}"
+
+            if fit or param_spec.fixed:
+                kwargs[name] = param_spec.value
+            else:
+                dist_cls = param_spec.prior
+                val = numpyro.sample(
+                    full_name, dist_cls(*param_spec.bounds), rng_key=rng_key
+                )
+                kwargs[name] = val
+
+        terms.append(term.term_class(**kwargs))
+
+    kernel = terms[0]
+    for t in terms[1:]:
+        kernel += t
+    return kernel

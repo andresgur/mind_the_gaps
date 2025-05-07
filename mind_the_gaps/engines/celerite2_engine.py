@@ -120,7 +120,7 @@ class Celerite2GPEngine(BaseGPEngine):
             init_params=self.init_params,  # self.gp.params,
             bounds=(lower_bounds, upper_bounds),
         )
-        self.gp.compute(params=opt_params, t=self._lightcurve.times, fit=False)
+        self.gp.compute(params=opt_params, t=self._lightcurve.times, fit=True)
         return opt_params
 
     def initialize_params(self, num_chains: int, std_dev=0.1) -> Dict:
@@ -167,7 +167,7 @@ class Celerite2GPEngine(BaseGPEngine):
         converge_steps: int,
         fit=True,
         seed=0,
-        progress=False,
+        progress=True,
     ) -> None:
 
         old_tau = jnp.inf
