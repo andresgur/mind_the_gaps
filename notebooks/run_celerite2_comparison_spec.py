@@ -108,12 +108,12 @@ if __name__ == "__main__":
                 term_class=jax_terms.RealTerm,
                 parameters={
                     "a": KernelParameterSpec(
-                        value=np.log(variance_drw),
+                        value=variance_drw,
                         prior=dist.Uniform,
                         bounds=(-10, 50.0),
                     ),
                     "c": KernelParameterSpec(
-                        value=np.log(w_bend),
+                        value=w_bend,
                         prior=dist.Uniform,
                         bounds=(-10.0, 10.0),
                     ),
@@ -131,12 +131,12 @@ if __name__ == "__main__":
                     "a": KernelParameterSpec(
                         value=variance_drw,
                         prior=dist.Uniform,
-                        bounds=(-10, 50.0),
+                        bounds=np.exp((-10, 50.0)),
                     ),
                     "c": KernelParameterSpec(
                         value=w_bend,
                         prior=dist.Uniform,
-                        bounds=(-10.0, 50.0),
+                        bounds=np.exp((-10.0, 50.0)),
                     ),
                 },
             ),
@@ -146,17 +146,17 @@ if __name__ == "__main__":
                     "a": KernelParameterSpec(
                         value=variance_drw,
                         prior=dist.Uniform,
-                        bounds=(-10.0, 50.0),
+                        bounds=np.exp((-10.0, 50.0)),
                     ),
                     "c": KernelParameterSpec(
                         value=c,
                         prior=dist.Uniform,
-                        bounds=(-10.0, 50.0),
+                        bounds=np.exp((-10.0, 50.0)),
                     ),
                     "d": KernelParameterSpec(
                         value=w,
                         prior=dist.Uniform,
-                        bounds=(-5.0, 5.0),
+                        bounds=np.exp((-5.0, 5.0)),
                     ),
                     "b": KernelParameterSpec(value=0.0, fixed=True),
                 },

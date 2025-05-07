@@ -19,7 +19,7 @@ class MeanFunction(ABC):
 
 
 class FixedMean(MeanFunction):
-    no_parameters = 0
+    no_parameters = 1
 
     def __init__(self, lightcurve):
         super().__init__(lightcurve=lightcurve)
