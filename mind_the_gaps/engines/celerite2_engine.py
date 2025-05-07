@@ -1,3 +1,5 @@
+import copy
+import pprint as pp
 import warnings
 from functools import partial
 from multiprocessing import Pool
@@ -14,7 +16,9 @@ import jaxopt
 import matplotlib.pyplot as plt
 import numpy as np
 import numpyro
+from jax import random
 from jaxopt import ScipyBoundedMinimize
+from numpyro.handlers import seed, trace
 from numpyro.infer import AIES, ESS, MCMC, NUTS
 from numpyro.infer.initialization import init_to_value
 
@@ -49,7 +53,7 @@ class Celerite2GPEngine(BaseGPEngine):
         self._lightcurve = lightcurve
         self.seed = seed
         self.meanmodel = meanmodel
-        # self.mean_params = mean_params
+        self.mean_params = mean_params
         self.rng_key = jax.random.PRNGKey(self.seed)
         # self.bounds = bounds
         self.cpus = cpus
@@ -175,13 +179,13 @@ class Celerite2GPEngine(BaseGPEngine):
             self.init_params = self.minimize()
             self.kernel_spec.update_params_from_array(self.init_params)
 
-        fixed_params = self.initialize_params(num_chains=num_chains)
+        # fixed_params = self.initialize_params(num_chains=num_chains)
 
         kernel = NUTS(
             self.numpyro_model,
             adapt_step_size=True,
             dense_mass=True,
-            init_strategy=init_to_value(values=fixed_params),
+            # init_strategy=init_to_value(values=fixed_params),
         )
         mcmc = MCMC(
             kernel,
@@ -243,13 +247,17 @@ class Celerite2GPEngine(BaseGPEngine):
         self._loglikelihoods = idata.posterior["log_likelihood"].values
 
     def _generate_lc_from_params(self, params: jax.Array) -> GappyLightcurve:
+        kernel_spec = copy.deepcopy(self.kernel_spec)
+        kernel_spec.update_params_from_array(params[len(self.mean_params) :])
+
         gp_sample = Celerite2GP(
-            kernel_fn=self.kernel_fn,
+            kernel_spec=self.kernel_spec,
             meanmodel=self.meanmodel,
-            params=params[:-1],
-            bounds=self.bounds,
+            # params=params[:-1],
+            # bounds=self.bounds,
             lightcurve=self._lightcurve,
             rng_key=self.rng_key,
+            mean_params=params[: len(self.mean_params)],
         )
         psd_model = gp_sample.get_psd()
         simulator = self._lightcurve.get_simulator(psd_model, pdf="Gaussian")

@@ -48,12 +48,17 @@ class KernelSpec:
     def __init__(self, terms: List[KernelTermSpec], engine: str):
         self.terms = terms
         self.engine = engine
+        if issubclass(self.terms[0].term_class, Term):
+            self.use_jax = True
 
     def update_params_from_array(self, array: Union[jax.Array, np.ndarray]) -> None:
         i = 0
         for term in self.terms:
             for name, param in term.parameters.items():
-                param.value = float(array[i])
+                if self.use_jax:
+                    param.value = jnp.array(array[i])
+                else:
+                    param.value = float(array[i])
                 i += 1
 
     def get_param_array(self) -> Union[np.ndarray, jax.Array]:
@@ -65,7 +70,8 @@ class KernelSpec:
 
         for term in self.terms:
             for param in term.parameters.values():
-                values.append(param.value)
+                if not param.fixed:
+                    values.append(param.value)
 
         if use_jax:
             return jnp.array(values)

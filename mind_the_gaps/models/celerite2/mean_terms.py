@@ -19,14 +19,16 @@ class MeanFunction(ABC):
 
 
 class FixedMean(MeanFunction):
-    no_parameters = 1
+    no_parameters = 0
 
     def __init__(self, lightcurve):
         super().__init__(lightcurve=lightcurve)
         self.mean_value = lightcurve.mean
         self.bounds = jnp.array([])
 
-    def compute_mean(self, params: jax.Array = None, rng_key: int = None):
+    def compute_mean(
+        self, fit: bool = True, params: jax.Array = None, rng_key: int = None
+    ):
         return self.mean_value
 
 
@@ -41,9 +43,10 @@ class ConstantMean(MeanFunction):
             [[jnp.min(self._lightcurve.y)], [jnp.max(self._lightcurve.y)]]
         )
 
-    def compute_mean(self, params: jnp.array, rng_key: int):
-        if params:
-            return params[: self.no_parameters]
+    def compute_mean(self, params: jnp.array, fit: bool = True, rng_key: int = None):
+        if fit and jnp.size(params) == self.no_parameters:
+
+            return params
         else:
             return numpyro.sample(
                 "mean",
@@ -67,7 +70,7 @@ class LinearMean(MeanFunction):
 
     def compute_mean(self, rng_key: int, params: jnp.array = None, bounds: dict = None):
         if params:
-            m, b = params[: self.count_parameters]
+            m, b = params  # [: self.count_parameters]
 
         else:
             m = numpyro.sample(

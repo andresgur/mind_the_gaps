@@ -1,3 +1,4 @@
+import pprint as pp
 from typing import Callable, Dict, List, Union
 
 import celerite2
@@ -135,14 +136,18 @@ class Celerite2GP(BaseGP):
         #    bounds=self.bounds,
         #    mean_model=self.meanmodel,
         # )
-        # if params:
-        #    mean_params = params[: self.meanmodel.no_params]
-        #    kernel_params = params[self.meanmodel.no_params :]
-        # self.kernel_spec.update_params_from_array(kernel_params)
-        mean = self.meanmodel.compute_mean(params=params, rng_key=self.rng_key)
+        #
+        #
+        #
+        if fit:
+            mean_params = params[: self.meanmodel.no_parameters]
+            kernel_params = params[self.meanmodel.no_parameters :]
+            self.kernel_spec.update_params_from_array(kernel_params)
+            mean = self.meanmodel.compute_mean(fit=fit, params=mean_params)
+        else:
+            mean = self.meanmodel.compute_mean(fit=fit, rng_key=self.rng_key)
 
         kernel = self._get_kernel(fit=fit)
-        # kernel = get_kernel(rng_key=self.rng_key, kernel_spec=self.kernel_spec, fit=fit)
 
         self.gp = celerite2.jax.GaussianProcess(kernel, mean=mean)
         self.gp.compute(
@@ -172,7 +177,7 @@ class Celerite2GP(BaseGP):
                     )
                     # if val.shape == ():
                     # val is a scalar, just use it directly
-                    kwargs[name] = val
+                    kwargs[name] = jnp.exp(val)
                     # else:
                     # val is a 1D array with more than one element
                     #    kwargs[name] = val[0] if val.shape[0] > 1 else val
@@ -192,13 +197,8 @@ class Celerite2GP(BaseGP):
         np.ndarray
             Power spectral density
         """
-        kernel, _ = self.kernel_fn(
-            params=self.params,
-            fit=True,
-            rng_key=self.rng_key,
-            bounds=self.bounds,
-            mean_model=self.meanmodel,
-        )
+        kernel = self._get_kernel(fit=True)
+
         return kernel.get_psd
 
     def negative_log_likelihood(self, params: jax.Array, fit=True) -> float:
@@ -218,6 +218,8 @@ class Celerite2GP(BaseGP):
         """
         self.compute(self._lightcurve.times, params=params, fit=fit)
         nll_value = -self.gp.log_likelihood(self._lightcurve.y)
+
+        jax.debug.print("{}", nll_value)
         return nll_value
 
     def get_parameter_vector(self) -> jax.Array:

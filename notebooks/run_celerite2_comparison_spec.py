@@ -108,12 +108,12 @@ if __name__ == "__main__":
                 term_class=jax_terms.RealTerm,
                 parameters={
                     "a": KernelParameterSpec(
-                        value=variance_drw,
+                        value=np.log(variance_drw),
                         prior=dist.Uniform,
                         bounds=(-10, 50.0),
                     ),
                     "c": KernelParameterSpec(
-                        value=w_bend,
+                        value=np.log(w_bend),
                         prior=dist.Uniform,
                         bounds=(-10.0, 10.0),
                     ),
@@ -172,7 +172,7 @@ if __name__ == "__main__":
     )
 
     gpmodel.derive_posteriors(
-        fit=True, max_steps=10000, num_chains=10, num_warmup=500, converge_steps=500
+        fit=True, max_steps=100, num_chains=10, num_warmup=100, converge_steps=100
     )
     gpmodel.process_lightcurves(
         nsims=10,
