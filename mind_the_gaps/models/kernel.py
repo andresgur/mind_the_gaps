@@ -91,3 +91,12 @@ class KernelSpec:
                     bounds.append(param.bounds)
 
         return jnp.array(bounds) if use_jax else np.array(bounds, dtype=np.float64)
+
+    def get_param_names(self) -> List[str]:
+        names = []
+        for i, term in enumerate(self.terms):
+            for name, param in term.parameters.items():
+                if not param.fixed:
+                    # Prefix with term index to avoid name collisions
+                    names.append(f"term{i}.{name}")
+        return names

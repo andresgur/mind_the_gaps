@@ -27,6 +27,9 @@ from mind_the_gaps.models.kernel import KernelParameterSpec, KernelSpec, KernelT
 from mind_the_gaps.models.psd_models import BendingPowerlaw
 from mind_the_gaps.simulator import Simulator
 
+# log_file = open("output.txt", "w")
+# sys.stdout = log_file
+# sys.stderr = log_file
 numpyro.set_host_device_count(10)
 if __name__ == "__main__":
 
@@ -110,7 +113,7 @@ if __name__ == "__main__":
                     "a": KernelParameterSpec(
                         value=variance_drw,
                         prior=dist.Uniform,
-                        bounds=(-10, 50.0),
+                        bounds=(-10, 100.0),
                     ),
                     "c": KernelParameterSpec(
                         value=w_bend,
@@ -131,12 +134,12 @@ if __name__ == "__main__":
                     "a": KernelParameterSpec(
                         value=variance_drw,
                         prior=dist.Uniform,
-                        bounds=np.exp((-10, 50.0)),
+                        bounds=(-10, 50.0),
                     ),
                     "c": KernelParameterSpec(
                         value=w_bend,
                         prior=dist.Uniform,
-                        bounds=np.exp((-10.0, 50.0)),
+                        bounds=(-10.0, 50.0),
                     ),
                 },
             ),
@@ -146,17 +149,17 @@ if __name__ == "__main__":
                     "a": KernelParameterSpec(
                         value=variance_drw,
                         prior=dist.Uniform,
-                        bounds=np.exp((-10.0, 50.0)),
+                        bounds=(-10.0, 50.0),
                     ),
                     "c": KernelParameterSpec(
                         value=c,
                         prior=dist.Uniform,
-                        bounds=np.exp((-10.0, 50.0)),
+                        bounds=(-10.0, 50.0),
                     ),
                     "d": KernelParameterSpec(
                         value=w,
                         prior=dist.Uniform,
-                        bounds=np.exp((-5.0, 5.0)),
+                        bounds=(-5.0, 5.0),
                     ),
                     "b": KernelParameterSpec(value=0.0, fixed=True),
                 },
@@ -172,17 +175,17 @@ if __name__ == "__main__":
     )
 
     gpmodel.derive_posteriors(
-        fit=True, max_steps=100, num_chains=10, num_warmup=100, converge_steps=100
+        fit=True, max_steps=5000, num_chains=10, num_warmup=100, converge_steps=1000
     )
-    gpmodel.process_lightcurves(
-        nsims=10,
-        fit=True,
-        max_steps=500,
-        num_chains=6,
-        num_warmup=500,
-        converge_steps=500,
-    )
-    gpmodel.likelihood_ratio_test()
+    # gpmodel.process_lightcurves(
+    #    nsims=10,
+    #    fit=True,
+    #    max_steps=500,
+    #    num_chains=6,
+    #    num_warmup=500,
+    #    converge_steps=500,
+    # )
+    # gpmodel.likelihood_ratio_test()
     gpmodel.null_model.plot_autocorrelation(path="autocorr_null.png")
     gpmodel.alt_model.plot_autocorrelation(path="autocorr_alt.png")
     gpmodel.null_model.corner_plot_samples(path="coner_plot_null.png")

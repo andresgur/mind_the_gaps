@@ -88,6 +88,7 @@ class Celerite2GPEngine(BaseGPEngine):
         self.gp.compute(t, params=params, fit=fit)
 
         log_likelihood = self.gp.log_likelihood(self._lightcurve.y)
+        # jax.debug.print("{}", log_likelihood)
         numpyro.deterministic("log_likelihood", log_likelihood)
         numpyro.sample(
             "obs",
@@ -175,9 +176,9 @@ class Celerite2GPEngine(BaseGPEngine):
     ) -> None:
 
         old_tau = jnp.inf
-        if fit:
-            self.init_params = self.minimize()
-            self.kernel_spec.update_params_from_array(self.init_params)
+        # if fit:
+        #    self.init_params = self.minimize()
+        #    self.kernel_spec.update_params_from_array(self.init_params)
 
         # fixed_params = self.initialize_params(num_chains=num_chains)
 
@@ -214,6 +215,8 @@ class Celerite2GPEngine(BaseGPEngine):
             jit_model_args=True,
         )
         mcmc.post_warmup_state = state
+        # need to inclue a saftey check so that this actually runs or errors
+        # will be thrown after the loop
         for iteration in range(int(max_steps / converge_steps)):
             mcmc.run(
                 mcmc.post_warmup_state.rng_key,
