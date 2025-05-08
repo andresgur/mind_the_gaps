@@ -113,7 +113,7 @@ if __name__ == "__main__":
                     "a": KernelParameterSpec(
                         value=variance_drw,
                         prior=dist.Uniform,
-                        bounds=(-10, 100.0),
+                        bounds=(-10, 150.0),
                     ),
                     "c": KernelParameterSpec(
                         value=w_bend,
@@ -134,12 +134,12 @@ if __name__ == "__main__":
                     "a": KernelParameterSpec(
                         value=variance_drw,
                         prior=dist.Uniform,
-                        bounds=(-10, 50.0),
+                        bounds=(-10, 150.0),
                     ),
                     "c": KernelParameterSpec(
                         value=w_bend,
                         prior=dist.Uniform,
-                        bounds=(-10.0, 50.0),
+                        bounds=(-10.0, 10.0),
                     ),
                 },
             ),
@@ -149,12 +149,12 @@ if __name__ == "__main__":
                     "a": KernelParameterSpec(
                         value=variance_drw,
                         prior=dist.Uniform,
-                        bounds=(-10.0, 50.0),
+                        bounds=(-10, 150.0),
                     ),
                     "c": KernelParameterSpec(
                         value=c,
                         prior=dist.Uniform,
-                        bounds=(-10.0, 50.0),
+                        bounds=(-10, 10.0),
                     ),
                     "d": KernelParameterSpec(
                         value=w,
@@ -175,7 +175,7 @@ if __name__ == "__main__":
     )
 
     gpmodel.derive_posteriors(
-        fit=True, max_steps=5000, num_chains=10, num_warmup=100, converge_steps=1000
+        fit=True, max_steps=15000, num_chains=10, num_warmup=1000, converge_steps=500
     )
     # gpmodel.process_lightcurves(
     #    nsims=10,

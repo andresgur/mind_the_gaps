@@ -103,15 +103,15 @@ if __name__ == "__main__":
     gpmodel.derive_posteriors(
         fit=True, max_steps=10000, num_chains=10, num_warmup=500, converge_steps=500
     )
-    gpmodel.process_lightcurves(
-        nsims=10,
-        fit=True,
-        max_steps=500,
-        num_chains=6,
-        num_warmup=500,
-        converge_steps=500,
-    )
-    gpmodel.likelihood_ratio_test()
+    # gpmodel.process_lightcurves(
+    #    nsims=10,
+    #    fit=True,
+    #    max_steps=500,
+    #    num_chains=6,
+    #    num_warmup=500,
+    #    converge_steps=500,
+    # )
+    # gpmodel.likelihood_ratio_test()
     gpmodel.null_model.plot_autocorrelation(path="autocorr_null.png")
     gpmodel.alt_model.plot_autocorrelation(path="autocorr_alt.png")
     gpmodel.null_model.corner_plot_samples(path="coner_plot_null.png")

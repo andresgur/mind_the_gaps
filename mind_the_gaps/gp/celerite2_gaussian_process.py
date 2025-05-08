@@ -155,15 +155,13 @@ class Celerite2GP(BaseGP):
             yerr=self._lightcurve.dy,
             check_sorted=False,
         )
-        # jax.debug.print("{}", self.gp.log_likelihood(self._lightcurve.y))
 
     def _get_kernel(self, fit=True):
 
-        rng_key = self.rng_key  # jax.random.PRNGKey(self.rng_key)
+        rng_key = self.rng_key
         terms = []
 
         for i, term in enumerate(self.kernel_spec.terms):
-            # term_cls = term_class
             kwargs = {}
 
             for name, param_spec in term.parameters.items():
@@ -176,13 +174,7 @@ class Celerite2GP(BaseGP):
                     val = numpyro.sample(
                         full_name, dist_cls(*param_spec.bounds), rng_key=rng_key
                     )
-                    # if val.shape == ():
-                    # val is a scalar, just use it directly
                     kwargs[name] = val
-                    # else:
-                    # val is a 1D array with more than one element
-                    #    kwargs[name] = val[0] if val.shape[0] > 1 else val
-                    # jax.debug.print("val {} {}", val, kwargs[name])
             terms.append(term.term_class(**kwargs))
 
         kernel = terms[0]
