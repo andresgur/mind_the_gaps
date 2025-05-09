@@ -2,7 +2,7 @@
 # @Date:   28-03-2022
 # @Email:  a.gurpide-lasheras@soton.ac.uk
 # @Last modified by:   agurpide
-# @Last modified time: 28-03-2022
+# @Last modified time: 26-04-2025
 import numpy as np
 import warnings
 from lmfit.models import LognormalModel
@@ -16,71 +16,28 @@ from mind_the_gaps.noise_models import PoissonNoise, GaussianNoise, KraftNoise
 
 
 class BaseSimulatorMethod:
-    def __init__(self, psd_model, timestamps, exposures,
-                 mean):
-        self.psd_model = psd_model
-        self.timestamps = timestamps
-        self.exposures = exposures
+    def __init__(self, mean):
         self.meanrate = mean
-        half_bins = self.exposures / 2
-        self.gti = [(time - half_bin, time + half_bin) for time, half_bin in zip(self.timestamps, half_bins)]
         
 
-    def set_psd_params(self, psd_params):
-        for par in psd_params.keys():
-            setattr(self.psd_model, par, psd_params[par])
-
-
-    def simulate(self, segment):
+    def adjust_pdf(self, segment)  -> Lightcurve:
         raise NotImplementedError("This method should be implemented by subclasses")
-
-     
-    def downsample(self, lc, timestamps, bin_exposures):
-        """Downsample the lightcurve into the new binning (regular or not)
-        Parameters
-        ----------
-        lc: Lightcurve
-            With the old binning
-        timestmaps: array
-            The new timestamps for the lightcurve
-        bin_exposures: array
-            Exposure times of each new bin in same units as timestamps
-        Returns the downsampled count rates
-        """
-        # return the lightcurve as it is
-        if len(lc.time) == len(timestamps):
-            return lc.countrate
-
-        if np.isscalar(bin_exposures):
-            start_time = timestamps[0] - bin_exposures
-        else:
-            start_time = timestamps[0] - bin_exposures[0]
-        # shif the starting time to match the input timestamps
-        shifted_lc = lc.shift(-lc.time[0] + start_time)
-        # split by gti derived from the original timestamps
-        lc_split = shifted_lc.split_by_gti(self.gti, min_points=0)
-
-        downsampled_rates = np.fromiter((lc.meanrate for lc in lc_split), dtype=float)
-
-        return downsampled_rates   
 
 
 class TK95Simulator(BaseSimulatorMethod):
-    def __init__(self, psd_model, timestamps, exposures, mean, random_state=None):
-        super().__init__(psd_model, timestamps, exposures, mean)
+    def __init__(self, mean, random_state=None):
+        super().__init__(mean)
 
-    def simulate(self, segment):
-        # Implementation of TK95 simulation
-        lc_rates = downsample(segment, self.timestamps, self.exposures)
-        lc_rates += self.meanrate - np.mean(lc_rates)
-        return lc_rates
+    def adjust_pdf(self, segment):
+        # Nothing to do here as the PDF is already Gaussian
+        return segment
 
 
 class E13Simulator(BaseSimulatorMethod):
 
-    def __init__(self, psd_model, timestamps, exposures, mean, pdf,
+    def __init__(self, mean, pdf,
                  max_iter=1000, random_state=None):
-        super().__init__(psd_model, timestamps, exposures, mean)
+        super().__init__( mean)
         self.pdf = pdf
         self.max_iter = max_iter
         if self.pdf == "lognormal":
@@ -89,23 +46,84 @@ class E13Simulator(BaseSimulatorMethod):
             self.pdfmethod = create_uniform_distribution
         elif self.pdf=="gaussian":
             self.pdfmethod = norm
+    
+    
+    def adjust_lightcurve_pdf(self, lc, pdf, max_iter=400):
+        """
+        Adjust the PDF of the input lightcurve using the method from Emmanolopoulos+2013
 
+        Parameters
+        ----------
+        lc: Lightcurve
+            Regularly sampled TK95 generated lightcurve with the desired PSD (and taking into account, if desired, rednoise leakage and aliasing effects)
+        pdf: scipy.stats.rv_continuous.pdf
+            Probability density distribution to be matched
+        max_iter: int
+            Number of iterations for the lightcurve creation if convergence is not reached (Greater beta values requirer larger max_iter e.g. 100 for beta < 1, 200 beta = 1, 500 or more for beta >=2)
 
-    def simulate(self, segment):
+        Returns
+        ----------
+        Lightcurve
+            A lightcurve with the adjusted rates
+        """
+        n_datapoints = lc.n
+        # step ii draw from distribution
+        xsim = pdf.rvs(size=n_datapoints)
+
+        dft_sim = pyfftw.interfaces.numpy_fft.rfft(xsim)
+
+        phases_sim = np.angle(dft_sim)
+
+        complex_fft = pyfftw.interfaces.numpy_fft.rfft(lc.countrate)
+
+        amplitudes_norm = np.absolute(complex_fft) / (n_datapoints // 2 + 1) # see Equation A2 from Emmanolopoulos+13
+
+        # step iii
+        dft_adjust = ne.evaluate("amplitudes_norm * exp(1j * phases_sim)")
+
+        xsim_adjust = pyfftw.interfaces.numpy_fft.irfft(dft_adjust, n=n_datapoints)
+        # step iv
+        xsim_adjust[np.argsort(-xsim_adjust)] = xsim[np.argsort(-xsim)]
+
+        iteration = 0
+        pyfftw.interfaces.cache.enable()
+        #plt.figure()
+        # start loop
+        while (not np.allclose(xsim, xsim_adjust, rtol=1e-03) and iteration < max_iter):
+            xsim = xsim_adjust
+            # step ii Fourier transform of xsim
+            dft_sim = pyfftw.interfaces.numpy_fft.rfft(xsim)
+            phases_sim = np.angle(dft_sim)
+            # replace amplitudes
+            dft_adjust = ne.evaluate("amplitudes_norm * exp(1j * phases_sim)")
+            # inverse fourier transform the spectrally adjusted time series
+            xsim_adjust = pyfftw.interfaces.numpy_fft.irfft(dft_adjust, n=n_datapoints)
+            # iv amplitude adjustment --> ranking sorted values
+            xsim_adjust[np.argsort(-xsim_adjust)] = xsim[np.argsort(-xsim)]
+
+            #diff = np.sum((xsim - xsim_adjust) ** 2)
+            #plt.scatter(iteration, diff, color="black")
+            iteration += 1
+        if iteration == max_iter:
+            warnings.warn("Lightcurve did not converge after %d iterations, PDF might be inaccurate. Try increase the maximum number of iterations" % iteration)
+        # tesed until here
+        lc.countrate = xsim
+
+        return lc
+
+    def adjust_pdf(self, segment):
         sample_std = np.std(segment.countrate)
         pdf = self.pdfmethod(self.meanrate, sample_std)
-        # Implementation of E13 simulation with additional parameters pdf and max_iter
-        lc_rates = E13_sim_TK95(segment, self.timestamps, [pdf], [1],
-                                exposures=self.exposures, max_iter=self.max_iter)
-        return lc_rates
-
+        adjusted_lc = self.adjust_lightcurve_pdf(segment, pdf, max_iter=self.max_iter)
+        return adjusted_lc
 
 class Simulator:
     """
     A class to simulate lightcurves from a given power spectral densities and flux probability density function
     """
     def __init__(self, psd_model, times, exposures, mean, pdf="gaussian", bkg_rate=None,
-                 bkg_rate_err=None, sigma_noise=None, aliasing_factor=2, extension_factor=10, max_iter=400, random_state=None):
+                 bkg_rate_err=None, sigma_noise=None, aliasing_factor=2, extension_factor=10, epsilon=1.001, max_iter=400, 
+                 random_state=None):
         """
         Parameters
         ----------
@@ -119,18 +137,20 @@ class Simulator:
         exposures:array_like or float,
             Exposure time of each datapoint in seconds
         mean: float,
-            Desired mean for the lightcurve
+            Desired mean countrate for the lightcurve
         bkg_rate: array-like
-            Associated background rate (or flux) with each datapoint
+            Associated background rate (or flux) of each datapoint
         bkg_rate_err:array-like
             uncertainty on background rate
         sigma_noise: float,
-            Standard deviation for the (Gaussian) noise
+            Standard deviation for the (Gaussian) noise. If not given assumes Poisson (no bkg rates) or Kraft (when bkg rates are given) noise
         aliasing_factor: float,
             This defines the grid of the original, regularly-sampled lightcurve produced
             prior to resampling as min(exposure) / aliasing_factor
         extension_factor: float,
             Factor by which extend the initially generated lightcurve, to introduce rednoise leakage. 10 times by default
+        epsilon: float,
+            Factor (>1) by which expand the exposure times in the resampling to handle correctly numerically equal values. Normally there will be no need to vary it.
         max_inter: int,
             Maximum number of iterations for the E13 method. Not use if method is TK95 (Gaussian PDF)
         random_state: int,
@@ -138,6 +158,9 @@ class Simulator:
 
         if extension_factor < 1:
             raise ValueError("Extension factor must be greater than 1")
+        
+        if epsilon <1:
+            raise ValueError("Epsilon needs to be greater than 1!")
 
         if np.any(exposures==0):
             raise ValueError("Some exposure times are 0!")
@@ -149,33 +172,31 @@ class Simulator:
             raise ValueError("%s not implemented! Currently implemented: Gaussian, Uniform or Lognormal")
         elif pdf.lower()=="gaussian":
             #print("Simulator will use TK95 algorithm with %s pdf" %pdf)
-            self.simulator = TK95Simulator(psd_model, times, self._exposures,
-                                           mean)
+            self.simulator = TK95Simulator(mean)
         else:
             #print("Simulator will use E13 algorithm with %s pdf" % pdf)
-            self.simulator = E13Simulator(psd_model, times, self._exposures,
-                                          mean, pdf.lower(), max_iter=max_iter)
+            self.simulator = E13Simulator(mean, pdf.lower(), max_iter=max_iter)
 
         self.random_state = np.random.RandomState(random_state)
         self.sim_dt = np.min(self._exposures) / aliasing_factor
 
-        epsilon = 0.99 # to avoid numerically distinct but equal
+        dt = np.diff(times)
         # check that the sampling is consistent with the exposure times of each timestamp
-        wrong = np.count_nonzero(np.diff(times) < self.sim_dt * epsilon)
+        wrong = np.count_nonzero(dt < self.sim_dt * 0.99)
         if wrong > 0:
             raise ValueError("%d timestamps differences are below the exposure integration time! Either reduce the exposure times, or space your observations" % wrong)
 
                 
-        start_time = times[0] - self._exposures[0]
-        end_time = times[-1] + 1.5 * self._exposures[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
+        start_time = times[0] - dt[0] / 1.99
+        end_time = times[-1] + dt[-1] # add small offset to ensure the first and last bins are properly behaved when imprinting the sampling pattern
         self.sim_duration = end_time - start_time
 
         # duration of the regularly and finely sampled lightcurve
         duration = (times[-1] - times[0]) * extension_factor
 
         # generate timesctamps for the regular, finely sampled grid and longer than input lightcurve by extending the end
-        self.sim_timestamps = np.arange(times[0] - 2 * self.sim_dt,
-                                times[0] + duration + self.sim_dt,
+        self.sim_timestamps = np.arange(start_time - self.sim_dt,
+                                start_time + duration + self.sim_dt,
                                 self.sim_dt)
         # variable for the fft
         self.fftndatapoints = len(self.sim_timestamps)
@@ -192,6 +213,12 @@ class Simulator:
                 self.noise = KraftNoise(self._exposures, bkg_rate * self._exposures, bkg_rate_err)
         else:
             self.noise = GaussianNoise(self._exposures, sigma_noise)
+
+
+        half_bins = self._exposures / 2 * epsilon
+        self.strategy = [(time - half_bin, time + half_bin) for time, half_bin in zip(times, half_bins)]
+
+        self.mean = mean
         #print("Simulator will use %s noise" % self.noise.name)
 
     def __str__(self):
@@ -221,16 +248,35 @@ class Simulator:
         """Set the parameters of the PSD
         Call this method prior to generate_lightcurve if you want to change the input params
         for the PSD
-        params:dict
+
+        Parameters
+        ----------
+        psd_params:dict
             Dictionary mapping parameter name to value
         """
-        self.simulator.set_psd_params(psd_params)
+        for par in psd_params.keys():
+            setattr(self._psd_model, par, psd_params[par])
 
 
     def add_noise(self, rates):
-        """Add noise to the input rates
+        """
+        Add noise to the input rates.
 
-        rates: array_like
+        This method applies a noise model to the input `rates`, returning the
+        perturbed (noisy) rates and the associated uncertainties.
+
+        Parameters
+        ----------
+        rates : array_like
+            Input rates to which noise will be added.
+
+        Returns
+        -------
+        noisy_rates : np.ndarray
+            The input rates after noise has been applied.
+        
+        dy : np.ndarray
+            The estimated uncertainties (standard deviation) on the noisy rates.
         """
         noisy_rates, dy = self.noise.add_noise(rates)
         #if self._noise_std is None:
@@ -249,8 +295,45 @@ class Simulator:
 
         return noisy_rates, dy
     
+    def downsample(self, lc):
+        """Downsample the lightcurve into the new sampling pattern (regular or otherwise)
+
+        Parameters
+        ----------
+        lc: Lightcurve
+            Regularly-sampled lightcurve to resample into the new sampling pattern
+
+        Returns
+        ----------
+        np.ndarray
+            The downsampled count rates at the input timestamps
+        """
+
+        rates = [ ]
+
+        for bin in self.strategy:
+            start, end = bin
+            idxs = np.argwhere((lc.time >= start) & (lc.time < end))
+        
+            meanrate = np.mean(lc.countrate[idxs])
+            rates.append(meanrate)
+            
+        return rates
+    
     def simulate_regularly_sampled(self):
-        """Generates a regularly-sampled lightcurve, longer and at a temporal resolution higher than the final, unevenly-sampled lightcurve"""
+        """
+        Generate a regularly sampled lightcurve.
+
+        Produce a lightcurve that is both longer in duration and 
+        higher in temporal resolution than the final unevenly sampled lightcurve. 
+        It simply applied the Timmer & Koenig (1995) algorithm, adjusting the mean 
+        at the end.
+
+        Returns
+        -------
+        Lightcurve
+            A regularly sampled lightcurve generated using the TK95 algorithm.
+        """
         # get a new realization of the PSD
         complex_fft = get_fft(self.fftndatapoints, self.sim_dt, self._psd_model)
         # invert it
@@ -258,21 +341,35 @@ class Simulator:
         # the power gets diluted due to the sampling, bring it back by applying this factor
         # the sqrt(2pi) factor enters because of celerite
         counts *= sqrt(self.fftndatapoints * self.sim_dt * sqrt(2 * np.pi))
-
-        return Lightcurve(self.sim_timestamps, counts, input_counts=True, skip_checks=True, dt=self.sim_dt, err_dist="gauss") # gauss is needed as some counts will be negative
+        # set err_dist to None to avoid any warnings and issues
+        lc =  Lightcurve(self.sim_timestamps, counts, input_counts=True, skip_checks=True, dt=self.sim_dt, err_dist="gauss") 
+        # adjust mean, note variance is provided from the PSD
+        lc.countrate = lc.countrate - lc.meanrate + self.mean 
+        return lc
 
 
     def generate_lightcurve(self):
         """Generates lightcurve with the last input PSD parameteres given. Note every call to this method will
         generate a different realization, even if the input parameters remain unchanged.
-        All parameters are specified during the Simulator creation    
-        """
+        All parameters are specified during the Simulator creation 
+
+
+        Returns
+        ----------
+        np.ndarray
+            The rates for the input timestamps
+        """   
         lc = self.simulate_regularly_sampled()
         # cut a slightly longer segment than the original ligthcurve
         segment = cut_random_segment(lc, self.sim_duration)
-        # finally call the appropiate simulator
-        rates = self.simulator.simulate(segment)
-        return rates
+        # shift it to match the timestamps
+        shifted_lc = segment.shift(-segment.tstart + self.strategy[0][0])
+        # adjust its rates to desired PDF, if TK95 (Gaussian) we just adjust the mean
+        lc_adjusted = self.simulator.adjust_pdf(shifted_lc)
+
+        downsampled_rates = self.downsample(lc_adjusted)
+
+        return downsampled_rates
 
 
 def add_poisson_noise(rates, exposures, background_counts=None, bkg_rate_err=None):
@@ -400,11 +497,29 @@ def get_fft(N, dt, model):
     return complex_fft
 
 def get_segment(lc, duration, N):
-    """Get N segment of the input lightcurve.
+    """Get the Nth segment of the input lightcurve.
+
+    Parameters
+    ----------
+    lc: Lightcurve
+        The input lightcurve from which a segment is to be drawn
+    duration: float
+        Duration of the desired segment
     N: int,
-        Integer indicating the segment to get (starting at N = 0 for ti=N * duration and tf=N * duration + duration)
+        Integer indicating the segment to get (starting at N = 0 and ending in N +1) i.e. t_start = N * duration)
+
+    Returns
+    -------
+    Lightcurve
+
+    Raises
+    ------
+    ValueError
+        If N is negative.
     """
-    start = lc.time[0] + duration * (N)
+    if N < 0:
+        raise ValueError("N must be a non-negative integer.")
+    start = lc.time[0] + duration * N
     return lc.truncate(start=start, stop=start + duration, method="time")
 
 
@@ -585,8 +700,11 @@ def E13_sim(timestamps, psd_model, pdfs=[norm(0, 1)], weights=[1], sim_dt=None, 
     return E13_sim_TK95(lc_cut, timestamps, pdfs, weights, bin_exposures, max_iter)
 
 
-def E13_sim_TK95(lc, timestamps, pdfs=[norm(0, 1)], weights=[1], exposures=None, max_iter=400):
-    """Simulate lightcurve using the method from Emmanolopoulos+2013
+def E13_sim_TK95(lc, pdfs=[norm(0, 1)], weights=[1], exposures=None, max_iter=400):
+    """Modified input lightcurve using the method from Emmanolopoulos+2013
+
+    Parameters
+    ----------
     lc: Lightcurve
         Regularly sampled TK95 generated lightcurve with the desired PSD (and taking into account, if desired, rednoise leakage and aliasing effects)
     timestmaps: array
@@ -653,7 +771,9 @@ def E13_sim_TK95(lc, timestamps, pdfs=[norm(0, 1)], weights=[1], exposures=None,
     # tesed until here
     lc.countrate = xsim
 
-    downsampled_rates = downsample(lc, timestamps, exposures)
+    return lc
+
+    
 
     return downsampled_rates
 
