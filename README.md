@@ -16,9 +16,10 @@ then enter the `mind_the_gaps` main directory and pip install it by running:
 Users are welcome to use/test the code and provide feedback but beware, the code is still in alpha phase, so expect bugs, errors and crashes! If you are intending to use the code, my recommendation would be to get in touch first!
 
 ## Usage
-The code can be used as a standalone to generate lightcurves or as it is desineg for, to test for a periodicity in a lightcurve. At a minimum your lightcurve should have timestamps, rates, uncertainties and exposures, and it can also contain background rates and uncertainties on the background.
+The code can be used as a standalone to generate lightcurves or as it is desineg for, to test for a periodicity in a lightcurve. At a minimum your lightcurve should have timestamps, rates, uncertainties and exposures, and it can also contain background rates and uncertainties on the background. I suspect the simulator is more powerful than anything out there, as it allows to chose the type of noise (Gaussian, Poissonian or Kraft) and simulate with any given observing window (regular or otherwise). Moreover, as opposed to some codes out there, the variance and the mean are also randomized in each simulation.
 
-Usually the first task is to identify the null hypothesis (a stochastic-only model) and the alternative model, which contains the periodic component (stochastic model + periodic component). To see how to go about model selection, see the notebook in [tutorials](https://github.com/andresgur/mind_the_gaps/tree/main/notebooks). Once you've established these two (note you can also have several sets of null hypothesis and alternative model) we follow the method outlined by [Protassov et al. 2002](https://ui.adsabs.harvard.edu/abs/2002ApJ...571..545P/abstract)
+When it comes to attempting to detect a periodicity, usually the first task is to identify the null hypothesis (a stochastic-only model) and the alternative model, which contains the periodic component (stochastic model + periodic component). To see how to go about model selection, see the notebook in [tutorials](https://github.com/andresgur/mind_the_gaps/tree/main/notebooks). Once you've established these two (note you can also have several sets of null hypothesis and alternative model) we follow the method outlined by [Protassov et al. 2002](https://ui.adsabs.harvard.edu/abs/2002ApJ...571..545P/abstract)
+
 1. Fit the observed data using the two null and alternative models
 2. Generate lightcurves from the posteriors of the stochastic model
 3. Fit the generated lightcurves using both models
@@ -32,8 +33,6 @@ Tests are included in the `tests/` directory and can be run as:
 ```
 python setup.py test
 ```
-**Warning:** Tests currently are not passing. Please check the [issues](https://github.com/andresgur/mind_the_gaps/issues/13) on the respository to see the current status.
-
 # Citation
 You can cite the [paper](https://academic.oup.com/mnras/advance-article/doi/10.1093/mnras/staf196/7994434) or the code as given below:
 ```

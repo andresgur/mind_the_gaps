@@ -71,6 +71,9 @@ class GPModelling:
 
         elif meanmodel.lower()=="constant":
             meanlabels = ["$\mu$"]
+            meanmodel = ConstantModel(self._lightcurve.mean,
+                        bounds=[(np.min(self._lightcurve.y), maxy)])
+            return meanmodel, True
 
         elif meanmodel.lower()=="linear":
             slope_guess = np.sign(self._lightcurve.y[-1] - self._lightcurve.y[0])
@@ -144,7 +147,7 @@ class GPModelling:
         return solution
 
 
-    def derive_posteriors(self, initial_chain_params=None, fit=True, converge=True, max_steps=10000,
+    def derive_posteriors(self, initial_chain_params=None, fit=True, converge=True, max_steps: int=10000, convergence_steps: int= 500,
                         walkers=12, cores=6, progress=True):
         """Derive GP Posteriors
 
@@ -158,6 +161,8 @@ class GPModelling:
             Whether to stop the chains if convergence is detected
         max_steps: int,
             Maximum number of steps for the chains
+        convergence_steps: int,
+            Number of steps to check for convergence
         walkers: int,
             Number of walkers for the chains
         cores: int,
@@ -174,7 +179,7 @@ class GPModelling:
         
             initial_chain_params = self.spread_walkers(walkers, initial_params, np.array(self.gp.get_parameter_bounds()))
         
-        every_samples = 500
+        every_samples = convergence_steps
         # This will be useful to testing convergence
         old_tau = np.inf
         # parallelize only if cores > 1
