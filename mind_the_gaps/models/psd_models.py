@@ -72,7 +72,7 @@ def Matern52(x, sigma=1, rho=1):
     return 1 / sqrt(2 * pi) * sigma**2 * 16/3 / sqrt(5) * rho * (1 / (1 + (x * rho / sqrt(5))**2))**3
 
 @custom_model
-def Jitter(x, sigma:float=1):
+def Jitter(x, sigma=1):
     """A jitter (white noise) kernel"""
     # the 2 is so when integrating the positive frequencies we get the right variance
     # the sqrt(2pi) enters because of celerite
