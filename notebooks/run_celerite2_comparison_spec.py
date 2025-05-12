@@ -173,6 +173,21 @@ if __name__ == "__main__":
         lightcurve=input_lc,
         **comparison_kwargs,
     )
+    gpmodel.null_model.parameters = jnp.array([1.0, 100.0, 4])
+    psd = gpmodel.null_model.get_psd
+    df = 1 / input_lc.duration
+    exposure = np.diff(times)[0]
+    nyquist = 1 / (2 * exposure)
+    freqs = np.arange(df, nyquist, df)
+    fig = plt.figure()
+
+    plt.xlabel("Frequency")
+    plt.ylabel("Power Density")
+    # plt.xscale("log")
+    # plt.yscale("log")
+    terms = gpmodel.null_model.modelling_engine.gp._get_kernel()
+    for i, term in enumerate([terms]):
+        plt.plot(freqs, term.get_psd(2 * np.pi * freqs))
 
     gpmodel.derive_posteriors(
         fit=True, max_steps=15000, num_chains=10, num_warmup=1000, converge_steps=500
@@ -186,6 +201,7 @@ if __name__ == "__main__":
     #    converge_steps=500,
     # )
     # gpmodel.likelihood_ratio_test()
+
     gpmodel.null_model.plot_autocorrelation(path="autocorr_null.png")
     gpmodel.alt_model.plot_autocorrelation(path="autocorr_alt.png")
     gpmodel.null_model.corner_plot_samples(path="coner_plot_null.png")

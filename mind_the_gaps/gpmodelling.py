@@ -241,6 +241,10 @@ class GPModelling:
     def bounds(self):
         return self.modelling_engine.gp.get_parameter_bounds()
 
+    @property
+    def get_psd(self):
+        return self.modelling_engine.gp.get_psd
+
 
 class GPModellingComparison:
     """
