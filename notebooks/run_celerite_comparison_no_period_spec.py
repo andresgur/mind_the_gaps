@@ -27,6 +27,7 @@ from mind_the_gaps.models.celerite2.kernel_terms import (
     real_kernel_fn,
 )
 from mind_the_gaps.models.celerite.celerite_models import Lorentzian as Lor
+from mind_the_gaps.models.kernel import KernelParameterSpec, KernelSpec, KernelTermSpec
 from mind_the_gaps.models.psd_models import (
     SHO,
     BendingPowerlaw,
@@ -72,7 +73,7 @@ if __name__ == "__main__":
         log_a=np.log(variance_drw), log_c=np.log(w_bend), bounds=bounds_drw
     )
 
-    # bounds_drw = dict(a=np.exp((-10, 50)), c=np.exp((-10, 10)))
+    bounds_drw = dict(a=np.exp((-10, 50)), c=np.exp((-10, 10)))
 
     P = 10  # period of the QPO
     w = 2 * np.pi / P
@@ -102,9 +103,52 @@ if __name__ == "__main__":
             "cpus": 10,
         },
     }
+    null_spec = KernelSpec(
+        engine="celerite",
+        terms=[
+            KernelTermSpec(
+                term_class=celerite.terms.RealTerm,
+                parameters={
+                    "log_a": KernelParameterSpec(
+                        value=np.log(variance_drw), bounds=(-10, 50)
+                    ),
+                    "log_c": KernelParameterSpec(
+                        value=np.log(w_bend), bounds=(-10, 10)
+                    ),
+                },
+            )
+        ],
+    )
+
+    alternative_spec = KernelSpec(
+        engine="celerite",
+        terms=[
+            KernelTermSpec(
+                term_class=celerite.terms.ComplexTerm,
+                parameters={
+                    "log_a": KernelParameterSpec(
+                        value=log_variance_qpo, bounds=(-10, 50)
+                    ),
+                    "log_c": KernelParameterSpec(value=log_c, bounds=(-10, 10)),
+                    "log_d": KernelParameterSpec(value=log_d, bounds=(-5, 5)),
+                },
+            ),
+            KernelTermSpec(
+                term_class=celerite.terms.RealTerm,
+                parameters={
+                    "log_a": KernelParameterSpec(
+                        value=np.log(variance_drw), bounds=(-10, 50)
+                    ),
+                    "log_c": KernelParameterSpec(
+                        value=np.log(w_bend), bounds=(-10, 10)
+                    ),
+                },
+            ),
+        ],
+    )
     gpmodel = GPModellingComparison(
-        null_kernel=null_kernel,
-        alt_kernel=alternative_kernel,
+        null_kernel_spec=null_spec,
+        alt_kernel_spec=alternative_spec,
         lightcurve=input_lc,
         **comparison_kwargs,
     )

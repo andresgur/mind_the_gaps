@@ -10,6 +10,7 @@ from mind_the_gaps.models.celerite.mean_models import (
     LinearModel,
     SineModel,
 )
+from mind_the_gaps.models.kernel import KernelSpec
 
 
 class CeleriteGP(BaseGP):
@@ -17,16 +18,20 @@ class CeleriteGP(BaseGP):
 
     def __init__(
         self,
-        kernel: terms.Term,
+        kernel_spec: KernelSpec,  # terms.Term,
         lightcurve: GappyLightcurve,
         fit_mean: bool,
         mean_model: str = None,
     ):
         self._lightcurve = lightcurve
+        self.kernel_spec = kernel_spec
+        self.kernel = self._get_kernel()
         self.mean_model, self.fit_mean = self._build_mean_model(meanmodel=mean_model)
         self.fit_mean = fit_mean
-        self.gp = celerite.GP(kernel=kernel, mean=self.mean_model, fit_mean=fit_mean)
-        self.kernel = kernel
+        self.gp = celerite.GP(
+            kernel=self.kernel, mean=self.mean_model, fit_mean=fit_mean
+        )
+
         self.compute()
 
     def compute(self) -> None:
@@ -134,3 +139,28 @@ class CeleriteGP(BaseGP):
 
     def get_parameter_names(self) -> tuple:
         return self.gp.get_parameter_names()
+
+    def _get_kernel(self):
+        import celerite.terms  # ensure this is imported correctly
+
+        terms = []
+        bounds_dict = {}
+        for i, term_spec in enumerate(self.kernel_spec.terms):
+            kwargs = {}
+            for name, param_spec in term_spec.parameters.items():
+                kwargs[name] = param_spec.value
+                if param_spec.bounds is not None:
+                    bounds_dict[name] = param_spec.bounds
+
+            # Only add bounds if at least one is specified
+            if bounds_dict:
+                kwargs["bounds"] = bounds_dict
+
+            term = term_spec.term_class(**kwargs)
+            terms.append(term)
+
+        kernel = terms[0]
+        for term in terms[1:]:
+            kernel += term
+
+        return kernel

@@ -34,7 +34,7 @@ class CeleriteGPEngine(BaseGPEngine):
 
     def __init__(
         self,
-        kernel: celerite.modeling.Model,
+        kernel_spec: celerite.modeling.Model,
         lightcurve: GappyLightcurve,
         mean_model: str,
         fit_mean: bool = True,
@@ -42,7 +42,7 @@ class CeleriteGPEngine(BaseGPEngine):
 
         self._lightcurve = lightcurve
         self.gp = CeleriteGP(
-            kernel=kernel,
+            kernel_spec=kernel_spec,
             lightcurve=lightcurve,
             mean_model=mean_model,
             fit_mean=fit_mean,
