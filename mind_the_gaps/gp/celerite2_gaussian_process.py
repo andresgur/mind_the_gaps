@@ -212,8 +212,6 @@ class Celerite2GP(BaseGP):
         self.compute(self._lightcurve.times, params=params, fit=fit)
         nll_value = -self.gp.log_likelihood(self._lightcurve.y)
 
-        jax.debug.print("{}", nll_value)
-        jax.debug.print("{}", params)
         return nll_value
 
     def get_parameter_vector(self) -> jax.Array:
@@ -279,11 +277,9 @@ class Celerite2GP(BaseGP):
 
 def get_kernel(rng_key, kernel_spec, fit=False):
 
-    # rng_key = self.rng_key  # jax.random.PRNGKey(self.rng_key)
     terms = []
 
     for i, term in enumerate(kernel_spec.terms):
-        # term_cls = term_class
         kwargs = {}
 
         for name, param_spec in term.parameters.items():
