@@ -55,7 +55,6 @@ class Celerite2GPEngine(BaseGPEngine):
         self.meanmodel = meanmodel
         self.mean_params = mean_params
         self.rng_key = jax.random.PRNGKey(self.seed)
-        # self.bounds = bounds
         self.cpus = cpus
 
         numpyro.enable_x64()
@@ -66,18 +65,12 @@ class Celerite2GPEngine(BaseGPEngine):
             lightcurve=self._lightcurve,
             meanmodel=self.meanmodel,
             mean_params=mean_params,
-            # bounds=self.bounds,
             rng_key=self.rng_key,
         )
         self.init_params = self.kernel_spec.get_param_array()
         if self.gp.fit_mean:
             self.init_params = jnp.concatenate([mean_params, self.init_params])
 
-        # self.gp.compute(
-        #    self._lightcurve.times,
-        #    fit=True,
-        #    params=self.init_params,
-        # )
         self._mcmc_samples = {}
         self._autocorr = []
 
@@ -99,15 +92,6 @@ class Celerite2GPEngine(BaseGPEngine):
 
     def minimize(self) -> jax.Array:
 
-        # upper_bounds = jnp.array([values[1] for values in self.bounds.values()])
-        # lower_bounds = jnp.array([values[0] for values in self.bounds.values()])
-
-        # [KernelTermSpec(term_class=<class 'celerite2.jax.terms.RealTerm'>, parameters=OrderedDict([('a', KernelParameterSpec(value=100.0, fixed=(False,), prior=<class 'numpyro.distributions.continuous.LogUniform'>, bounds=(-10, 50.0))), ('c', KernelParameterSpec(value=0.3141592653589793, fixed=(False,), prior=<class 'numpyro.distributions.continuous.LogUniform'>, bounds=(-10.0, 10.0)))]))]
-
-        #    init_params = self.gp.params
-        # elif self.meanmodel is None:
-        #    init_params = self.gp.params[1:]
-        # init_params = self.kernel_spec.get_param_array()
         bounds = self.kernel_spec.get_bounds_array()
         upper_bounds = jnp.array([values[1] for values in bounds])
         lower_bounds = jnp.array([values[0] for values in bounds])
@@ -256,8 +240,6 @@ class Celerite2GPEngine(BaseGPEngine):
         gp_sample = Celerite2GP(
             kernel_spec=self.kernel_spec,
             meanmodel=self.meanmodel,
-            # params=params[:-1],
-            # bounds=self.bounds,
             lightcurve=self._lightcurve,
             rng_key=self.rng_key,
             mean_params=params[: len(self.mean_params)],
