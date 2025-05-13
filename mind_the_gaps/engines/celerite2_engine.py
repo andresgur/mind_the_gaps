@@ -25,7 +25,7 @@ from numpyro.infer.initialization import init_to_value
 from mind_the_gaps.engines.gp_engine import BaseGPEngine
 from mind_the_gaps.gp.celerite2_gaussian_process import Celerite2GP
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
-from mind_the_gaps.models.kernel import KernelSpec
+from mind_the_gaps.models.kernel_spec import KernelSpec
 
 
 class Celerite2GPEngine(BaseGPEngine):

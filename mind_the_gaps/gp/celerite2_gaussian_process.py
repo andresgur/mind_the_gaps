@@ -11,7 +11,6 @@ import numpyro
 
 from mind_the_gaps.gp.gaussian_process import BaseGP
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
-from mind_the_gaps.models.celerite2.kernel_terms import real_kernel_fn
 from mind_the_gaps.models.celerite2.mean_terms import (
     ConstantMean,
     FixedMean,
@@ -25,7 +24,7 @@ from mind_the_gaps.models.celerite.mean_models import (
     LinearModel,
     SineModel,
 )
-from mind_the_gaps.models.kernel import KernelSpec
+from mind_the_gaps.models.kernel_spec import KernelSpec
 
 
 class Celerite2GP(BaseGP):
@@ -165,16 +164,17 @@ class Celerite2GP(BaseGP):
             kwargs = {}
 
             for name, param_spec in term.parameters.items():
-                full_name = f"term{i}_{name}"
+                full_name = f"terms[{i}]:log_{name}"
 
                 if fit or param_spec.fixed:
-                    kwargs[name] = param_spec.value
+                    val = param_spec.value
                 else:
                     dist_cls = param_spec.prior
                     val = numpyro.sample(
                         full_name, dist_cls(*param_spec.bounds), rng_key=rng_key
                     )
-                    kwargs[name] = val
+
+                kwargs[name] = jnp.exp(val)
             terms.append(term.term_class(**kwargs))
 
         kernel = terms[0]

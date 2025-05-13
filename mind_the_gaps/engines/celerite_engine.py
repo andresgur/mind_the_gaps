@@ -541,3 +541,6 @@ class CeleriteGPEngine(BaseGPEngine):
             Number of variable parameters
         """
         return self._ndim
+
+    def predict(self, y, **kwargs):
+        return self.gp.predict(y, **kwargs)

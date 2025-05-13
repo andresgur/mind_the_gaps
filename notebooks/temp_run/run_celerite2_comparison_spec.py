@@ -19,11 +19,11 @@ from mind_the_gaps.gpmodelling import GPModelling, GPModellingComparison
 
 # from mind_the_gaps.gp.processes.celerite2_gaussian_process import Celerite2GP
 from mind_the_gaps.lightcurves import GappyLightcurve
-from mind_the_gaps.models.celerite2.kernel_terms import (
-    complex_real_kernel_fn,
-    real_kernel_fn,
+from mind_the_gaps.models.kernel_spec import (
+    KernelParameterSpec,
+    KernelSpec,
+    KernelTermSpec,
 )
-from mind_the_gaps.models.kernel import KernelParameterSpec, KernelSpec, KernelTermSpec
 from mind_the_gaps.models.psd_models import BendingPowerlaw
 from mind_the_gaps.simulator import Simulator
 
@@ -111,12 +111,12 @@ if __name__ == "__main__":
                 term_class=jax_terms.RealTerm,
                 parameters={
                     "a": KernelParameterSpec(
-                        value=variance_drw,
+                        value=jnp.log(variance_drw),
                         prior=dist.Uniform,
                         bounds=(-10, 150.0),
                     ),
                     "c": KernelParameterSpec(
-                        value=w_bend,
+                        value=jnp.log(w_bend),
                         prior=dist.Uniform,
                         bounds=(-10.0, 10.0),
                     ),
@@ -132,12 +132,12 @@ if __name__ == "__main__":
                 term_class=jax_terms.RealTerm,
                 parameters={
                     "a": KernelParameterSpec(
-                        value=variance_drw,
+                        value=jnp.log(variance_drw),
                         prior=dist.Uniform,
                         bounds=(-10, 150.0),
                     ),
                     "c": KernelParameterSpec(
-                        value=w_bend,
+                        value=jnp.log(w_bend),
                         prior=dist.Uniform,
                         bounds=(-10.0, 10.0),
                     ),
@@ -147,17 +147,17 @@ if __name__ == "__main__":
                 term_class=jax_terms.ComplexTerm,
                 parameters={
                     "a": KernelParameterSpec(
-                        value=variance_drw,
+                        value=jnp.log(variance_drw),
                         prior=dist.Uniform,
                         bounds=(-10, 150.0),
                     ),
                     "c": KernelParameterSpec(
-                        value=c,
+                        value=jnp.log(c),
                         prior=dist.Uniform,
                         bounds=(-10, 10.0),
                     ),
                     "d": KernelParameterSpec(
-                        value=w,
+                        value=jnp.log(w),
                         prior=dist.Uniform,
                         bounds=(-5.0, 5.0),
                     ),
@@ -173,21 +173,21 @@ if __name__ == "__main__":
         lightcurve=input_lc,
         **comparison_kwargs,
     )
-    gpmodel.null_model.parameters = jnp.array([1.0, 100.0, 4])
-    psd = gpmodel.null_model.get_psd
-    df = 1 / input_lc.duration
-    exposure = np.diff(times)[0]
-    nyquist = 1 / (2 * exposure)
-    freqs = np.arange(df, nyquist, df)
-    fig = plt.figure()
+    # gpmodel.null_model.parameters = jnp.array([1.0, 100.0, 4])
+    # psd = gpmodel.null_model.get_psd
+    # df = 1 / input_lc.duration
+    # exposure = np.diff(times)[0]
+    # nyquist = 1 / (2 * exposure)
+    # freqs = np.arange(df, nyquist, df)
+    # fig = plt.figure()
 
-    plt.xlabel("Frequency")
-    plt.ylabel("Power Density")
+    #    plt.xlabel("Frequency")
+    #    plt.ylabel("Power Density")
     # plt.xscale("log")
     # plt.yscale("log")
-    terms = gpmodel.null_model.modelling_engine.gp._get_kernel()
-    for i, term in enumerate([terms]):
-        plt.plot(freqs, term.get_psd(2 * np.pi * freqs))
+    #    terms = gpmodel.null_model.modelling_engine.gp._get_kernel()
+    #    for i, term in enumerate([terms]):
+    #        plt.plot(freqs, term.get_psd(2 * np.pi * freqs))
 
     gpmodel.derive_posteriors(
         fit=True, max_steps=15000, num_chains=10, num_warmup=1000, converge_steps=500

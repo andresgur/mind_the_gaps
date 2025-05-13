@@ -10,7 +10,7 @@ from mind_the_gaps.models.celerite.mean_models import (
     LinearModel,
     SineModel,
 )
-from mind_the_gaps.models.kernel import KernelSpec
+from mind_the_gaps.models.kernel_spec import KernelSpec
 
 
 class CeleriteGP(BaseGP):
@@ -18,7 +18,7 @@ class CeleriteGP(BaseGP):
 
     def __init__(
         self,
-        kernel_spec: KernelSpec,  # terms.Term,
+        kernel_spec: KernelSpec,
         lightcurve: GappyLightcurve,
         fit_mean: bool,
         mean_model: str = None,
@@ -141,7 +141,6 @@ class CeleriteGP(BaseGP):
         return self.gp.get_parameter_names()
 
     def _get_kernel(self):
-        import celerite.terms  # ensure this is imported correctly
 
         terms = []
         bounds_dict = {}
@@ -152,7 +151,6 @@ class CeleriteGP(BaseGP):
                 if param_spec.bounds is not None:
                     bounds_dict[name] = param_spec.bounds
 
-            # Only add bounds if at least one is specified
             if bounds_dict:
                 kwargs["bounds"] = bounds_dict
 
@@ -164,3 +162,23 @@ class CeleriteGP(BaseGP):
             kernel += term
 
         return kernel
+
+    def standarized_residuals(self, include_noise=True):
+        """Returns the standarized residuals (see e.g. Kelly et al. 2011) Eq. 49.
+        You should set the gp parameters to your best or mean (median) parameter values prior to calling this method
+
+        Parameters
+        ----------
+        include_noise: bool,
+            True to include any jitter term into the standard deviation calculation. False ignores this contribution.
+        """
+        pred_mean, pred_var = self.gp.predict(
+            self._lightcurve.y, return_var=True, return_cov=False
+        )
+        if include_noise:
+            pred_var += self.gp.kernel.jitter
+        std_res = (self._lightcurve.y - pred_mean) / np.sqrt(pred_var)
+        return std_res
+
+    def predict(self, y, **kwargs):
+        return self.gp.predict(y, **kwargs)

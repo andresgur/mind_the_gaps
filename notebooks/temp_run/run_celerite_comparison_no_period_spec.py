@@ -19,15 +19,13 @@ from scipy.stats import percentileofscore
 
 from mind_the_gaps import GPModelling
 from mind_the_gaps.gpmodelling import GPModelling, GPModellingComparison
-
-# from mind_the_gaps.gp.processes.celerite2_gaussian_process import Celerite2GP
 from mind_the_gaps.lightcurves import GappyLightcurve
-from mind_the_gaps.models.celerite2.kernel_terms import (
-    complex_real_kernel_fn,
-    real_kernel_fn,
-)
 from mind_the_gaps.models.celerite.celerite_models import Lorentzian as Lor
-from mind_the_gaps.models.kernel import KernelParameterSpec, KernelSpec, KernelTermSpec
+from mind_the_gaps.models.kernel_spec import (
+    KernelParameterSpec,
+    KernelSpec,
+    KernelTermSpec,
+)
 from mind_the_gaps.models.psd_models import (
     SHO,
     BendingPowerlaw,
@@ -69,9 +67,6 @@ if __name__ == "__main__":
 
     bounds_drw = dict(log_a=(-10, 50), log_c=(-10, 10))
     # you can use RealTerm from celerite or DampedRandomWalk from models.celerite_models
-    null_kernel = celerite.terms.RealTerm(
-        log_a=np.log(variance_drw), log_c=np.log(w_bend), bounds=bounds_drw
-    )
 
     bounds_drw = dict(a=np.exp((-10, 50)), c=np.exp((-10, 10)))
 
@@ -87,11 +82,6 @@ if __name__ == "__main__":
     )
 
     bounds_qpo = dict(log_a=(-10, 50), log_c=(-10, 10), log_d=(-5, 5))
-    alternative_kernel = celerite.terms.ComplexTerm(
-        log_a=log_variance_qpo, log_c=log_c, log_d=log_d, bounds=bounds_qpo
-    ) + celerite.terms.RealTerm(
-        log_a=np.log(variance_drw), log_c=np.log(w_bend), bounds=bounds_drw
-    )
 
     comparison_kwargs = {
         "null_kwargs": {

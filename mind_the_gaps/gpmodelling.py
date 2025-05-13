@@ -24,7 +24,7 @@ from tinygp.kernels.base import Kernel
 from mind_the_gaps.engines.celerite2_engine import Celerite2GPEngine
 from mind_the_gaps.engines.celerite_engine import CeleriteGPEngine
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
-from mind_the_gaps.models.kernel import KernelSpec
+from mind_the_gaps.models.kernel_spec import KernelSpec
 
 
 class GPModelling:
@@ -164,6 +164,15 @@ class GPModelling:
         return self.modelling_engine.generate_from_posteriors(**engine_kwargs)
 
     def plot_autocorrelation(self, path: str = "autocorr.png", dpi: int = 100) -> None:
+        """Plots the autocorrelation statistic for the model.
+
+        Parameters
+        ----------
+        path : str, optional
+            File to save plot to, by default "autocorr.png"
+        dpi : int, optional
+            Define image quality in DPI, by default 100
+        """
 
         path = os.path.abspath(path)
 
@@ -177,6 +186,15 @@ class GPModelling:
     def corner_plot_samples(
         self, path: str = "corner_plot.png", dpi: int = 100
     ) -> None:
+        """Plot a corner ploy of the samples for the model
+
+        Parameters
+        ----------
+        path : str, optional
+            File to save the plot to, by default "corner_plot.png"
+        dpi : int, optional
+            Define image quality in DPI, by default 100
+        """
         samples = self.modelling_engine.mcmc_samples
         if isinstance(self.modelling_engine, Celerite2GPEngine):
             samples = {k: v for k, v in samples.items() if k != "log_likelihood"}
@@ -244,6 +262,20 @@ class GPModelling:
     @property
     def get_psd(self):
         return self.modelling_engine.gp.get_psd
+
+    def standarized_residuals(self, include_noise=True):
+        """Returns the standarized residuals (see e.g. Kelly et al. 2011) Eq. 49.
+        You should set the gp parameters to your best or mean (median) parameter values prior to calling this method
+
+        Parameters
+        ----------
+        include_noise: bool,
+            True to include any jitter term into the standard deviation calculation. False ignores this contribution.
+        """
+        return self.modelling_engine.gp.standarized_residuals()
+
+    def predict(self, y, **kwargs):
+        return self.modelling_engine.gp.predict(y, **kwargs)
 
 
 class GPModellingComparison:
