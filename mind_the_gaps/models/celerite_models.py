@@ -2,6 +2,7 @@ from celerite.terms import Term
 import numpy as np
 from celerite.modeling import Model
 
+
 # Covariance models
 class Lorentzian(Term):
     parameter_names = ("log_S0", "log_Q", "log_omega0")

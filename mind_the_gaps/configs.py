@@ -7,7 +7,7 @@ import celerite
 import warnings
 import numpy as np
 
-from mind_the_gaps.models.celerite_models import Lorentzian, DampedRandomWalk, Cosinus, BendingPowerlaw
+from mind_the_gaps.models import Lorentzian, DampedRandomWalk, Cosinus, BendingPowerlaw
 
 two_pi = 2 * np.pi
 days_to_seconds = 24 * 3600

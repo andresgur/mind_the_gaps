@@ -2,6 +2,8 @@ from astropy.modeling.models import custom_model
 import numpy as np
 from scipy.special import gamma
 from math import pi, sqrt
+
+
 @custom_model
 def SHO(x, S0=1, Q=10, omega0=1):
     """Equation 20 from Foreman-Mackey+2017 (tested)
@@ -38,7 +40,6 @@ def BendingPowerlaw(x, S0=1, omega0=1, Q=1/2):
     ----------
     x: array-like
         Angular frequencies
-    
     """
     a = S0
     c = 0.5 * omega0/Q

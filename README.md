@@ -41,6 +41,17 @@ Once you've established these two (note you can also have several sets of null h
 
 Another notebook in [tutorials](docs/notebooks/) shows how to implement this process using functions and objects from the package.
 
+## Documentation
+Documentation is [available online](https://andresgur.github.io/mind_the_gaps/).
+To build a copy of the documentation locally, install the code as:
+```shell
+pip install .[docs]
+```
+The documentation can then be built to the `docss/build/html` directory using:
+```shell
+cd docs; make html
+```
+
 
 ## Tests
 Tests are included in the `tests/` directory. 
