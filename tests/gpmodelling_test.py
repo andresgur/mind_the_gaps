@@ -1,11 +1,11 @@
 from mind_the_gaps.gpmodelling import  GPModelling
-from mind_the_gaps.models.celerite_models import DampedRandomWalk, Lorentzian
+from mind_the_gaps.models import DampedRandomWalk, Lorentzian
 from mind_the_gaps.lightcurves import GappyLightcurve
 import unittest
 import numpy as np
 
-class TestGPModelling(unittest.TestCase):
 
+class TestGPModelling(unittest.TestCase):
     def test_parameters_within_bounds(self):
         walkers = 100
         lor_params = [10, 5, -5]
@@ -25,15 +25,18 @@ class TestGPModelling(unittest.TestCase):
         
         # Ensure all walkers have values within the bounds
         for i, sample in enumerate(samples.T):
-            self.assertTrue(np.all(np.logical_and(bounds[i][0] <= sample, sample <= bounds[i][1])))
+            self.assertTrue(
+                np.all(np.logical_and(bounds[i][0] <= sample, sample <= bounds[i][1]))
+            )
 
 
         samples = gpmodel.spread_walkers(walkers, parameters, bounds, percent=0.9, max_attempts=2)
         
         # Ensure all walkers have values within the bounds
         for i, sample in enumerate(samples.T):
-            self.assertTrue(np.all(np.logical_and(bounds[i][0] <= sample, sample <= bounds[i][1])))
-
+            self.assertTrue(
+                np.all(np.logical_and(bounds[i][0] <= sample, sample <= bounds[i][1]))
+            )
 
     def test_infinite_bounds(self):
         walkers = 100
@@ -55,12 +58,15 @@ class TestGPModelling(unittest.TestCase):
         self.assertTrue(np.all(np.isfinite(samples[:, 0])))
         # Ensure all walkers have values within the bounds
         for bounds_i, sample in zip(bounds[1:], samples.T[1:]):
-            self.assertTrue(np.all(np.logical_and(bounds_i[0] <= sample, sample <= bounds_i[1])))
+            self.assertTrue(
+                np.all(np.logical_and(bounds_i[0] <= sample, sample <= bounds_i[1]))
+            )
 
         samples = gpmodel.spread_walkers(walkers, parameters, bounds, percent=0.99, max_attempts=5)
         # first parameter can be any value
-        self.assertTrue(np.all(np.isfinite(samples[:, 0])))
-            
+        self.assertTrue(
+            np.all(np.isfinite(samples[:, 0]))
+        )
 
     def test_zero_percent(self):
             walkers = 100
@@ -80,9 +86,10 @@ class TestGPModelling(unittest.TestCase):
             samples = gpmodel.spread_walkers(walkers, parameters, bounds, percent=0, max_attempts=50)
             
             # All samples should be exactly at the parameters
-            np.testing.assert_array_equal(samples, np.array([parameters] * walkers))
+            np.testing.assert_array_equal(
+                samples, np.array([parameters] * walkers)
+            )
 
-    
     def test_max_attempts(self):
         walkers = 100
         lor_params = [10, 5, -5]
@@ -102,7 +109,9 @@ class TestGPModelling(unittest.TestCase):
         
         # Since the bounds are impossible, all samples should be equal to the parameter
         for i, sample in enumerate(samples.T):
-            self.assertTrue(np.all(sample==parameters[i]))
+            self.assertTrue(
+                np.all(sample==parameters[i])
+            )
 
 
 if __name__ == '__main__':
