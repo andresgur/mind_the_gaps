@@ -443,16 +443,18 @@ def get_fft(N, dt, model):
     # generate real and complex parts from gaussian distributions
     real, im = np.random.normal(0, size=(2, N // 2 + 1))
     complex_fft = np.empty(len(freqs), dtype=complex)
-    if inspect.ismethod(model):
-        model_object = model.__self__
-        if isinstance(model_object, Celerite2Term):
-            temp = model(np.log(freqs[1:]))
-        else:
-            temp = np.sqrt(0.5 * model(freqs[1:]))
-    else:
-        temp = np.sqrt(0.5 * model(freqs[1:]))
+    # if inspect.ismethod(model):
+    #    model_object = model.__self__
+    #    if isinstance(model_object, Celerite2Term):
+    #        temp = model(np.log(freqs[1:]))
+    #    else:
+    #        temp = np.sqrt(0.5 * model(freqs[1:]))
+    # else:
+    #    temp = np.sqrt(0.5 * model(freqs[1:]))
 
-    complex_fft[1:] = (real + im * 1j)[1:] * temp  # np.sqrt(0.5 * model(freqs[1:]))
+    complex_fft[1:] = (real + im * 1j)[1:] * np.sqrt(
+        0.5 * model(freqs[1:])
+    )  # np.sqrt(0.5 * model(freqs[1:]))
     # complex_fft[1:] = (real + im * 1j)[1:] * np.sqrt(0.5 * model(freqs[1:]))
     # assign whatever real number to the total number of photons, it does not matter as the lightcurve is normalized later
     complex_fft[0] = 1e6

@@ -57,8 +57,6 @@ class Celerite2GP(BaseGP):
             _description_
         rng_key : jnp.array
             _description_
-        bounds : dict, optional
-            _description_, by default None
         mean : str
             Mean model for the gaussian process either "Constant", "Linear" or "Gaussian", by default None
         """
@@ -66,11 +64,15 @@ class Celerite2GP(BaseGP):
         self.kernel_spec = kernel_spec
         self._lightcurve = lightcurve
         self.rng_key = rng_key
-        # self.bounds = bounds
         self.mean_params = mean_params
-        self.meanmodel, self.fit_mean = self._build_mean_model(meanmodel, mean_params)
+        self.meanmodel = self._build_mean_model(meanmodel, mean_params)
+        if self.meanmodel.sampled_mean:
+            init_params = jnp.concatenate(
+                [mean_params, self.kernel_spec.get_param_array()]
+            )
+        else:
+            init_params = self.kernel_spec.get_param_array()
 
-        init_params = jnp.concatenate([mean_params, self.kernel_spec.get_param_array()])
         self.compute(self._lightcurve.times, fit=True, params=init_params)
 
     def _build_mean_model(
@@ -89,22 +91,16 @@ class Celerite2GP(BaseGP):
         """
 
         if meanmodel is None or meanmodel.lower() == "fixed":
-            return (
-                FixedMean(lightcurve=self._lightcurve),
-                False,
-            )
+            return FixedMean(lightcurve=self._lightcurve)
+
         elif meanmodel.lower() == "constant":
-            return (
-                ConstantMean(lightcurve=self._lightcurve),
-                True,
-            )
+            return ConstantMean(lightcurve=self._lightcurve)
+
         elif meanmodel.lower() == "linear":
-            return (
-                LinearMean(lightcurve=self._lightcurve),
-                True,
-            )
+            return LinearMean(lightcurve=self._lightcurve)
+
         elif meanmodel.lower() == "gaussian":
-            return GaussianMean(lightcurve=self._lightcurve), True
+            return GaussianMean(lightcurve=self._lightcurve)
         else:
             raise ValueError(
                 f"Invalid mean model specified: '{meanmodel}'. Must be None, 'fixed', 'constant', 'linear', or 'gaussian'."
@@ -127,20 +123,9 @@ class Celerite2GP(BaseGP):
         fit : bool
             Whether the GP is being fitted
         """
-        # self.params = params
-        # kernel, mean = self.kernel_fn(
-        #    params=params,
-        #    fit=fit,
-        #    rng_key=self.rng_key,
-        #    bounds=self.bounds,
-        #    mean_model=self.meanmodel,
-        # )
-        #
-        #
-        #
         if fit:
-            mean_params = params[: self.meanmodel.no_parameters]
-            kernel_params = params[self.meanmodel.no_parameters :]
+            mean_params = params[: self.meanmodel.sampled_parameters]
+            kernel_params = params[self.meanmodel.sampled_parameters :]
             self.kernel_spec.update_params_from_array(kernel_params)
             mean = self.meanmodel.compute_mean(fit=fit, params=mean_params)
         else:
@@ -165,7 +150,10 @@ class Celerite2GP(BaseGP):
 
             for name, param_spec in term.parameters.items():
                 full_name = f"terms[{i}]:log_{name}"
-
+                if not param_spec.fixed and param_spec.prior is None:
+                    raise ValueError(
+                        f"Missing prior distribution for parameter '{full_name}'"
+                    )
                 if fit or param_spec.fixed:
                     val = param_spec.value
                 else:
@@ -271,33 +259,10 @@ class Celerite2GP(BaseGP):
         [str]
             A list containing the kernel parameter names.
         """
-
-        return self.kernel_spec.get_param_names()
-
-
-def get_kernel(rng_key, kernel_spec, fit=False):
-
-    terms = []
-
-    for i, term in enumerate(kernel_spec.terms):
-        kwargs = {}
-
-        for name, param_spec in term.parameters.items():
-            full_name = f"term{i}_{name}"
-
-            if fit or param_spec.fixed:
-                kwargs[name] = param_spec.value
-            else:
-                dist_cls = param_spec.prior
-
-                val = numpyro.sample(
-                    full_name, dist_cls(*np.log(param_spec.bounds)), rng_key=rng_key
-                )
-                kwargs[name] = np.exp(val)
-
-        terms.append(term.term_class(**kwargs))
-
-    kernel = terms[0]
-    for t in terms[1:]:
-        kernel += t
-    return kernel
+        if self.meanmodel.sampled_mean:
+            param_names = (
+                self.meanmodel.param_names + self.kernel_spec.get_param_names()
+            )
+        else:
+            param_names = self.kernel_spec.get_param_names()
+        return param_names

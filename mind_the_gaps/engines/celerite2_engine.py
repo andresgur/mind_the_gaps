@@ -46,13 +46,17 @@ class Celerite2GPEngine(BaseGPEngine):
         meanmodel: str = None,
         mean_params: jax.Array = None,
         seed: int = 0,
+        fit_mean: bool = True,
         bounds: dict = None,
     ):
-
         self.kernel_spec = kernel_spec
         self._lightcurve = lightcurve
         self.seed = seed
         self.meanmodel = meanmodel
+        self.fit_mean = fit_mean
+        if self.meanmodel is None:
+            self.fit_mean = False
+
         self.mean_params = mean_params
         self.rng_key = jax.random.PRNGKey(self.seed)
         self.cpus = cpus
@@ -68,7 +72,7 @@ class Celerite2GPEngine(BaseGPEngine):
             rng_key=self.rng_key,
         )
         self.init_params = self.kernel_spec.get_param_array()
-        if self.gp.fit_mean:
+        if self.fit_mean:
             self.init_params = jnp.concatenate([mean_params, self.init_params])
 
         self._mcmc_samples = {}
@@ -81,7 +85,6 @@ class Celerite2GPEngine(BaseGPEngine):
         self.gp.compute(t, params=params, fit=fit)
 
         log_likelihood = self.gp.log_likelihood(self._lightcurve.y)
-        # jax.debug.print("{}", log_likelihood)
         numpyro.deterministic("log_likelihood", log_likelihood)
         numpyro.sample(
             "obs",
@@ -95,7 +98,7 @@ class Celerite2GPEngine(BaseGPEngine):
         bounds = self.kernel_spec.get_bounds_array()
         upper_bounds = jnp.array([values[1] for values in bounds])
         lower_bounds = jnp.array([values[0] for values in bounds])
-        if self.gp.fit_mean and self.meanmodel is not None:
+        if self.fit_mean:
             upper_bounds = jnp.concatenate([self.gp.meanmodel.bounds[1], upper_bounds])
             lower_bounds = jnp.concatenate([self.gp.meanmodel.bounds[0], lower_bounds])
 
@@ -110,6 +113,7 @@ class Celerite2GPEngine(BaseGPEngine):
             bounds=(lower_bounds, upper_bounds),
         )
         self.gp.compute(params=opt_params, t=self._lightcurve.times, fit=True)
+
         return opt_params
 
     def initialize_params(self, num_chains: int, std_dev=0.1) -> Dict:
@@ -140,10 +144,8 @@ class Celerite2GPEngine(BaseGPEngine):
                     0, std_dev, size=num_chains
                 )
 
-                # Clip to bounds
                 spread_values = np.clip(spread_values, float(low), float(high))
 
-                # Store in dict
                 param_dict[f"term{i}_{param_name}"] = jnp.array(spread_values)
             i += 1
         return param_dict
@@ -160,16 +162,18 @@ class Celerite2GPEngine(BaseGPEngine):
     ) -> None:
 
         old_tau = jnp.inf
-        # if fit:
-        #    self.init_params = self.minimize()
-        #    self.kernel_spec.update_params_from_array(self.init_params)
+        if fit:
+            self.init_params = self.minimize()
+            self.kernel_spec.update_params_from_array(
+                self.init_params[self.gp.meanmodel.sampled_parameters :]
+            )
 
         # fixed_params = self.initialize_params(num_chains=num_chains)
 
         kernel = NUTS(
             self.numpyro_model,
             adapt_step_size=True,
-            dense_mass=True,
+            dense_mass=False,
             # init_strategy=init_to_value(values=fixed_params),
         )
         mcmc = MCMC(
@@ -216,10 +220,11 @@ class Celerite2GPEngine(BaseGPEngine):
             else:
                 for key in samples:
                     self._mcmc_samples[key] = jnp.concatenate(
-                        [self._mcmc_samples[key], samples[key]], axis=0
+                        [self._mcmc_samples[key], samples[key]], axis=1
                     )
 
             tau = self._auto_corr_time(self._mcmc_samples, num_chains)
+
             self._autocorr.append(jnp.mean(tau))
 
             if jnp.all(tau * 100 < (iteration + 1) * converge_steps) and np.all(
@@ -229,20 +234,29 @@ class Celerite2GPEngine(BaseGPEngine):
                 break
             else:
                 print(f"MCMC not converged after {(iteration+1)*converge_steps} steps.")
+            old_tau = tau
         self._tau = tau
         self._mcmc = mcmc
         self._loglikelihoods = idata.posterior["log_likelihood"].values
 
     def _generate_lc_from_params(self, params: jax.Array) -> GappyLightcurve:
         kernel_spec = copy.deepcopy(self.kernel_spec)
-        kernel_spec.update_params_from_array(params[len(self.mean_params) :])
+        if self.gp.meanmodel.sampled_mean:
+            mean_params = params[: self.gp.meanmodel.sampled_parameters]
+            kernel_params = params[self.gp.meanmodel.sampled_parameters :]
 
+            # mean = self.meanmodel.compute_mean(fit=True, params=mean_params)
+        else:
+            mean_params = self.init_params[: self.gp.meanmodel.sampled_parameters]
+            kernel_params = params
+
+        kernel_spec.update_params_from_array(kernel_params)
         gp_sample = Celerite2GP(
-            kernel_spec=self.kernel_spec,
+            kernel_spec=kernel_spec,
             meanmodel=self.meanmodel,
             lightcurve=self._lightcurve,
             rng_key=self.rng_key,
-            mean_params=params[: len(self.mean_params)],
+            mean_params=mean_params,
         )
         psd_model = gp_sample.get_psd()
         simulator = self._lightcurve.get_simulator(psd_model, pdf="Gaussian")
@@ -252,18 +266,22 @@ class Celerite2GPEngine(BaseGPEngine):
         return lc
 
     def generate_from_posteriors(self, nsims: int):
-        flat_samples = {key: v.reshape(-1) for key, v in self._mcmc_samples.items()}
-
-        total_samples = len(next(iter(flat_samples.values())))
-
         if self._mcmc_samples is None:
             raise RuntimeError(
                 "Posteriors have not been derived. Please run derive_posteriors prior to calling this method."
             )
         if nsims >= len(next(iter(self._mcmc_samples.values()))):
             warnings.warn(
-                "The number of simulation requested (%d) is higher than the number of posterior samples (%d), so many samples will be drawn more than once"
+                f"The number of simulation requested {nsims} is higher than the number of posterior samples {len(next(iter(self._mcmc_samples.values())))}, so many samples will be drawn more than once"
             )
+        flat_samples = {
+            key: v.reshape(-1)
+            for key, v in self._mcmc_samples.items()
+            if key != "log_likelihood"
+        }
+
+        total_samples = len(next(iter(flat_samples.values())))
+
         sampled_indices = np.random.choice(total_samples, nsims, replace=True)
         sampled_params = np.column_stack(
             [v[sampled_indices] for v in flat_samples.values()]

@@ -65,7 +65,7 @@ class KernelSpec:
         i = 0
         for term in self.terms:
             for name, param in term.parameters.items():
-                if self.use_jax:
+                if self.celerite2:
                     param.value = jnp.array(array[i])
                 else:
                     param.value = float(array[i])

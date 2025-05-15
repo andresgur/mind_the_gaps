@@ -20,11 +20,13 @@ class MeanFunction(ABC):
 
 class FixedMean(MeanFunction):
     no_parameters = 1
+    sampled_parameters = 0
 
     def __init__(self, lightcurve):
         super().__init__(lightcurve=lightcurve)
         self.mean_value = lightcurve.mean
         self.bounds = jnp.array([])
+        self.sampled_mean = False
 
     def compute_mean(
         self, fit: bool = True, params: jax.Array = None, rng_key: int = None
@@ -36,14 +38,19 @@ class ConstantMean(MeanFunction):
     """Constant mean function: m(t) = c"""
 
     no_parameters = 1
+    sampled_parameters = 1
+    param_names = ["mean"]
 
     def __init__(self, lightcurve):
         super().__init__(lightcurve=lightcurve)
         self.bounds = jnp.array(
             [[jnp.min(self._lightcurve.y)], [jnp.max(self._lightcurve.y)]]
         )
+        self.sampled_mean = True
 
-    def compute_mean(self, params: jnp.array, fit: bool = True, rng_key: int = None):
+    def compute_mean(
+        self, params: jnp.array = None, fit: bool = True, rng_key: int = None
+    ):
         if fit and jnp.size(params) == self.no_parameters:
 
             return params
@@ -58,6 +65,8 @@ class ConstantMean(MeanFunction):
 class LinearMean(MeanFunction):
     """Linear mean function: m(t) = mt + b"""
 
+    param_names = ["m", "b"]
+
     @classmethod
     def count_parameters(cls):
         return 2
@@ -67,6 +76,7 @@ class LinearMean(MeanFunction):
         self.bounds = jnp.array(
             [[jnp.min(self._lightcurve.y)], [jnp.max(self._lightcurve.y)]]
         )
+        self.sampled_mean = True
 
     def compute_mean(self, rng_key: int, params: jnp.array = None, bounds: dict = None):
         if params:
@@ -88,6 +98,8 @@ class LinearMean(MeanFunction):
 
 class GaussianMean(MeanFunction):
     """Gaussian mean function: m(t) = A * exp(- (t - mu)^2 / (2 * sigma^2))"""
+
+    param_names = ["A", "mu", "sigma"]
 
     @classmethod
     def count_parameters(cls):
