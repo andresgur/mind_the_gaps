@@ -1,4 +1,4 @@
-name: Deploy Sphinx documentation
+name: "Deploy Sphinx documentation"
 
 on:
   push:
@@ -15,5 +15,7 @@ jobs:
       pages: write
       id-token: write
     steps:
+    - id: install_pandoc
+      run: sudo apt-get install pandoc
     - id: deployment
       uses: sphinx-notes/pages@v3
