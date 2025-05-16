@@ -61,8 +61,7 @@ class E13Simulator(BaseSimulatorMethod):
             raise ValueError(
                 "pdf must be one of 'lognormal', 'uniform', 'gaussian'"
             )
-    
-    
+
     def adjust_lightcurve_pdf(
             self,
             lc: Lightcurve,
@@ -266,14 +265,14 @@ class Simulator:
         return sim_info
     
     @property
-    def psd_model(self) -> AstropyModel|Callable:
+    def psd_model(self) -> Callable|AstropyModel:
         """Getter for the PSD model."""
         return self._psd_model
 
     @psd_model.setter
     def psd_model(
             self,
-            new_psd_model: AstropyModel|Callable
+            new_psd_model: Callable|AstropyModel
     ):
         """Setter for the PSD model."""
         if not callable(new_psd_model):
@@ -701,7 +700,7 @@ def downsample(
 
 def tk95_sim(
         timestamps: ArrayLike,
-        psd_model: AstropyModel,
+        psd_model: Callable|AstropyModel,
         mean: float|Quantity,
         sim_dt: float|None = None,
         extension_factor: int = 20,
@@ -799,7 +798,7 @@ def check_pdfs(
 
 def E13_sim(
         timestamps: ArrayLike,
-        psd_model: AstropyModel,
+        psd_model: Callable|AstropyModel,
         pdfs: ArrayLike = [norm(0, 1)],
         weights: ArrayLike = [1],
         sim_dt: float|Quantity = None,
