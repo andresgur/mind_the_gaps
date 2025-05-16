@@ -4,9 +4,10 @@
 ```
 
 ```{toctree}
-:maxdepth: 3
+:maxdepth: 5
 :hidden:
 
 self
+structure
 examples
 ```

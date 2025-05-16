@@ -3,10 +3,17 @@
 # @Email:  a.gurpide-lasheras@soton.ac.uk
 # @Last modified by:   agurpide
 # @Last modified time: 26-04-2025
+from typing import Callable, Tuple, List, Literal, Dict
+from astropy.units import Quantity
+from lmfit.model import ModelResult
+from numpy.typing import ArrayLike, NDArray
+from astropy.modeling import Model as AstropyModel
+
+import astropy.modeling
 import numpy as np
 import warnings
 from lmfit.models import LognormalModel
-from scipy.stats import norm
+from scipy.stats import norm, rv_continuous
 from stingray import Lightcurve
 import numexpr as ne
 import pyfftw
@@ -34,9 +41,13 @@ class TK95Simulator(BaseSimulatorMethod):
 
 
 class E13Simulator(BaseSimulatorMethod):
-
-    def __init__(self, mean, pdf,
-                 max_iter=1000, random_state=None):
+    def __init__(
+            self,
+            mean: float,
+            pdf: Literal["lognormal", "uniform", "gaussian"],
+            max_iter: int = 1000,
+            random_state: int = None
+    ):
         super().__init__( mean)
         self.pdf = pdf
         self.max_iter = max_iter
@@ -46,19 +57,28 @@ class E13Simulator(BaseSimulatorMethod):
             self.pdfmethod = create_uniform_distribution
         elif self.pdf=="gaussian":
             self.pdfmethod = norm
+        else:
+            raise ValueError(
+                "pdf must be one of 'lognormal', 'uniform', 'gaussian'"
+            )
     
     
-    def adjust_lightcurve_pdf(self, lc, pdf, max_iter=400):
+    def adjust_lightcurve_pdf(
+            self,
+            lc: Lightcurve,
+            pdf: rv_continuous,
+            max_iter: int = 400
+    ) -> Lightcurve:
         """
         Adjust the PDF of the input lightcurve using the method from Emmanolopoulos+2013
 
         Parameters
         ----------
-        lc: Lightcurve
+        lc
             Regularly sampled TK95 generated lightcurve with the desired PSD (and taking into account, if desired, rednoise leakage and aliasing effects)
-        pdf: scipy.stats.rv_continuous.pdf
+        pdf
             Probability density distribution to be matched
-        max_iter: int
+        max_iter
             Number of iterations for the lightcurve creation if convergence is not reached (Greater beta values requirer larger max_iter e.g. 100 for beta < 1, 200 beta = 1, 500 or more for beta >=2)
 
         Returns
@@ -111,51 +131,68 @@ class E13Simulator(BaseSimulatorMethod):
 
         return lc
 
-    def adjust_pdf(self, segment):
+    def adjust_pdf(
+            self,
+            segment
+    ) -> Lightcurve:
         sample_std = np.std(segment.countrate)
         pdf = self.pdfmethod(self.meanrate, sample_std)
         adjusted_lc = self.adjust_lightcurve_pdf(segment, pdf, max_iter=self.max_iter)
         return adjusted_lc
 
+
 class Simulator:
     """
     A class to simulate lightcurves from a given power spectral densities and flux probability density function
     """
-    def __init__(self, psd_model, times, exposures, mean, pdf="gaussian", bkg_rate=None,
-                 bkg_rate_err=None, sigma_noise=None, aliasing_factor=2, extension_factor=10, epsilon=1.001, max_iter=400, 
-                 random_state=None):
+    def __init__(
+            self,
+            psd_model: Callable|AstropyModel,
+            times: ArrayLike,
+            exposures: float|ArrayLike,
+            mean: float,
+            pdf: str = "gaussian",
+            bkg_rate: ArrayLike|None = None,
+            bkg_rate_err: ArrayLike|None = None,
+            sigma_noise: float|None = None,
+            aliasing_factor: float = 2,
+            extension_factor: float = 10,
+            epsilon: float = 1.001,
+            max_iter: int = 400,
+            random_state: int|None = None
+    ):
         """
         Parameters
         ----------
-        psd_model: function or astropy.model
+        psd_model:
             PSD model to use for the lightcurve simulations. Astropy model or a function taking in angular frequencies and returning the power
-        pdf: str
+        pdf:
             String defining the flux probability density function desired for the ligthcurve. If Gaussian, uses Timmer & König 1995 algorithm, otherwise uses Emmanolopoulos et al. 2013.
               Currently implemented: Gaussian, Lognormal and Uniform distributions.
-        times:array_like,
+        times:
             Timestamps of the lightcurve (i.e. times at the "center" of the sampling). Always in seconds
-        exposures:array_like or float,
+        exposures:
             Exposure time of each datapoint in seconds
-        mean: float,
+        mean:
             Desired mean countrate for the lightcurve
-        bkg_rate: array-like
+        bkg_rate:
             Associated background rate (or flux) of each datapoint
-        bkg_rate_err:array-like
+        bkg_rate_err:
             uncertainty on background rate
-        sigma_noise: float,
+        sigma_noise:
             Standard deviation for the (Gaussian) noise. If not given assumes Poisson (no bkg rates) or Kraft (when bkg rates are given) noise
-        aliasing_factor: float,
+        aliasing_factor:
             This defines the grid of the original, regularly-sampled lightcurve produced
             prior to resampling as min(exposure) / aliasing_factor
-        extension_factor: float,
+        extension_factor:
             Factor by which extend the initially generated lightcurve, to introduce rednoise leakage. 10 times by default
-        epsilon: float,
+        epsilon:
             Factor (>1) by which expand the exposure times in the resampling to handle correctly numerically equal values. Normally there will be no need to vary it.
-        max_inter: int,
+        max_inter:
             Maximum number of iterations for the E13 method. Not use if method is TK95 (Gaussian PDF)
-        random_state: int,
+        random_state:
+            ???
         """
-
         if extension_factor < 1:
             raise ValueError("Extension factor must be greater than 1")
         
@@ -221,8 +258,7 @@ class Simulator:
         self.mean = mean
         #print("Simulator will use %s noise" % self.noise.name)
 
-    def __str__(self):
-
+    def __str__(self) -> str:
         sim_info = (f"Simulator(\n"
             f"  PSD Model: {self._psd_model}\n"
             f"  PDF: {self.pdf}\n)"
@@ -230,12 +266,15 @@ class Simulator:
         return sim_info
     
     @property
-    def psd_model(self):
+    def psd_model(self) -> AstropyModel|Callable:
         """Getter for the PSD model."""
         return self._psd_model
 
     @psd_model.setter
-    def psd_model(self, new_psd_model):
+    def psd_model(
+            self,
+            new_psd_model: AstropyModel|Callable
+    ):
         """Setter for the PSD model."""
         if not callable(new_psd_model):
             raise ValueError("PSD model must be callable (e.g., a function or Astropy model).")
@@ -243,9 +282,13 @@ class Simulator:
         # Update the simulator with the new PSD model
         self.simulator.psd_model = new_psd_model
 
+    def set_psd_params(
+            self,
+            psd_params: Dict
+    ):
+        """
+        Set the parameters of the PSD
 
-    def set_psd_params(self, psd_params):
-        """Set the parameters of the PSD
         Call this method prior to generate_lightcurve if you want to change the input params
         for the PSD
 
@@ -257,8 +300,10 @@ class Simulator:
         for par in psd_params.keys():
             setattr(self._psd_model, par, psd_params[par])
 
-
-    def add_noise(self, rates):
+    def add_noise(
+            self,
+            rates: ArrayLike,
+    ) -> (NDArray, NDArray):
         """
         Add noise to the input rates.
 
@@ -267,15 +312,15 @@ class Simulator:
 
         Parameters
         ----------
-        rates : array_like
+        rates
             Input rates to which noise will be added.
 
         Returns
         -------
-        noisy_rates : np.ndarray
+        noisy_rates
             The input rates after noise has been applied.
         
-        dy : np.ndarray
+        dy
             The estimated uncertainties (standard deviation) on the noisy rates.
         """
         noisy_rates, dy = self.noise.add_noise(rates)
@@ -295,17 +340,21 @@ class Simulator:
 
         return noisy_rates, dy
     
-    def downsample(self, lc):
-        """Downsample the lightcurve into the new sampling pattern (regular or otherwise)
+    def downsample(
+            self,
+            lc: Lightcurve
+    ) -> NDArray:
+        """
+        Downsample the lightcurve into the new sampling pattern (regular or otherwise)
 
         Parameters
         ----------
-        lc: Lightcurve
+        lc
             Regularly-sampled lightcurve to resample into the new sampling pattern
 
         Returns
         ----------
-        np.ndarray
+        NDArray
             The downsampled count rates at the input timestamps
         """
 
@@ -320,7 +369,7 @@ class Simulator:
             
         return rates
     
-    def simulate_regularly_sampled(self):
+    def simulate_regularly_sampled(self) -> Lightcurve:
         """
         Generate a regularly sampled lightcurve.
 
@@ -331,7 +380,7 @@ class Simulator:
 
         Returns
         -------
-        Lightcurve
+        lc
             A regularly sampled lightcurve generated using the TK95 algorithm.
         """
         # get a new realization of the PSD
@@ -348,15 +397,17 @@ class Simulator:
         return lc
 
 
-    def generate_lightcurve(self):
-        """Generates lightcurve with the last input PSD parameteres given. Note every call to this method will
-        generate a different realization, even if the input parameters remain unchanged.
-        All parameters are specified during the Simulator creation 
+    def generate_lightcurve(self) -> NDArray:
+        """
+        Generates lightcurve with the last input PSD parameteres given.
 
+        Note every call to this method will generate a different realization,
+        even if the input parameters remain unchanged.
+        All parameters are specified during the Simulator creation 
 
         Returns
         ----------
-        np.ndarray
+        NDArray
             The rates for the input timestamps
         """   
         lc = self.simulate_regularly_sampled()
@@ -372,14 +423,31 @@ class Simulator:
         return downsampled_rates
 
 
-def add_poisson_noise(rates, exposures, background_counts=None, bkg_rate_err=None):
+def add_poisson_noise(
+        rates: ArrayLike,
+        exposures: float|ArrayLike,
+        background_counts: ArrayLike|None = None,
+        bkg_rate_err: ArrayLike = None
+) -> (ArrayLike, ArrayLike):
     """Add Poisson noise and estimate uncertainties
-    rates: array_like
-        Array of count rates
-    exposures: array_like or float
-        Exposure time at each bin (or a single value if same everywhere)
 
-    Return the array of new Poissonian modified rates and its uncertainties
+    Parameters
+    ----------
+    rates
+        Array of count rates
+    exposures
+        Exposure time at each bin (or a single value if same everywhere)
+    background_counts
+        ???
+    bkg_rate_err
+        ???
+
+    Returns
+    -------
+    ArrayLike
+        New Poissonian modified rates
+    ArrayLike
+        Its uncertainties
     """
 
     if background_counts is None:
@@ -398,34 +466,44 @@ def add_poisson_noise(rates, exposures, background_counts=None, bkg_rate_err=Non
     return net_counts  / exposures, dy
 
 
-def draw_positive(pdf):
-    """Dummy method to ensure all samples of count rates are positively defined
-    pdf: scipy.stats.rv_continuous
+def draw_positive(
+        pdf: rv_continuous
+) -> float:
+    """
+    Dummy method to ensure all samples of count rates are positively defined
+
+    Parameters
+    ----------
+    pdf: rv_continuous
         PDF where to draw values from (which can contain negative values, e.g. a Gaussian function)
 
     Returns
     -------
-    value:float
+    float
         One sample from the pdf
     """
     value = pdf.rvs()
     return(value if value>0 else draw_positive(pdf))
 
 
-def fit_pdf(time_series, nbins=20):
+def fit_pdf(
+    time_series: ArrayLike|Quantity,
+    nbins: int = 20
+) -> (ModelResult, List[str]):
     """
     Fit the time series probability density function.
     Parameters
     ---------
-    time_series: array or Quantity
-    n_bins: int
+    time_series
+        ???
+    n_bins
         Number of bins of the histogram to be fitted
 
     Returns
     -------
-    out_fit: lmift.ModelResult
+    ModelResult
         Best fit model
-    prefixes: list
+    List[str]
         List of prefixes for each model component of the pdf
     """
     models = []
@@ -472,16 +550,27 @@ def fit_pdf(time_series, nbins=20):
         return out_fit_2, ["pdf1", "pdf2"]
 
 
-def get_fft(N, dt, model):
-    """Get DFT
+def get_fft(
+        N: int,
+        dt: float,
+        model: AstropyModel
+) -> ArrayLike:
+    """
+    Get DFT
+
     Parameters
     ----------
-    N: int
+    N
         Number of datapoints
-    dt: float
+    dt
         Binning in time in seconds
-    model: astropy.model
+    model
         The model for the PSD
+
+    Returns
+    -------
+    ArrayLike
+        The complex FFT
     """
     freqs = np.fft.rfftfreq(N, dt) * 2 * np.pi
     #generate real and complex parts from gaussian distributions
@@ -496,21 +585,27 @@ def get_fft(N, dt, model):
         complex_fft[-1] = np.real(complex_fft[-1])
     return complex_fft
 
-def get_segment(lc, duration, N):
-    """Get the Nth segment of the input lightcurve.
+def get_segment(
+        lc: Lightcurve,
+        duration: float,
+        N: int
+) -> Lightcurve:
+    """
+    Get the Nth segment of the input lightcurve.
 
     Parameters
     ----------
-    lc: Lightcurve
+    lc
         The input lightcurve from which a segment is to be drawn
-    duration: float
+    duration
         Duration of the desired segment
-    N: int,
+    N
         Integer indicating the segment to get (starting at N = 0 and ending in N +1) i.e. t_start = N * duration)
 
     Returns
     -------
     Lightcurve
+        ???
 
     Raises
     ------
@@ -529,16 +624,27 @@ def cut_random_segment(lc, duration):
     return lc.truncate(start=shift, stop=shift + duration, method="time")
 
 
-def imprint_sampling_pattern(lightcurve, timestamps, bin_exposures):
-    """Modify the input lightcurve to have the input sampling pattern (timestamps and exposures) provided
+def imprint_sampling_pattern(
+        lightcurve: Lightcurve,
+        timestamps: ArrayLike,
+        bin_exposures: float|ArrayLike,
+) -> ArrayLike:
+    """
+    Modify the input lightcurve to have the input sampling pattern (timestamps and exposures) provided
+
     Parameters
     ---------
-    lightcurve: stingray.lightcurve
+    lightcurve
         Lightcurve to which imprint the given sampling pattern
-    timestamps: array
+    timestamps
         New timestamps of the new sampling
-    bin_exposures: array or scalar
+    bin_exposures
         Exposures of the timestamps. Either as a float or array (or 1 item array)
+
+    Returns
+    -------
+    ArrayLike
+        The average count rates for the subsegment corresponding to each timestamp.
     """
     half_bins = bin_exposures / 2
 
@@ -555,17 +661,27 @@ def imprint_sampling_pattern(lightcurve, timestamps, bin_exposures):
     return np.fromiter((lc.meanrate for lc in lc_split), dtype=float)
 
 
-def downsample(lc, timestamps, bin_exposures):
-    """Downsample the lightcurve into the new binning (regular or not)
+def downsample(
+        lc: Lightcurve,
+        timestamps: ArrayLike,
+        bin_exposures: ArrayLike
+):
+    """
+    Downsample the lightcurve into the new binning (regular or not)
+
     Parameters
     ----------
-    lc: Lightcurve
+    lc
         With the old binning
-    timestmaps: array
+    timestmaps
         The new timestamps for the lightcurve
-    bin_exposures: array
+    bin_exposures
         Exposure times of each new bin in same units as timestamps
-    Returns the downsampled count rates
+
+    Returns
+    -------
+    ArrayLike
+        Returns the downsampled count rates
     """
     # return the lightcurve as it is
     if len(lc.time) == len(timestamps):
@@ -583,24 +699,37 @@ def downsample(lc, timestamps, bin_exposures):
     return downsampled_rates
 
 
-def tk95_sim(timestamps, psd_model, mean, sim_dt=None, extension_factor=20, bin_exposures=None):
-    """Simulate one lightcurve using the method from Timmer and Koenig+95 with the input sampling (timestamps) and using a red-noise powerlaw model.
+def tk95_sim(
+        timestamps: ArrayLike,
+        psd_model: AstropyModel,
+        mean: float|Quantity,
+        sim_dt: float|None = None,
+        extension_factor: int = 20,
+        bin_exposures: float|ArrayLike|None = None
+) -> ArrayLike:
+    """
+    Simulate one lightcurve using the method from Timmer and Koenig+95 with the input sampling (timestamps) and using a red-noise powerlaw model.
 
     Parameters
     ----------
-    timestamps: array
+    timestamps
         The timestamps of the lightcurve to simulate
-    psd_model: astropy.model
+    psd_model
         Model for the PSD
-    mean: float or Quantity
+    mean
         Desired mean for the final lightcurve
-    sim_dt: float
+    sim_dt
         Binning to use for the simulated lightcurve (desired final dt is given by bin_exposures).
         If not given it is computed from the mean difference of the input timestamps
-    extension_factor: int,
+    extension_factor
         How many times longer the initial lightcurve needs to be simulated (to introduce red noise leakage)
-    bin_exposures: float or array-like
+    bin_exposures
         Exposure time of each bin in the final lightcurve (float for constant, array for irregular bins)
+
+    Returns
+    -------
+    ArrayLike
+        The downsampled rates.
     """
     if extension_factor < 1:
         raise ValueError("Extension factor needs to be higher than 1")
@@ -640,8 +769,27 @@ def tk95_sim(timestamps, psd_model, mean, sim_dt=None, extension_factor=20, bin_
     return downsampled_rates
 
 
-def check_pdfs(weights, pdfs):
-    """Check input pdf parameters"""
+def check_pdfs(
+        weights: NDArray,
+        pdfs: NDArray
+) :
+    """
+    Check input pdf parameters
+
+    Parameters
+    ----------
+    weights
+        ???
+    pdfs
+        ???
+
+    Raises
+    ------
+    ValueError
+        If the weights and PDFs are different lengths
+    ValueError
+        If the weights sum to greater than 1.
+    """
     if len(pdfs) != len(weights):
         raise ValueError("Number of weights (%d) must match number of pdfs (%d)" % (weights.size, pdfs.size))
 
@@ -649,28 +797,42 @@ def check_pdfs(weights, pdfs):
         raise ValueError("Weights for the probability density distributions must be = 1. (%.20f)" % np.sum(weights))
 
 
-def E13_sim(timestamps, psd_model, pdfs=[norm(0, 1)], weights=[1], sim_dt=None, extension_factor=20,
-            bin_exposures=None, max_iter=300):
-    """Simulate lightcurve using the method from Emmanolopoulos+2013
+def E13_sim(
+        timestamps: ArrayLike,
+        psd_model: AstropyModel,
+        pdfs: ArrayLike = [norm(0, 1)],
+        weights: ArrayLike = [1],
+        sim_dt: float|Quantity = None,
+        extension_factor: float = 20,
+        bin_exposures: ArrayLike|None = None,
+        max_iter: int = 300
+) -> Tuple:
+    """
+    Simulate lightcurve using the method from Emmanolopoulos+2013
 
-    timestamps: array_like
+    timestamps
         Timestamps of the desired time series
-    psd_model: astropy.model
+    psd_model
         The model for the PSD
-    pdfs: array_like
+    pdfs
         Probability density distribution to be matched
-    weights: array_like
+    weights
         Array containing the weights of each of the input distributions
-    sim_dt: float or Quantity
+    sim_dt
         Time sampling to use when simulating the data
-    extension_factor: float
+    extension_factor
         Factor by which to extend the original lightcurve to introduce rednoise leakage.
-    bin_exposures: array_like
+    bin_exposures
         Exposure time of each sample
-     max_iter: int
+     max_iter
         Number of iterations for the lightcurve creation if convergence is not reached
         (More complex models (or greater beta values) or pdfs require larger max_iter e.g. 100 for beta < 1,
         200 beta = 1, 500 or more for beta >=2 or bending powerlaws)
+
+    Returns
+    -------
+    Tuple
+        ???
     """
 
     if extension_factor < 1:
@@ -700,23 +862,35 @@ def E13_sim(timestamps, psd_model, pdfs=[norm(0, 1)], weights=[1], sim_dt=None, 
     return E13_sim_TK95(lc_cut, timestamps, pdfs, weights, bin_exposures, max_iter)
 
 
-def E13_sim_TK95(lc, pdfs=[norm(0, 1)], weights=[1], exposures=None, max_iter=400):
-    """Modified input lightcurve using the method from Emmanolopoulos+2013
+def E13_sim_TK95(
+        lc: Lightcurve,
+        pdfs: ArrayLike= [norm(0, 1)],
+        weights: ArrayLike = [1],
+        exposures: ArrayLike|None = None,
+        max_iter: int = 400
+) -> ArrayLike:
+    """
+    Modified input lightcurve using the method from Emmanolopoulos+2013
 
     Parameters
     ----------
-    lc: Lightcurve
+    lc
         Regularly sampled TK95 generated lightcurve with the desired PSD (and taking into account, if desired, rednoise leakage and aliasing effects)
-    timestmaps: array
+    timestmaps
         New desired timestmaps (in seconds)
-    pdfs: array_like
+    pdfs
         Probability density distribution to be matched
-    weights: array_like
+    weights
         Array containing the weights of each of the input distributions
-    exposures: array
+    exposures
         Exposures in seconds of the new bins. If not given assumed equal to lc.dt (it can be array or scalar)
-     max_iter: int
+     max_iter
         Number of iterations for the lightcurve creation if convergence is not reached (Greater beta values requirer larger max_iter e.g. 100 for beta < 1, 200 beta = 1, 500 or more for beta >=2)
+
+    Returns
+    -------
+    Lightcurve
+        ???
     """
 
     check_pdfs(weights, pdfs)
@@ -778,16 +952,27 @@ def E13_sim_TK95(lc, pdfs=[norm(0, 1)], weights=[1], exposures=None, max_iter=40
     return downsampled_rates
 
 
-def _normalize(time_series, mean, std):
-    """Normalize lightcurve to a desired mean and standard deviation
+def _normalize(
+        time_series: ArrayLike|Quantity,
+        mean: float|Quantity,
+        std: float|Quantity
+) -> ArrayLike|Quantity:
+    """
+    Normalize lightcurve to a desired mean and standard deviation
+
     Parameters
     ----------
-    time_series: Quantity or array
+    time_series
         Y values of the time series to which you want to normalize
-    mean: Quantity or float
+    mean
         Desired mean of the generated lightcurve to match.
-    std_dev:Quantity or float
+    std
         Desired standard deviation of the simulated lightcurve to match.
+
+    Returns
+    -------
+    ArrayLike|Quantity
+        Normalized lightcurve
     """
     # this sets the same variance
     if hasattr(mean, "unit"):

@@ -14,10 +14,10 @@
 #
 import os
 import sys
-
-import autoapi
 import toml
 import datetime
+
+from typing import Dict, Any
 
 
 sys.path.insert(
@@ -54,6 +54,7 @@ extensions = [
     'sphinx.ext.graphviz',
     'sphinx.ext.githubpages',
     'sphinx.ext.intersphinx',
+    'sphinx.ext.linkcode',
     'sphinx.ext.napoleon',
     'autoapi.extension',
     'myst_parser',
@@ -95,14 +96,6 @@ pygments_style = 'sphinx'
 autodoc_typehints = 'both'
 autoclass_content = 'both'
 
-# Links between different projects documentation
-intersphinx_mapping = {
-    'python': ('https://docs.python.org/3', None),
-    'numpy': ('https://numpy.org/doc/stable', None),
-    'scipy': ('https://docs.scipy.org/doc/scipy', None),
-    'matplotlib': ('https://matplotlib.org/stable', None),
-    'celerite': ('https://celerite.readthedocs.io/en/stable', None),
-}
 
 # -- Options for HTML output -------------------------------------------------
 
@@ -134,7 +127,7 @@ html_theme = 'sphinx_rtd_theme'
 
 # -- Extension configuration -------------------------------------------------
 
-# -- Options for AutoAPI output ---------------------------------------------
+# -- Options for AutoAPI output ----------------------------------------------
 autoapi_dirs = ['../mind_the_gaps']
 autoapi_python_class_content = 'both'
 autoapi_options = [
@@ -150,3 +143,35 @@ autoapi_options = [
     'show-inheritance-diagram',
 ]
 autoapi_own_page_level = 'class'
+
+# -- Options for GraphViz mapping --------------------------------------------
+graphviz_output_format = 'svg'
+# graphviz_dot_args = '-Tsvg'
+
+# -- Options for InterSphinx mapping -----------------------------------------
+
+# Links between different projects documentation
+intersphinx_mapping = {
+    'python': ('https://docs.python.org/3', None),
+    'numpy': ('https://numpy.org/doc/stable', None),
+    'scipy': ('https://docs.scipy.org/doc/scipy', None),
+    'matplotlib': ('https://matplotlib.org/stable', None),
+    'celerite': ('https://celerite.readthedocs.io/en/stable', None),
+    'stingray': ('https://docs.stingray.science/en/stable/', None),
+    'astropy': ('https://docs.astropy.org/en/stable', None),
+}
+
+# -- Options for LinkCode output ---------------------------------------------
+def linkcode_resolve(
+        domain: str,
+        info: Dict[str, Any],
+) -> str|None:
+    """
+    Finds the path on GitHub for a given entry in the documentation.
+    """
+    if domain != 'py':
+        return None
+    elif not info['module']:
+        return None
+    else:
+        return f"{pyproject['project']['urls']['Repository']}/blob/main/{info['module'].replace('.', '/')}.py"

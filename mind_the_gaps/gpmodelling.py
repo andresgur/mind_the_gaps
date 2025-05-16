@@ -6,7 +6,7 @@
 from typing import List, Tuple
 
 import numpy as np
-import numpy.typing as npt
+from numpy.typing import ArrayLike
 
 from mind_the_gaps.lightcurves import GappyLightcurve
 import celerite
@@ -14,7 +14,6 @@ import celerite.modeling
 from celerite.modeling import ConstantModel
 from mind_the_gaps.models import LinearModel, GaussianModel
 import emcee
-import celerite
 from multiprocessing import Pool
 from functools import partial
 from scipy.optimize import minimize
@@ -37,11 +36,11 @@ class GPModelling:
 
         Parameters
         ----------
-        lightcurve:
+        lightcurve
             An instance of a lightcurve
         model: celerite.terms.Term
             The model to be fitted to the lightcurve
-        mean_model:
+        mean_model
             Mean model. If given it will be fitted, otherwise assumed the mean value.
             Available implementations are Constant, Linear and Gaussian.
         """
@@ -69,14 +68,14 @@ class GPModelling:
 
         Parameters
         ----------
-        meanmodel:
+        meanmodel
             ???
 
         Returns
         -------
-        celerite.modeling.Model:
+        celerite.modeling.Model
             A celerite model
-        bool:
+        bool
             Whether to the mean model is fitted or not
         """
         maxy = np.max(self._lightcurve.y)
@@ -131,16 +130,16 @@ class GPModelling:
 
         Parameters
         ----------
-        params:
+        params
             List of parameters of the GP at which to calculate the posteriors
-        y: npt.ArrayLike
+        y: ArrayLike
             The dataset (count rates, lightcurves, etc)
         gp: celerite.GP
             An instance of the Gaussian Process solver
 
         Returns
         -------
-        float:
+        float
             Returns the log of the posterior
             https://celerite.readthedocs.io/en/stable/tutorials/modeling/
         """
@@ -160,14 +159,14 @@ class GPModelling:
 
     def fit(
             self,
-            initial_params: npt.ArrayLike = None
+            initial_params: ArrayLike = None
     ):
         """
         Fit the GP by running a minimization rutine
 
         Parameters
         ----------
-        initial_params:
+        initial_params
             Set of initial paramteres. If not given uses those given at initialization
 
         Returns
@@ -184,7 +183,7 @@ class GPModelling:
 
     def derive_posteriors(
             self,
-            initial_chain_params: npt.ArrayLike = None,
+            initial_chain_params: ArrayLike = None,
             fit: bool = True,
             converge: bool = True,
             max_steps: int = 10000,
@@ -198,17 +197,17 @@ class GPModelling:
 
         Parameters
         ----------
-        initial_chain_params:
+        initial_chain_params
             Set of initial parameters for the chains. If not given will use randomized from the parameters given at initialization
-        fit:
+        fit
             Whether to run a minimization routine prior to running the MCMC chains
-        converge:
+        converge
             Whether to stop the chains if convergence is detected
-        max_steps:
+        max_steps
             Maximum number of steps for the chains
-        convergence_steps:
+        convergence_steps
             Number of steps to check for convergence
-        walkers:
+        walkers
             Number of walkers for the chains
         cores:
             Number of cores for parallelization
@@ -275,29 +274,30 @@ class GPModelling:
     def spread_walkers(
             self,
             walkers: int,
-            parameters: npt.ArrayLike,
+            parameters: ArrayLike,
             bounds: List[Tuple[float, float]],
             percent: float = 0.1,
             max_attempts: int = 20
-    ):
+    ) -> ArrayLike:
         """Spread the walkers using a Gaussian distribution around a given set of parameters
 
         Parameters
         ----------
-        walkers:
+        walkers
             Number of walkers
-        parameters:
+        parameters
             Parameters around which the chains need to be spread
-        bounds:
+        bounds
             Bounds (min, max) for each of the parameters (in same order)
-        percent:
+        percent
             By which percentage factor (0-1) scale the initial parameters for the standard deviation
                 of the Gaussians. Default: 0.1 (i.e. 10%)
-        max_attempts:
+        max_attempts
             Attempts before giving up (if the parameters fall always outside the imposed bounds)
 
         Returns
         -------
+        ArrayLike
             Returns a set of randomized samples for the chains
         """
         if percent < 0 or percent > 1:
@@ -339,12 +339,13 @@ class GPModelling:
             self,
             include_noise: bool = True
     ):
-        """Returns the standarized residuals (see e.g. Kelly et al. 2011) Eq. 49.
+        """
+        Returns the standarized residuals (see e.g. Kelly et al. 2011) Eq. 49.
         You should set the gp parameters to your best or mean (median) parameter values prior to calling this method
 
         Parameters
         ----------
-        include_noise: bool,
+        include_noise
             True to include any jitter term into the standard deviation calculation. False ignores this contribution.
         """
         pred_mean, pred_var = self.gp.predict(self._lightcurve.y, return_var=True, return_cov=False)
@@ -357,17 +358,19 @@ class GPModelling:
     def get_rstat(
             self,
             burnin: int = None
-    ):
+    ) -> ArrayLike:
         """Calculate convergence criterion from Gelman & Rubin 1992; Gelman et al. 2004.
         Values close to 1 indicate convergence.
+
         Parameters
         ----------
-        burnin:int,
+        burnin
             Number of samples to burn prior to the estimation. By default
             uses the autocorrelation time to estimate a suitable number
 
         Returns
         -------
+        ArrayLike
             Returns an array of the value of the statistic per chain
         """
         if self._sampler is None:
@@ -439,7 +442,7 @@ class GPModelling:
 
         Returns
         -------
-        int:
+        int
             Number of variable parameters
         """
         return self._ndim
@@ -466,13 +469,13 @@ class GPModelling:
 
         Parameters
         ----------
-        nsims:
+        nsims
             Number of lightcurve simulations to perform
-        cpus:
+        cpus
             Number of cpus to use for parallelization
-        pdf:
+        pdf
             PDF for the simulations: Gaussian, Lognormal or Uniform
-        extension_factor:
+        extension_factor
             Extension factor for the generation of the lightcurves, to introduce rednoise leakage
         """
 
@@ -490,7 +493,11 @@ class GPModelling:
             lightcurves = pool.map(partial(self._generate_lc_from_params, simulator=simulator), param_samples)
         return lightcurves
     
-    def _generate_lc_from_params(self, parameters, simulator):
+    def _generate_lc_from_params(
+            self,
+            parameters: ArrayLike,
+            simulator,
+    ) -> GappyLightcurve:
         self.gp.set_parameter_vector(parameters)
         # set the new PSD with update params
         simulator.psd_model = self.gp.kernel.get_psd
