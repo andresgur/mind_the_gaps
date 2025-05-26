@@ -108,7 +108,7 @@ class E13Simulator(BaseSimulatorMethod):
         pyfftw.interfaces.cache.enable()
         #plt.figure()
         # start loop
-        while (not np.allclose(xsim, xsim_adjust, rtol=1e-03) and iteration < max_iter):
+        while (not np.allclose(xsim_adjust, xsim, rtol=1e-04) and iteration < max_iter):
             xsim = xsim_adjust
             # step ii Fourier transform of xsim
             dft_sim = pyfftw.interfaces.numpy_fft.rfft(xsim)
@@ -238,7 +238,7 @@ class Simulator:
         self.fftndatapoints = len(self.sim_timestamps)
         self.pdf = pdf
 
-        self._psd_model = psd_model
+        self.psd_model = psd_model
         self._times = times
         
         # noise
@@ -278,8 +278,6 @@ class Simulator:
         if not callable(new_psd_model):
             raise ValueError("PSD model must be callable (e.g., a function or Astropy model).")
         self._psd_model = new_psd_model
-        # Update the simulator with the new PSD model
-        self.simulator.psd_model = new_psd_model
 
     def set_psd_params(
             self,
@@ -414,7 +412,7 @@ class Simulator:
         segment = cut_random_segment(lc, self.sim_duration)
         # shift it to match the timestamps
         shifted_lc = segment.shift(-segment.tstart + self.strategy[0][0])
-        # adjust its rates to desired PDF, if TK95 (Gaussian) we just adjust the mean
+        # adjust its rates to desired PDF, if TK95 (Gaussian) no need to adjust as the mean is already set
         lc_adjusted = self.simulator.adjust_pdf(shifted_lc)
 
         downsampled_rates = self.downsample(lc_adjusted)
