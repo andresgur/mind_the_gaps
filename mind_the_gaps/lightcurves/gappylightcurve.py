@@ -4,33 +4,47 @@
 # @Last modified by:   agurpide
 # @Last modified time: 28-02-2022
 import numpy as np
+from typing import List
+from numpy import floating
+from numpy.typing import ArrayLike, NDArray
 from random import sample
 from mind_the_gaps.simulator import Simulator
+from astropy.modeling import Model as AstropyModel
+
 
 class ExposureTimeError(Exception):
     def __init__(self, message):
         super().__init__(message)
 
+
 class GappyLightcurve:
     """
     A class to store parameters of a irregularly-sampled lightcurve
     """
-    def __init__(self, times, y, dy=None, exposures=None, bkg_rate=None, bkg_rate_err=None):
+    def __init__(
+            self,
+            times: ArrayLike,
+            y: ArrayLike,
+            dy: ArrayLike|None = None,
+            exposures: float|ArrayLike|None = None,
+            bkg_rate: ArrayLike|None = None,
+            bkg_rate_err: ArrayLike|None = None
+    ):
         """
 
         Parameters
         ----------
-        times:array_like,
+        times:
             Timestamps of the lightcurve (i.e. times at the "center" of the sampling). Always in seconds
-        y: array_like
+        y:
             Observed flux or count rate
-        dy: array-like
+        dy:
             1 sigma uncertainty on y. Optional, 
-        exposures: scalar or array-like, optional
+        exposures:
             Exposure time of each datapoint in seconds
-        bkg_rate: array-like
+        bkg_rate:
             Associated background rate (or flux) with each datapoint
-        bkg_rate_err:array-like
+        bkg_rate_err:
             uncertainty on background rate
 
         """
@@ -58,19 +72,19 @@ class GappyLightcurve:
         
 
     @property
-    def times(self):
+    def times(self) -> ArrayLike:
         """
         Timestamps of the lightcurve.
 
         Returns
         -------
-        array-like
+        ArrayLike
             Timestamps of the lightcurve.
         """
         return self._times
 
     @property
-    def n(self):
+    def n(self) -> int:
         """
         Number of datapoints
 
@@ -82,37 +96,37 @@ class GappyLightcurve:
         return len(self._times)
 
     @property
-    def y(self):
+    def y(self) -> ArrayLike:
         """
         Observed flux or count rate.
 
         Returns
         -------
-        array-like
+        ArrayLike
             Observed flux or count rate.
         """
         return self._y
 
     @property
-    def dy(self):
+    def dy(self) -> ArrayLike:
         """
         1 sigma uncertainty on y.
 
         Returns
         -------
-        array-like
+        ArrayLike
             1 sigma uncertainty on y.
         """
         return self._dy
 
     @property
-    def exposures(self):
+    def exposures(self) -> ArrayLike:
         """
         Exposure time of each datapoint.
 
         Returns
         -------
-        array-like
+        ArrayLike
             Exposure time of each datapoint.
         """
         return self._exposures
@@ -124,7 +138,7 @@ class GappyLightcurve:
 
         Returns
         -------
-        array-like
+        ArrayLike
             Associated background rate (or flux) with each datapoint.
         """
         return self._bkg_rate
@@ -136,7 +150,7 @@ class GappyLightcurve:
 
         Returns
         -------
-        array-like
+        ArrayLike
             Uncertainty on background rate.
         """
         return self._bkg_rate_err
@@ -154,20 +168,24 @@ class GappyLightcurve:
         return self._times[-1] - self._times[0]
 
     @property
-    def mean(self):
+    def mean(self) -> floating:
         """Mean count rate"""
         return np.mean(self._y)
 
 
-    def truncate(self, tmin=-np.inf, tmax=np.inf):
+    def truncate(
+            self,
+            tmin: floating = -np.inf,
+            tmax: floating = np.inf
+    ):
         """
         Create a new GappyLightcurve instance by cutting the data between tmin and tmax.
 
         Parameters
         ----------
-        tmin : float
+        tmin
             Minimum timestamp for the cut.
-        tmax : float
+        tmax
             Maximum timestamp for the cut.
 
         Returns
@@ -190,18 +208,21 @@ class GappyLightcurve:
             self._bkg_rate_err[mask]
         )
 
-    def split(self, interval):
+    def split(
+            self,
+            interval: float
+    ) -> List['GappyLightcurve']:
         """
         Split the lightcurve based on the input (time) interval
 
         Parameters
         ----------
-        interval : float
+        interval
             Time interval with which split the lightcurve
 
         Returns
         -------
-        array of GappyLightcurve
+        List[GappyLightcurve]
             Each split lightcurve will be stored as a new object
         """
         lightcurves = []
@@ -215,7 +236,10 @@ class GappyLightcurve:
             j = i + 1
         return lightcurves
 
-    def rand_remove(self, points_remove):
+    def rand_remove(
+            self,
+            points_remove: int
+    ) -> 'GappyLightcurve':
         """Randomly remove a given number of points from the lightcurve"""
         if points_remove > self.n:
             return ValueError("Number of points to remove (%d) is greater than number of lightcurve datapoints (%d)"  % (points_remove, self.n))
@@ -231,23 +255,32 @@ class GappyLightcurve:
             self._bkg_rate_err[mask]
         )
 
-    def to_csv(self, outname: str):
+    def to_csv(
+            self,
+            outname: str
+    ):
         """Save lightcurve properties to csv file"""
         outputs = np.array([self._times, self._y, self._dy, self._exposures, self._bkg_rate, self._bkg_rate_err])
         np.savetxt(outname, outputs.T, fmt="%.8e\t%.5f\t%.5f\t%.3f\t%.5f\t%.5f", header="t\trate\terror\texposure\tbkg_rate\tbkg_rate_err")
 
 
-    def get_simulator(self, psd_model, pdf="gaussian", **kwargs):
-        """Creates an instance of mind_the_gaps.Simulator based on the lightcurve
-            properties (timestamps, exposures, etc)
+    def get_simulator(
+            self,
+            psd_model: AstropyModel,
+            pdf: str = "gaussian",
+            **kwargs
+    ) -> Simulator:
+        """
+        Creates an instance of mind_the_gaps.Simulator based on the lightcurve
+        properties (timestamps, exposures, etc)
 
         Parameters
         ----------
-        psd_model: astropy.modeling.Model,
+        psd_model
             The model for the PSD
-        pdf: str,
+        pdf
             A string defining the probability distribution (Gaussian, Lognormal or Uniform)
-        kwargs: dict,
+        kwargs
             Arguments for the simulator (aliasing_factor, sigma_noise, etc)
 
         Returns

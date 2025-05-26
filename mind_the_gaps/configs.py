@@ -6,11 +6,13 @@
 import celerite
 import warnings
 import numpy as np
+from typing import Tuple
 
-from mind_the_gaps.models.celerite_models import Lorentzian, DampedRandomWalk, Cosinus, BendingPowerlaw
+from mind_the_gaps.models import Lorentzian, DampedRandomWalk, Cosinus, BendingPowerlaw
 
-two_pi = 2 * np.pi
-days_to_seconds = 24 * 3600
+
+two_pi: float = 2 * np.pi
+days_to_seconds: float = 24 * 3600
 
 class ConfigFileError(Exception):
     """Custom exception for configuration file errors."""
@@ -18,15 +20,23 @@ class ConfigFileError(Exception):
         super().__init__(message)
 
 
-def read_config_file(config_file, walkers=32):
+def read_config_file(
+        config_file: str,
+        walkers: int = 32
+):
     """Read config file with model and parameter initial values and bounds.
 
     Parameters
     ----------
-    config_file:str,
+    config_file
         The config file
+    walkers
+        ???
 
-    Returns the kernel,
+    Returns
+    -------
+    Tuple
+        Returns the kernel, ???
     """
     try:
         model_info = np.genfromtxt(config_file, names=True, dtype="U25,U25,U25,U25",

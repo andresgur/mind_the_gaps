@@ -3,20 +3,36 @@
 # @Email:  a.gurpide-lasheras@soton.ac.uk
 # @Last modified by:   agurpide
 # @Last modified time: 12-12-2024
+from typing import Tuple
+from numpy import floating
+from numpy.typing import ArrayLike
 from mind_the_gaps.stats import kraft_pdf
 import numpy as np
 from astropy.stats import poisson_conf_interval
 
+
 class BaseNoise:
-    def __init__(self, name):
+    def __init__(
+            self,
+            name: str
+    ):
         self.name = name
 
-    def add_noise(self, rates):
+    def add_noise(
+            self,
+            rates: ArrayLike,
+    ):
         """Randomize the input rates and calculate uncertainties"""
         raise NotImplementedError("This method should be implemented by subclasses")
 
+
 class PoissonNoise(BaseNoise):
-    def __init__(self, exposures, background_counts=None, bkg_rate_err=None):
+    def __init__(
+            self,
+            exposures: ArrayLike,
+            background_counts: float|floating|None = None,
+            bkg_rate_err: ArrayLike|None = None
+    ):
         super().__init__(name="Poisson")
 
         self.exposures = exposures
@@ -30,14 +46,26 @@ class PoissonNoise(BaseNoise):
             self.bkg_rate_err = bkg_rate_err
 
 
-    def add_noise(self, rates):
-        """Add Poisson noise and estimate uncertainties
-        rates: array_like
+    def add_noise(
+            self,
+            rates: ArrayLike
+    ) -> Tuple[ArrayLike, ArrayLike]:
+        """
+        Add Poisson noise and estimate uncertainties
+
+        Parameters
+        ----------
+        rates
             Array of count rates
-        exposures: array_like or float
+        exposures
             Exposure time at each bin (or a single value if same everywhere)
 
-        Return the array of new Poissonian modified rates and its uncertainties
+        Returns
+        -------
+        ArrayLike
+            New Poissonian modified rates
+        ArrayLike
+            Uncertainties on the rates
         """
 
         total_counts = rates * self.exposures + self.background_counts
@@ -49,14 +77,21 @@ class PoissonNoise(BaseNoise):
         dy = np.sqrt((np.sqrt(total_counts_poiss) / self.exposures)**2 + self.bkg_rate_err**2)
 
         return net_counts  / self.exposures, dy
-    
+
+
 class KraftNoise(PoissonNoise):
-    def __init__(self, exposures, background_counts=None, bkg_rate_err=None, kraft_counts=15):
-        """Add Poisson/Kraft noise to a given count rates rates based on a real lightcurve and estimate the uncertainty
+    def __init__(
+            self,
+            exposures: ArrayLike,
+            background_counts: float|None = None,
+            bkg_rate_err: ArrayLike|None = None,
+            kraft_counts: float = 15
+    ):
+        """
+        Add Poisson/Kraft noise to a given count rates rates based on a real lightcurve and estimate the uncertainty
 
         Parameters
         ----------
-
         bkg_counts: float or np.ndarray
             The number of background counts. None will assume 0s
         exposures: array
@@ -70,15 +105,26 @@ class KraftNoise(PoissonNoise):
         self.name = "Kraft"
         self.kraft_counts = kraft_counts
 
-    def add_noise(self, rates):
-        """Add Poisson/Kraft noise to a given count rates rates based on a real lightcurve and estimate the uncertainty
+    def add_noise(
+            self,
+            rates: ArrayLike
+    ) -> Tuple[ArrayLike, ArrayLike]:
+        """
+        Add Poisson/Kraft noise to a given count rates rates based on a real lightcurve and estimate the uncertainty
+
+        This method was tested for speed against a single for loop (instead of three list comprehension) and it was found to be faster using the lists (around 10% reduction in time from the for loop approach))
 
         Parameters
         ----------
-        rates: array
+        rates
             The count rates per second
 
-        This method was tested for speed against a single for loop (instead of three list comprehension) and it was found to be faster using the lists (around 10% reduction in time from the for loop approach))
+        Returns
+        -------
+        ArrayLike
+            New Poissonian modified rates
+        ArrayLike
+            Uncertainties on the rates
         """
         net_rates, dy = super().add_noise(rates)
         total_counts = net_rates * self.exposures + self.background_counts
@@ -105,12 +151,34 @@ class KraftNoise(PoissonNoise):
         return net_rates, dy
     
 class GaussianNoise(BaseNoise):
-    def __init__(self, exposures, sigma_noise):
+    def __init__(
+            self,
+            exposures: ArrayLike,
+            sigma_noise: float
+    ):
         super().__init__(name="Gaussian")
 
         self.sigma_noise = sigma_noise
 
-    def add_noise(self, rates):
+    def add_noise(
+            self,
+            rates: ArrayLike
+    ) -> Tuple[ArrayLike, ArrayLike]:
+        """
+        Add Gaussian noise to a given count rates rates based on a real lightcurve and estimate the uncertainty
+
+        Parameters
+        ----------
+        rates
+            The count rates per second
+
+        Returns
+        -------
+        ArrayLike
+            New Poissonian modified rates
+        ArrayLike
+            Uncertainties on the rates
+        """
         noisy_rates = rates + np.random.normal(scale=self.sigma_noise, size=len(rates))
         #dy = np.sqrt(rates * self._exposures) / self._exposures
         dy = self.sigma_noise * np.ones(len(rates))

@@ -1,0 +1,21 @@
+name: "Deploy Sphinx documentation"
+
+on:
+  push:
+    branches:
+    - main
+
+jobs:
+  pages:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+    - id: install_pandoc
+      run: sudo apt-get install pandoc
+    - id: deployment
+      uses: sphinx-notes/pages@v3
