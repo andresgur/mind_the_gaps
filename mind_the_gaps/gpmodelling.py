@@ -113,7 +113,7 @@ class GPModelling:
 
         elif meanmodel.lower()=="gaussian":
             sigma_guess = (self._lightcurve.duration) / 2
-            amplitude_guess = (maxy - np.min(y)) * np.sqrt(2 * np.pi)* sigma_guess
+            amplitude_guess = (maxy - np.min(self._lightcurve.y)) * np.sqrt(2 * np.pi)* sigma_guess
             mean_guess = self._lightcurve.times[len(self._lightcurve.times)//2]
             meanmodel = GaussianModel(mean_guess, sigma_guess, amplitude_guess,
                                       bounds=[(self._lightcurve.times[0], self._lightcurve.times[-1]), (0, self._lightcurve.duration),

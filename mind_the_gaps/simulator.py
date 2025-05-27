@@ -3,7 +3,7 @@
 # @Email:  a.gurpide-lasheras@soton.ac.uk
 # @Last modified by:   agurpide
 # @Last modified time: 26-04-2025
-from typing import Callable, Tuple, List, Literal, Dict
+from typing import Callable, Tuple, List, Literal, Dict, Union
 from astropy.units import Quantity
 from lmfit.model import ModelResult
 from numpy.typing import ArrayLike, NDArray
@@ -146,19 +146,19 @@ class Simulator:
     """
     def __init__(
             self,
-            psd_model: Callable|AstropyModel,
+            psd_model: Union[Callable, AstropyModel],
             times: ArrayLike,
-            exposures: float|ArrayLike,
+            exposures: Union[float, ArrayLike],
             mean: float,
             pdf: str = "gaussian",
-            bkg_rate: ArrayLike|None = None,
-            bkg_rate_err: ArrayLike|None = None,
-            sigma_noise: float|None = None,
+            bkg_rate: Union[ArrayLike, None] = None,
+            bkg_rate_err: Union[ArrayLike, None] = None,
+            sigma_noise: Union[float, None] = None,
             aliasing_factor: float = 2,
             extension_factor: float = 10,
             epsilon: float = 1.001,
             max_iter: int = 400,
-            random_state: int|None = None
+            random_state: Union[int, None] = None
     ):
         """
         Parameters
@@ -265,14 +265,14 @@ class Simulator:
         return sim_info
     
     @property
-    def psd_model(self) -> Callable|AstropyModel:
+    def psd_model(self) -> Union[Callable, AstropyModel]:
         """Getter for the PSD model."""
         return self._psd_model
 
     @psd_model.setter
     def psd_model(
             self,
-            new_psd_model: Callable|AstropyModel
+            new_psd_model: Union[Callable, AstropyModel]
     ):
         """Setter for the PSD model."""
         if not callable(new_psd_model):
@@ -422,8 +422,8 @@ class Simulator:
 
 def add_poisson_noise(
         rates: ArrayLike,
-        exposures: float|ArrayLike,
-        background_counts: ArrayLike|None = None,
+        exposures: Union[float, ArrayLike],
+        background_counts: Union[ArrayLike, None] = None,
         bkg_rate_err: ArrayLike = None
 ) -> (ArrayLike, ArrayLike):
     """Add Poisson noise and estimate uncertainties
@@ -484,7 +484,7 @@ def draw_positive(
 
 
 def fit_pdf(
-    time_series: ArrayLike|Quantity,
+    time_series: Union[ArrayLike, Quantity],
     nbins: int = 20
 ) -> (ModelResult, List[str]):
     """
@@ -624,7 +624,7 @@ def cut_random_segment(lc, duration):
 def imprint_sampling_pattern(
         lightcurve: Lightcurve,
         timestamps: ArrayLike,
-        bin_exposures: float|ArrayLike,
+        bin_exposures: Union[float, ArrayLike],
 ) -> ArrayLike:
     """
     Modify the input lightcurve to have the input sampling pattern (timestamps and exposures) provided
@@ -698,11 +698,11 @@ def downsample(
 
 def tk95_sim(
         timestamps: ArrayLike,
-        psd_model: Callable|AstropyModel,
-        mean: float|Quantity,
-        sim_dt: float|None = None,
+        psd_model: Union[Callable, AstropyModel],
+        mean: Union[float, Quantity],
+        sim_dt: Union[float, None] = None,
         extension_factor: int = 20,
-        bin_exposures: float|ArrayLike|None = None
+        bin_exposures: Union[ArrayLike, float, None] = None
 ) -> ArrayLike:
     """
     Simulate one lightcurve using the method from Timmer and Koenig+95 with the input sampling (timestamps) and using a red-noise powerlaw model.
@@ -796,12 +796,12 @@ def check_pdfs(
 
 def E13_sim(
         timestamps: ArrayLike,
-        psd_model: Callable|AstropyModel,
+        psd_model: Union[Callable, AstropyModel],
         pdfs: ArrayLike = [norm(0, 1)],
         weights: ArrayLike = [1],
-        sim_dt: float|Quantity = None,
+        sim_dt: Union[float, Quantity] = None,
         extension_factor: float = 20,
-        bin_exposures: ArrayLike|None = None,
+        bin_exposures: Union[ArrayLike, None] = None,
         max_iter: int = 300
 ) -> Tuple:
     """
@@ -863,7 +863,7 @@ def E13_sim_TK95(
         lc: Lightcurve,
         pdfs: ArrayLike= [norm(0, 1)],
         weights: ArrayLike = [1],
-        exposures: ArrayLike|None = None,
+        exposures: Union[ArrayLike, None] = None,
         max_iter: int = 400
 ) -> ArrayLike:
     """
@@ -873,7 +873,7 @@ def E13_sim_TK95(
     ----------
     lc
         Regularly sampled TK95 generated lightcurve with the desired PSD (and taking into account, if desired, rednoise leakage and aliasing effects)
-    timestmaps
+    timestamps
         New desired timestmaps (in seconds)
     pdfs
         Probability density distribution to be matched
@@ -950,10 +950,10 @@ def E13_sim_TK95(
 
 
 def _normalize(
-        time_series: ArrayLike|Quantity,
-        mean: float|Quantity,
-        std: float|Quantity
-) -> ArrayLike|Quantity:
+        time_series: Union[ArrayLike, Quantity],
+        mean: Union[float, Quantity],
+        std: Union[float, Quantity]
+) -> Union[ArrayLike, Quantity]:
     """
     Normalize lightcurve to a desired mean and standard deviation
 
@@ -968,7 +968,7 @@ def _normalize(
 
     Returns
     -------
-    ArrayLike|Quantity
+    Union[ArrayLike, Quantity]
         Normalized lightcurve
     """
     # this sets the same variance

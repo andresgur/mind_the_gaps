@@ -3,7 +3,7 @@
 # @Email:  a.gurpide-lasheras@soton.ac.uk
 # @Last modified by:   agurpide
 # @Last modified time: 12-12-2024
-from typing import Tuple
+from typing import Tuple, Union
 from numpy import floating
 from numpy.typing import ArrayLike
 from mind_the_gaps.stats import kraft_pdf
@@ -30,8 +30,8 @@ class PoissonNoise(BaseNoise):
     def __init__(
             self,
             exposures: ArrayLike,
-            background_counts: float|floating|None = None,
-            bkg_rate_err: ArrayLike|None = None
+            background_counts: Union[float, floating, None] = None,
+            bkg_rate_err: Union[ArrayLike, None] = None
     ):
         super().__init__(name="Poisson")
 
@@ -67,7 +67,6 @@ class PoissonNoise(BaseNoise):
         ArrayLike
             Uncertainties on the rates
         """
-
         total_counts = rates * self.exposures + self.background_counts
 
         total_counts_poiss = np.random.poisson(total_counts)
@@ -83,8 +82,8 @@ class KraftNoise(PoissonNoise):
     def __init__(
             self,
             exposures: ArrayLike,
-            background_counts: float|None = None,
-            bkg_rate_err: ArrayLike|None = None,
+            background_counts: Union[float, None] = None,
+            bkg_rate_err: Union[ArrayLike, None] = None,
             kraft_counts: float = 15
     ):
         """

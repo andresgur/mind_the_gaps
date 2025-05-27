@@ -5,7 +5,6 @@
 # @Last modified time: 01-12-2021
 import numpy as np
 from astropy.time import Time
-import os
 import astropy.units as u
 import warnings
 
