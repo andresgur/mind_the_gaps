@@ -4,7 +4,7 @@
 # @Last modified by:   agurpide
 # @Last modified time: 28-02-2022
 import numpy as np
-from typing import List
+from typing import List, Union
 from numpy import floating
 from numpy.typing import ArrayLike, NDArray
 from random import sample
@@ -25,10 +25,10 @@ class GappyLightcurve:
             self,
             times: ArrayLike,
             y: ArrayLike,
-            dy: ArrayLike|None = None,
-            exposures: float|ArrayLike|None = None,
-            bkg_rate: ArrayLike|None = None,
-            bkg_rate_err: ArrayLike|None = None
+            dy: Union[ArrayLike, None] = None,
+            exposures: Union[float, ArrayLike, None] = None,
+            bkg_rate: Union[ArrayLike, None] = None,
+            bkg_rate_err: Union[ArrayLike, None] = None
     ):
         """
 
@@ -68,8 +68,6 @@ class GappyLightcurve:
 
         self._bkg_rate = bkg_rate if bkg_rate is not None else np.zeros(len(times))
         self._bkg_rate_err = bkg_rate_err if bkg_rate_err is not None else np.zeros(len(times))
-        
-        
 
     @property
     def times(self) -> ArrayLike:

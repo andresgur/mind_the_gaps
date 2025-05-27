@@ -1,10 +1,11 @@
 import numpy as np
 from scipy import stats, special
 from scipy.stats import lognorm, uniform
-import scipy as sp
 from scipy.optimize import minimize
 
+
 __all__ = ["kraft_pdf", "lognormal", "chi_cov", "chi_log_likehood", "chi_square", "create_log_normal", "create_uniform_distribution"]
+
 
 class kraft_pdf(stats.rv_continuous):
     """Posterior probability function based on Kraft+1991"""

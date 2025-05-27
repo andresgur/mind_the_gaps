@@ -17,7 +17,7 @@ import sys
 import toml
 import datetime
 
-from typing import Dict, Any
+from typing import Dict, Any, Union
 
 
 sys.path.insert(
@@ -165,7 +165,7 @@ intersphinx_mapping = {
 def linkcode_resolve(
         domain: str,
         info: Dict[str, Any],
-) -> str|None:
+) -> Union[str,None]:
     """
     Finds the path on GitHub for a given entry in the documentation.
     """
