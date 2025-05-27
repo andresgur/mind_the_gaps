@@ -16,6 +16,6 @@ jobs:
       id-token: write
     steps:
     - id: install_pandoc
-      run: sudo apt-get install pandoc
+      run: sudo apt-get install graphviz pandoc
     - id: deployment
       uses: sphinx-notes/pages@v3
