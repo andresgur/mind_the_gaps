@@ -139,7 +139,8 @@ def psd_ar1(tau, dt, df, frequencies, data_variance):
 
 
 def mudelsee_residuals(timestamps, rates, tau):
-    """Calculate residuals of the AR(1) fit using Equation 6 from Mudelsee et al. 2002.
+    """
+    Calculate residuals of the AR(1) fit using Equation 6 from Mudelsee et al. 2002.
 
     Parameters:
     -----------

@@ -4,6 +4,7 @@
 # @Last modified by:   smangham
 # @Last modified time: 09-01-2024
 import warnings
+from typing import Tuple
 
 import celerite
 import numpy as np
@@ -15,8 +16,8 @@ from mind_the_gaps.models.celerite.celerite_models import (
     Lorentzian,
 )
 
-two_pi = 2 * np.pi
-days_to_seconds = 24 * 3600
+two_pi: float = 2 * np.pi
+days_to_seconds: float = 24 * 3600
 
 
 class ConfigFileError(Exception):
@@ -26,15 +27,20 @@ class ConfigFileError(Exception):
         super().__init__(message)
 
 
-def read_config_file(config_file, walkers=32):
+def read_config_file(config_file: str, walkers: int = 32):
     """Read config file with model and parameter initial values and bounds.
 
     Parameters
     ----------
-    config_file:str,
+    config_file
         The config file
+    walkers
+        ???
 
-    Returns the kernel,
+    Returns
+    -------
+    Tuple
+        Returns the kernel, ???
     """
     try:
         model_info = np.genfromtxt(

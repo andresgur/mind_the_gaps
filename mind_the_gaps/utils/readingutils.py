@@ -345,6 +345,7 @@ def read_standard_lightcurve(input_file):
     input_file:str
         The input file to be read
     """
+
     lightcurve = np.genfromtxt(input_file, names=True)
     timestamps = lightcurve["t"] << u.s
     rates = lightcurve["rate"]

@@ -20,7 +20,7 @@ from typing import Any, Dict, Union
 
 import toml
 
-# sys.path.insert(0, os.path.abspath("../."))
+sys.path.insert(0, os.path.abspath("../."))
 pyproject = toml.load("../pyproject.toml")
 
 # -- Project information -----------------------------------------------------
@@ -71,7 +71,6 @@ source_suffix = {
     ".txt": "markdown",
     ".md": "markdown",
 }
-
 
 # The master toctree document.
 master_doc = "index"

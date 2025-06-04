@@ -21,7 +21,6 @@ from mind_the_gaps.models.psd_models import (
 
 
 class TestSimulator(unittest.TestCase):
-
     def test_DRW(self):
         Q = 1 / 2
         S_0 = 10
@@ -86,4 +85,5 @@ class TestSimulator(unittest.TestCase):
 
 
 if __name__ == "__main__":
+
     unittest.main()

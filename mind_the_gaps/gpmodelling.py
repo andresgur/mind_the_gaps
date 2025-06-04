@@ -269,13 +269,14 @@ class GPModelling:
     def get_psd(self):
         return self.modelling_engine.gp.get_psd
 
-    def standarized_residuals(self, include_noise=True):
-        """Returns the standarized residuals (see e.g. Kelly et al. 2011) Eq. 49.
+    def standarized_residuals(self, include_noise: bool = True):
+        """
+        Returns the standarized residuals (see e.g. Kelly et al. 2011) Eq. 49.
         You should set the gp parameters to your best or mean (median) parameter values prior to calling this method
 
         Parameters
         ----------
-        include_noise: bool,
+        include_noise
             True to include any jitter term into the standard deviation calculation. False ignores this contribution.
         """
         return self.modelling_engine.gp.standarized_residuals()
@@ -296,25 +297,39 @@ class GPModellingComparison:
         lightcurve: GappyLightcurve,
         **modelling_kwargs: Mapping[str, Any],
     ):
+        def _get_gpmodel_handle_kwargs(kernel_spec, lightcurve, mean_params, **kwargs):
+            args = {
+                "kernel_spec": kernel_spec,
+                "lightcurve": lightcurve,
+                **kwargs,
+            }
+            if mean_params is not None:
+                args["mean_params"] = mean_params
+            return GPModelling(**args)
 
         self.null_kernel_spec = null_kernel_spec
         self.alt_kernel_spec = alt_kernel_spec
         self.lightcurve = lightcurve
 
         self.likelihoods = []
-        self.null_modelling_kwargs = modelling_kwargs.pop("null_kwargs", {})
-        self.alt_modelling_kwargs = modelling_kwargs.pop("alt_kwargs", {})
+        null_mean_params = None
+        alt_mean_params = None
+        if mean_params := modelling_kwargs.pop("mean_params", None):
+            null_mean_params = mean_params[0]
+            alt_mean_params = mean_params[1]
 
-        self.null_model = GPModelling(
+        self.null_model = _get_gpmodel_handle_kwargs(
             kernel_spec=null_kernel_spec,
             lightcurve=lightcurve,
-            **self.null_modelling_kwargs,
+            mean_params=null_mean_params,
+            **modelling_kwargs,
         )
 
-        self.alt_model = GPModelling(
+        self.alt_model = _get_gpmodel_handle_kwargs(
             kernel_spec=alt_kernel_spec,
             lightcurve=lightcurve,
-            **self.alt_modelling_kwargs,
+            mean_params=alt_mean_params,
+            **modelling_kwargs,
         )
 
     def derive_posteriors(self, **engine_kwargs: Mapping[str, Any]):

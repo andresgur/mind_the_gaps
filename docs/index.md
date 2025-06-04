@@ -10,4 +10,8 @@
 self
 structure
 examples
+<<<<<<< HEAD
 ```
+=======
+```
+>>>>>>> main
