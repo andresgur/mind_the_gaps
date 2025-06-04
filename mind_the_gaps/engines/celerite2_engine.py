@@ -1,25 +1,16 @@
 import copy
-import pprint as pp
 import warnings
-from functools import partial
 from multiprocessing import Pool
-from typing import Callable, Dict, List
+from typing import Dict, List
 
 import arviz as az
-import celerite
-import celerite2.jax
-import emcee
 import jax
-import jax.experimental
 import jax.numpy as jnp
 import jaxopt
 import matplotlib.pyplot as plt
 import numpy as np
 import numpyro
-from jax import random
-from jaxopt import ScipyBoundedMinimize
-from numpyro.handlers import seed, trace
-from numpyro.infer import AIES, ESS, MCMC, NUTS
+from numpyro.infer import MCMC, NUTS, Predictive
 from numpyro.infer.initialization import init_to_value
 
 from mind_the_gaps.engines.gp_engine import BaseGPEngine
@@ -29,6 +20,15 @@ from mind_the_gaps.models.kernel_spec import KernelSpec
 
 
 class Celerite2GPEngine(BaseGPEngine):
+    """Celerite2 Gaussian Process Engine, used for modelling lightcurves using the Celerite2 library with Numpyro MCMC sampling.
+    This engine wraps the CeleriteGP class and provides methods for fitting the GP, deriving posteriors, and generating lightcurves from the posteriors.
+    It allows for parallelized MCMC sampling and provides methods to check convergence, calculate autocorrelation times, and generate lightcurves from the derived posteriors.
+
+    Inherits from:
+    ---------------
+    BaseGP : Base class for Gaussian Process models
+    """
+
     posterior_params = {
         "fit",
         "max_steps",
@@ -42,28 +42,44 @@ class Celerite2GPEngine(BaseGPEngine):
         self,
         kernel_spec: KernelSpec,
         lightcurve: GappyLightcurve,
-        cpus: int,
         meanmodel: str = None,
         mean_params: jax.Array = None,
         seed: int = 0,
         fit_mean: bool = True,
-        bounds: dict = None,
     ):
+        """Initialise the Celerite2 Gaussian Process Engine with a kernel specification,
+
+        Parameters
+        ----------
+        BaseGPEngine : _base class for Gaussian Process engines
+        kernel_spec : KernelSpec
+            Specification of the kernel to use, containing the terms and their parameters.
+        lightcurve : GappyLightcurve
+            The lightcurve data to fit the Gaussian Process to.
+        meanmodel : str, optional
+            The type of mean model to use, can be "Constant", "Linear", "Gaussian" or "Fixed", defaults to None.
+        mean_params : jax.Array, optional
+            Parameters for the mean model, if applicable. If None, defaults to a fixed mean based on the lightcurve.
+        seed : int, optional
+            Random seed for reproducibility, by default 0.
+        fit_mean : bool, optional
+            Whether to fit the mean model parameters, by default True.
+        """
         self.kernel_spec = kernel_spec
         self._lightcurve = lightcurve
         self.seed = seed
         self.meanmodel = meanmodel
         self.fit_mean = fit_mean
-        if self.meanmodel is None:
+        if self.meanmodel is None or self.meanmodel.lower() == "fixed":
             self.fit_mean = False
 
         self.mean_params = mean_params
         self.rng_key = jax.random.PRNGKey(self.seed)
-        self.cpus = cpus
+        self.rng_key, subkey = jax.random.split(self.rng_key)
 
         numpyro.enable_x64()
         numpyro.set_platform("cpu")
-        numpyro.set_host_device_count(self.cpus)
+        #
         self.gp = Celerite2GP(
             kernel_spec=self.kernel_spec,
             lightcurve=self._lightcurve,
@@ -79,12 +95,28 @@ class Celerite2GPEngine(BaseGPEngine):
         self._autocorr = []
 
     def numpyro_model(
-        self, t: jax.Array, params: jax.Array = None, fit: bool = False
+        self,
+        t: jax.Array,
+        params: jax.Array | None = None,
+        fit: bool = False,
     ) -> None:
+        """Numpyro model for the Gaussian Process, which defines the prior distributions (Using the KernelSpec)
+        and the likelihood of the model given the lightcurve data. This method computes
+
+        Parameters
+        ----------
+        t : jax.Array
+            The time array of the lightcurve.
+        params : jax.Array, optional
+            parameters for the Gaussian Process, by default None
+        fit : bool, optional
+            whether the model is being fitted, i.e. during optimisation, or sampled, by default False
+        """
 
         self.gp.compute(t, params=params, fit=fit)
 
         log_likelihood = self.gp.log_likelihood(self._lightcurve.y)
+
         numpyro.deterministic("log_likelihood", log_likelihood)
         numpyro.sample(
             "obs",
@@ -94,6 +126,19 @@ class Celerite2GPEngine(BaseGPEngine):
         )
 
     def minimize(self) -> jax.Array:
+        """Minimize the negative log likelihood of the Gaussian Process using jaxopt L-BFGS-B method.
+        This method optimises the parameters of the Gaussian Process to fit the lightcurve data.
+        It uses the bounds defined in the kernel specification to ensure that the parameters remain within valid ranges.
+        The method returns the optimised parameters as a jax Array.
+        If the mean model is being fitted, it includes the mean model parameters in the optimisation.
+        The optimisation is performed using the ScipyBoundedMinimize solver from jaxopt.
+        The method also updates the Gaussian Process with the optimised parameters.
+
+        Returns
+        -------
+        jax.Array
+            The optimised parameters of the Gaussian Process after minimization.
+        """
 
         bounds = self.kernel_spec.get_bounds_array()
         upper_bounds = jnp.array([values[1] for values in bounds])
@@ -116,19 +161,23 @@ class Celerite2GPEngine(BaseGPEngine):
 
         return opt_params
 
-    def initialize_params(self, num_chains: int, std_dev=0.1) -> Dict:
-        """
-        Generate multiple initial parameter values for NUTS sampling, ensuring they
-        respect bounds and have a Gaussian spread.
+    def initialise_params(self, num_chains: int, std_dev=0.1) -> Dict:
+        """Initialise the parameters for the Gaussian Process by spreading
+        the initial values around their base values using a normal distribution.
+        This method generates a dictionary of parameters for each chain, where each parameter is perturbed
+        by a small random value drawn from a normal distribution centered around the base value.
 
-        Args:
-            init_params (list or array): Initial parameter values.
-            num_chains (int): Number of MCMC chains.
-            bounds (dict): Dictionary with parameter names as keys and (min, max) tuples as values.
-            std_dev (float): Standard deviation for Gaussian noise.
+        Parameters
+        ----------
+        num_chains : int
+            The number of chains to initialise parameters for.
+        std_dev : float, optional
+            Standard deviation for the normal distribution used to spread the parameters, by default 0.1.
 
-        Returns:
-            dict: Dictionary of JAX arrays with shape (num_chains, param_dim).
+        Returns
+        -------
+        Dict
+            A dictionary where keys are parameter names and values are jax arrays of spread values for each chain.
         """
         param_dict = {}
         i = 0
@@ -140,11 +189,12 @@ class Celerite2GPEngine(BaseGPEngine):
                 base_value = param_spec.value
                 low, high = param_spec.bounds
 
-                spread_values = base_value + np.random.normal(
-                    0, std_dev, size=num_chains
+                spread_values = (
+                    base_value
+                    + jax.random.normal(self.rng_key, shape=(num_chains,)) * std_dev
                 )
 
-                spread_values = np.clip(spread_values, float(low), float(high))
+                spread_values = jnp.clip(spread_values, float(low), float(high))
 
                 param_dict[f"term{i}_{param_name}"] = jnp.array(spread_values)
             i += 1
@@ -157,9 +207,34 @@ class Celerite2GPEngine(BaseGPEngine):
         max_steps: int,
         converge_steps: int,
         fit=True,
-        seed=0,
         progress=True,
     ) -> None:
+        """Derive the posterior distributions of the Gaussian Process parameters using MCMC sampling.
+        This method initialises the parameters, runs MCMC sampling using the Numpyro with the NUTS kernel,
+        and checks for convergence based on the autocorrelation time of the samples.
+        It updates the Gaussian Process with the sampled parameters and stores the samples for further analysis.
+
+        Parameters
+        ----------
+        num_warmup : int
+            Number of warmup steps for the MCMC sampling.
+        num_chains : int
+            Number of chains to run in parallel for MCMC sampling.
+        max_steps : int
+            Maximum number of steps for the MCMC sampling.
+        converge_steps : int
+            Number of steps to check for convergence in the MCMC sampling.
+        fit : bool, optional
+            Whether to fit the parameters before running MCMC, by default True.
+        progress : bool, optional
+            Whether to show a progress bar during MCMC sampling, by default True.
+
+        Raises
+        ------
+        ValueError
+            If `max_steps` is less than `converge_steps`, as it would not allow for at least one iteration of MCMC sampling.
+
+        """
 
         old_tau = jnp.inf
         if fit:
@@ -168,13 +243,13 @@ class Celerite2GPEngine(BaseGPEngine):
                 self.init_params[self.gp.meanmodel.sampled_parameters :]
             )
 
-        # fixed_params = self.initialize_params(num_chains=num_chains)
+        fixed_params = self.initialise_params(num_chains=num_chains)
 
         kernel = NUTS(
             self.numpyro_model,
             adapt_step_size=True,
             dense_mass=False,
-            # init_strategy=init_to_value(values=fixed_params),
+            init_strategy=init_to_value(values=fixed_params),
         )
         mcmc = MCMC(
             kernel,
@@ -189,7 +264,6 @@ class Celerite2GPEngine(BaseGPEngine):
         mcmc.run(
             self.rng_key,
             t=self._lightcurve.times,
-            # params=self.kernel_spec.get_param_array(),
         )
         state = mcmc.last_state
 
@@ -203,9 +277,12 @@ class Celerite2GPEngine(BaseGPEngine):
             jit_model_args=True,
         )
         mcmc.post_warmup_state = state
-        # need to inclue a saftey check so that this actually runs or errors
-        # will be thrown after the loop
-        for iteration in range(int(max_steps / converge_steps)):
+        num_iterations = int(max_steps / converge_steps)
+        if num_iterations < 1:
+            raise ValueError(
+                f"max_steps ({max_steps}) must be at least as large as converge_steps ({converge_steps}) to run at least one iteration."
+            )
+        for iteration in range(num_iterations):
             mcmc.run(
                 mcmc.post_warmup_state.rng_key,
                 t=self._lightcurve.times,
@@ -228,7 +305,7 @@ class Celerite2GPEngine(BaseGPEngine):
             self._autocorr.append(jnp.mean(tau))
 
             if jnp.all(tau * 100 < (iteration + 1) * converge_steps) and np.all(
-                np.abs(old_tau - tau) / tau < 0.01
+                jnp.abs(old_tau - tau) / tau < 0.01
             ):
                 print(f"MCMC converged after {(iteration+1)*converge_steps} steps.")
                 break
@@ -240,12 +317,24 @@ class Celerite2GPEngine(BaseGPEngine):
         self._loglikelihoods = idata.posterior["log_likelihood"].values
 
     def _generate_lc_from_params(self, params: jax.Array) -> GappyLightcurve:
+        """Generate a lightcurve from the Gaussian Process parameters.
+        This method creates a new GappyLightcurve instance by sampling from the Gaussian Process defined by the kernel specification.
+
+        Parameters
+        ----------
+        params : jax.Array
+            Parameters for the Gaussian Process, which include both the mean model parameters and the kernel parameters.
+
+        Returns
+        -------
+        GappyLightcurve
+            A new GappyLightcurve instance generated from the Gaussian Process parameters.
+        """
         kernel_spec = copy.deepcopy(self.kernel_spec)
         if self.gp.meanmodel.sampled_mean:
             mean_params = params[: self.gp.meanmodel.sampled_parameters]
             kernel_params = params[self.gp.meanmodel.sampled_parameters :]
 
-            # mean = self.meanmodel.compute_mean(fit=True, params=mean_params)
         else:
             mean_params = self.init_params[: self.gp.meanmodel.sampled_parameters]
             kernel_params = params
@@ -265,15 +354,27 @@ class Celerite2GPEngine(BaseGPEngine):
         lc = GappyLightcurve(self._lightcurve.times, noisy_rates, dy)
         return lc
 
-    def generate_from_posteriors(self, nsims: int):
-        if self._mcmc_samples is None:
-            raise RuntimeError(
-                "Posteriors have not been derived. Please run derive_posteriors prior to calling this method."
-            )
-        if nsims >= len(next(iter(self._mcmc_samples.values()))):
-            warnings.warn(
-                f"The number of simulation requested {nsims} is higher than the number of posterior samples {len(next(iter(self._mcmc_samples.values())))}, so many samples will be drawn more than once"
-            )
+    def generate_from_posteriors(self, nsims: int) -> List[GappyLightcurve]:
+        """Generate lightcurves from the posterior samples of the Gaussian Process.
+        This method samples from the posterior distributions of the parameters derived from MCMC sampling.
+        It generates a specified number of lightcurves by randomly selecting parameter sets from the posterior samples.
+
+        Parameters
+        ----------
+        nsims : int
+            The number of lightcurves to generate from the posterior samples.
+
+        Returns
+        -------
+        List[GappyLightcurve]
+            A list of GappyLightcurve instances generated from the posterior samples.
+
+        Raises
+        ------
+        RuntimeError
+            If the posteriors have not been derived yet, i.e., if `derive_posteriors` has not been called.
+        """
+
         flat_samples = {
             key: v.reshape(-1)
             for key, v in self._mcmc_samples.items()
@@ -281,6 +382,14 @@ class Celerite2GPEngine(BaseGPEngine):
         }
 
         total_samples = len(next(iter(flat_samples.values())))
+        if self._mcmc_samples is None:
+            raise RuntimeError(
+                "Posteriors have not been derived. Please run derive_posteriors prior to calling this method."
+            )
+        if nsims >= total_samples:
+            warnings.warn(
+                f"The number of simulation requested {nsims} is higher than the number of posterior samples {len(next(iter(self._mcmc_samples.values())))}, so many samples will be drawn more than once"
+            )
 
         sampled_indices = np.random.choice(total_samples, nsims, replace=True)
         sampled_params = np.column_stack(
@@ -293,13 +402,28 @@ class Celerite2GPEngine(BaseGPEngine):
 
         return lightcurves
 
-    def auto_window(self, taus: jax.Array, c: int) -> jax.Array:
+    def _auto_window(self, taus: jax.Array, c: int) -> jax.Array:
+        """Determine the window size for the autocorrelation function based on the specified threshold `c`.
+
+        Parameters
+        ----------
+        taus : jax.Array
+            The autocorrelation times as a jax array.
+        c : int
+            The threshold factor to determine the window size.
+
+        Returns
+        -------
+        jax.Array
+            The index of the first autocorrelation time that exceeds the threshold `c` times the autocorrelation time.
+            If no such index exists, returns the last index of `taus`.
+        """
         m = jnp.arange(len(taus)) < c * taus
         if jnp.any(m):
             return jnp.argmin(m)
         return len(taus) - 1
 
-    def function_1d(self, x: jax.Array) -> jax.Array:
+    def _function_1d(self, x: jax.Array) -> jax.Array:
         """Estimate the normalized autocorrelation function of a 1-D series
 
         Args:
@@ -313,23 +437,54 @@ class Celerite2GPEngine(BaseGPEngine):
         x = jnp.atleast_1d(x)
         if len(x.shape) != 1:
             raise ValueError("invalid dimensions for 1D autocorrelation function")
-        n = self.next_pow_two(len(x))
+        n = self._next_pow_two(len(x))
 
         f = jnp.fft.fft(x - jnp.mean(x), n=2 * n)
         acf = jnp.fft.ifft(f * jnp.conjugate(f))[: len(x)].real
         acf /= acf[0]
         return acf
 
-    def next_pow_two(self, n):
+    def _next_pow_two(self, n):
         """Returns the next power of two greater than or equal to `n`"""
         i = 1
         while i < n:
             i = i << 1
         return i
 
-    def _auto_corr_time(self, samples, num_chains, c=5, tol=50, quiet=False):
+    def _auto_corr_time(
+        self, samples: Dict, num_chains: int, c: int = 5, tol: int = 50, quiet=True
+    ) -> float:
+        """Estimate the autocorrelation time of the MCMC samples.
+        Jax version of the Emcee approach to get autocorrelation time. (See https://emcee.readthedocs.io/en/stable/user/autocorr/#autocorrelation-analysis)
 
-        x = jnp.stack([samples[key].T for key in samples.keys()], axis=-1)
+        Parameters
+        ----------
+        samples : Dict
+            Dictionary of MCMC samples, where keys are parameter names and values are jax arrays of samples.
+        num_chains : int
+            Number of chains in the MCMC samples.
+        c : int, optional
+            Step size of the window search, by default 5
+        tol : int, optional
+            Minimum number of autocorrelation times to trust the estimate, by default 50
+        quiet : bool, optional
+            Warn when chain is too short rather than raise a ValueError, by default False
+
+        Returns
+        -------
+        jax.Array
+            An estimate of the integrated autocorrelation time of the chain for each parameter.
+
+        Raises
+        ------
+        ValueError
+            If the dimensions of the input samples are invalid or if the chain is shorter than the specified tolerance times the integrated autocorrelation time.
+        """
+
+        x = jnp.stack(
+            [samples[key].T for key in samples.keys() if key != "log_likelihood"],
+            axis=-1,
+        )
         x = jnp.atleast_1d(x)
 
         if len(x.shape) == 2:
@@ -341,35 +496,31 @@ class Celerite2GPEngine(BaseGPEngine):
         tau_est = jnp.empty(n_d)
         windows = jnp.empty(n_d, dtype=int)
 
-        # Loop over parameters
         for d in range(n_d):
             f = jnp.zeros(n_t)
             for c in range(n_c):
-                f += self.function_1d(x[:, c, d])
+                f += self._function_1d(x[:, c, d])
             f /= n_c
             taus = 2.0 * jnp.cumsum(f) - 1.0
-            windows = windows.at[d].set(self.auto_window(taus, c))
+            windows = windows.at[d].set(self._auto_window(taus, c))
             tau_est = tau_est.at[d].set(taus[windows[d]])
-
-        # Check convergence
-        flag = tol * tau_est > n_t
-
-        # Warn or raise in the case of non-convergence
-        if jnp.any(flag):
-            msg = (
-                "The chain is shorter than {0} times the integrated "
-                "autocorrelation time for {1} parameter(s). Use this estimate "
-                "with caution and run a longer chain!\n"
-            ).format(tol, jnp.sum(flag))
-            msg += "N/{0} = {1:.0f};\ntau: {2}".format(tol, n_t / tol, tau_est)
-            if not quiet:
-                pass
-                # raise Exception
 
         return tau_est
 
     @property
-    def max_loglikelihood(self):
+    def max_loglikelihood(self) -> float:
+        """Return the maximum loglikelihood from the derived posteriors.
+
+        Returns
+        -------
+        float
+            The maximum loglikelihood value from the derived posteriors.
+
+        Raises
+        ------
+        AttributeError
+            If the posteriors have not been derived yet, i.e., if `derive_posteriors` has not been called.
+        """
         if self._loglikelihoods is None:
             raise AttributeError(
                 "Posteriors have not been derived. Please run \
@@ -380,6 +531,18 @@ class Celerite2GPEngine(BaseGPEngine):
 
     @property
     def autocorr(self) -> List[float]:
+        """Return the autocorrelation time of the chains.
+
+        Returns
+        -------
+        List[float]
+            The autocorrelation time for each parameter in the chains.
+
+        Raises
+        ------
+        AttributeError
+            If the posteriors have not been derived yet, i.e., if `derive_posteriors` has not been called.
+        """
         if self._autocorr is None:
             raise AttributeError(
                 "Posteriors have not been derived. Please run \
@@ -389,31 +552,88 @@ class Celerite2GPEngine(BaseGPEngine):
         return self._autocorr
 
     @property
-    def max_parameters(self):
-        """Return the parameters that maximize the loglikehood"""
+    def max_parameters(self) -> jax.Array:
+        """Return the parameters corresponding to the maximum loglikelihood.
+
+        Returns
+        -------
+        jax.Array
+            An array containing the parameters corresponding to the maximum loglikelihood from the derived posteriors.
+
+        Raises
+        ------
+        AttributeError
+            If the posteriors have not been derived yet, i.e., if `derive_posteriors` has not been called.
+        """
         if self._mcmc_samples is None:
             raise AttributeError(
                 "Posteriors have not been derived. Please run \
                     derive_posteriors prior to populate the attributes."
             )
-        return self._mcmc_samples[jnp.argmax(self._loglikelihoods)]
+        flat_idx = jnp.argmax(self._loglikelihoods)
+        idx = jnp.unravel_index(flat_idx, self._loglikelihoods.shape)
+        chain_idx = int(idx[0])
+        step_idx = int(idx[1])
+
+        # Extract and stack the parameter values at that index (excluding log_likelihood)
+        values = [
+            self._mcmc_samples[param][chain_idx, step_idx]
+            for param in self._mcmc_samples
+            if param != "log_likelihood"
+        ]
+
+        return jnp.array(values)
 
     @property
-    def median_parameters(self):
+    def median_parameters(self) -> jax.Array:
+        """Return the median parameters from the derived posteriors.
+
+        Returns
+        -------
+        jax.Array
+            An array containing the median parameters from the derived posteriors.
+
+        Raises
+        ------
+        AttributeError
+            If the posteriors have not been derived yet, i.e., if `derive_posteriors` has not been called.
+        """
         if self._mcmc_samples is None:
             raise AttributeError(
                 "Posteriors have not been derived. Please run \
                 derive_posteriors prior to populate the attributes."
             )
-        return jnp.median(self._mcmc_samples, axis=0)
+        return [
+            jnp.median(self._mcmc_samples[param].reshape(-1))
+            for param in self._mcmc_samples
+            if param != "log_likelihood"
+        ]
 
     @property
-    def parameter_names(self):
-        raise NotImplementedError
+    def parameter_names(self) -> List[str]:
+        """Return the names of the parameters in the Gaussian Process.
+
+        Returns
+        -------
+        List[str]
+            A list of parameter names used in the Gaussian Process.
+        """
+        self.gp.get_parameter_names()
 
     @property
-    def tau(self):
-        """The autocorrelation time of the chains"""
+    def tau(self) -> jax.Array:
+        """Return the autocorrelation time of the chains.
+
+        Returns
+        -------
+        jax.Array
+            An array containing the autocorrelation time for each parameter in the chains.
+
+        Raises
+        ------
+        AttributeError
+            If the posteriors have not been derived yet, i.e., if `derive_posteriors` has not been called.
+        """
         if self._mcmc_samples is None:
             raise AttributeError(
                 "Posteriors have not been derived. Please run \

@@ -41,11 +41,12 @@ class BaseGPEngine(metaclass=ABCMeta):
             )
 
     @classmethod
-    def validate_kwargs(cls, kwargs):
+    def validate_posterior_kwargs(cls, kwargs):
         for key in kwargs:
             if key not in cls.posterior_params:
+
                 raise ValueError(
-                    f"Invalid parameter '{key}' for {cls.__name__}. "
+                    f"Invalid parameter for derive_posteriors '{key}' for {cls.__name__}. "
                     f"Allowed parameters: {cls.posterior_params}"
                 )
 

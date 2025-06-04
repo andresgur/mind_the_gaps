@@ -5,16 +5,20 @@
 # @Last modified time: 28-05-2024
 
 import os
+import sys
 
 import jax.numpy as jnp
 from jax import config
 
 config.update("jax_enable_x64", True)
 
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Any, List, Mapping, Union
 
 import celerite
 import corner
+import jax
 import numpy as np
 from celerite2.jax.terms import Term
 from matplotlib import pyplot as plt
@@ -37,7 +41,7 @@ class GPModelling:
         # kernel: Union[celerite.modeling.Model, Kernel, Term],
         kernel_spec: KernelSpec,
         lightcurve: GappyLightcurve,
-        mean_model: str = None,
+        meanmodel: str = None,
         fit_mean: bool = True,
         model_type: str = "auto",
         **modelling_kwargs: Mapping[str, Any],
@@ -65,90 +69,92 @@ class GPModelling:
             kernel_spec=kernel_spec,
             lightcurve=lightcurve,
             model_type=model_type,
-            mean_model=mean_model,
+            meanmodel=meanmodel,
             fit_mean=fit_mean,
             **modelling_kwargs,
         )
 
     def _select_modelling_engine(
         self,
-        kernel_spec: KernelSpec,  # Union[celerite.modeling.Model, Kernel, Term],
+        kernel_spec: KernelSpec,
         lightcurve: GappyLightcurve,
-        model_type: str,
-        mean_model: str,
-        fit_mean: bool,
-        **modelling_kwargs: Mapping[str, Any],
-    ) -> Union[CeleriteGPEngine | Celerite2GPEngine]:
+        model_type: str = "auto",
+        meanmodel: str = None,
+        fit_mean: bool = True,
+        mean_params: jax.Array = None,
+        seed: int = 0,
+    ) -> Union[CeleriteGPEngine, Celerite2GPEngine]:
         """
-        Select GP  modelling engine.
+        Factory method to select and instantiate the appropriate GP modelling engine.
 
         Parameters
         ----------
-        kernel_spec : kernelSpec
-            Specification for kernel to be built.
+        kernel_spec : KernelSpec
+            Specification of the GP kernel (e.g., celerite or celerite2).
         lightcurve : GappyLightcurve
-            An instance of a lightcurve.
-        mean_model : str, optional
-            Mean model. If given it will be fitted, otherwise assumed the mean value.
-            Available implementations are Constant, Linear and Gaussian., by default None
-        fit_mean : bool, optional
-            Whether to fit the mean, by default True
+            Lightcurve data to be modelled.
         model_type : str, optional
-            User can select the model/kernel type, "auto", "celerite", "celerite2", "tinygp"
-            by default "auto" in which case the GP engine is selected based on the type of kernel.
+            Which model type to use: "auto", "celerite", "celerite2".
+            Defaults to "auto", which selects the model based on kernel type.
+        meanmodel : str, optional
+            Mean model to use ("constant", "linear", etc.). Defaults to None.
+        fit_mean : bool, optional
+            Whether to fit the mean model parameters. Defaults to True.
+        mean_params : jax.Array, optional
+            Initial mean model parameters (used in celerite2 only).
+        seed : int, optional
+            Random seed (used in celerite2 only). Defaults to 0.
+        **kwargs : dict
+            Additional keyword arguments (currently unused).
 
         Returns
         -------
-        Union[CeleriteGPEngine]
-            GP modelling engine.
+        Union[CeleriteGPEngine, Celerite2GPEngine]
+            An instance of the appropriate GP modelling engine.
 
         Raises
         ------
         ValueError
-            If model_type is not valid, or if the type of kernel is unrecognised.
-
+            If model_type is invalid or kernel type is unrecognized.
         """
         if model_type.lower() == "auto":
             if issubclass(kernel_spec.terms[0].term_class, celerite.modeling.Model):
-                return CeleriteGPEngine(
-                    kernel_spec=kernel_spec,
-                    lightcurve=lightcurve,
-                    mean_model=mean_model,
-                    fit_mean=fit_mean,
-                )
+                model_type = "celerite"
             elif issubclass(kernel_spec.terms[0].term_class, Term):
-                return Celerite2GPEngine(
-                    kernel_spec=kernel_spec,
-                    lightcurve=lightcurve,
-                    **modelling_kwargs,
-                )
-            elif issubclass(kernel_spec.terms[0].term_class, Kernel):
-                raise NotImplementedError(f"TinyGPEngine not implemented.")
+                model_type = "celerite2"
+            elif isinstance(kernel_spec.terms[0].term_class, Kernel):
+                model_type = "tinygp"
             else:
                 raise ValueError(
-                    f"Unrecognised kernel type: {type(kernel_spec.terms[0].term_class)}"
+                    f"Unrecognized kernel type: {kernel_spec.terms[0].term_class}"
                 )
-        elif model_type.lower() == "celerite":
+
+        if model_type == "celerite":
             return CeleriteGPEngine(
                 kernel_spec=kernel_spec,
                 lightcurve=lightcurve,
-                mean_model=mean_model,
+                meanmodel=meanmodel,
                 fit_mean=fit_mean,
             )
-        elif model_type.lower() == "celerite2":
+        elif model_type == "celerite2":
             return Celerite2GPEngine(
                 kernel_spec=kernel_spec,
                 lightcurve=lightcurve,
-                **modelling_kwargs,
+                meanmodel=meanmodel,
+                mean_params=mean_params,
+                seed=seed,
+                fit_mean=fit_mean,
             )
-        elif model_type.lower() == "tinygp":
-            raise NotImplementedError(f"TinyGPEngine not implemented.")
+        elif model_type == "tinygp":
+            raise NotImplementedError(
+                "TinyGP is not yet implemented in mind_the_gaps. Please use celerite or celerite2."
+            )
         else:
-            raise ValueError(f"Unsupported model type: {model_type}")
+            raise ValueError(f"Unsupported model_type: {model_type}")
 
     def derive_posteriors(self, **engine_kwargs: Mapping[str, Any]):
         """Vaidate the engine kwargs and derive the posteriors."""
-        self.modelling_engine.validate_kwargs(engine_kwargs)
+        self.modelling_engine.validate_posterior_kwargs(engine_kwargs)
         self.modelling_engine.derive_posteriors(**engine_kwargs)
 
     def generate_from_posteriors(
@@ -368,3 +374,83 @@ class GPModellingComparison:
         plt.close()
 
         print(f"Plot saved at: {path}")
+
+    def process_lightcurves_par(self, nsims, par_workers=None, **engine_kwargs):
+        self.likelihoods_null = [None] * nsims
+        self.likelihoods_alt = [None] * nsims
+        lcs = self.null_model.generate_from_posteriors(nsims=nsims)
+
+        args_list = [
+            (
+                i,
+                lc,
+                self.null_kernel_spec,
+                self.null_modelling_kwargs,
+                self.alt_kernel_spec,
+                self.alt_modelling_kwargs,
+                engine_kwargs,
+            )
+            for i, lc in enumerate(lcs)
+        ]
+
+        with ProcessPoolExecutor(
+            max_workers=par_workers or multiprocessing.cpu_count()
+        ) as executor:
+            futures = [
+                executor.submit(_process_one_lightcurve, args) for args in args_list
+            ]
+
+            n_done = 0
+        for future in as_completed(futures):
+            i, null_ll, alt_ll = future.result()
+            self.likelihoods_null[i] = null_ll
+            self.likelihoods_alt[i] = alt_ll
+            n_done += 1
+            pct = (n_done / nsims) * 100
+            print(f"Processed {n_done}/{nsims} lightcurves ({pct:.1f}%)", end="\r")
+            sys.stdout.flush()
+
+    def likelihood_ratio_test(self, path: str = "LRT.png") -> None:
+        path = os.path.abspath(path)
+        plt.figure()
+        T_dist = -2 * (np.array(self.likelihoods_null) - np.array(self.likelihoods_alt))
+        plt.hist(T_dist, bins=10)
+        T_obs = -2 * (
+            self.null_model.max_loglikelihood - self.alt_model.max_loglikelihood
+        )
+        print("Observed LRT_stat: %.3f" % T_obs)
+        perc = percentileofscore(T_dist, T_obs)
+        print("p-value: %.4f" % (1 - perc / 100))
+        plt.axvline(T_obs, label="%.2f%%" % perc, ls="--", color="black")
+
+        sigmas = [95, 99.7]
+        colors = ["red", "green"]
+        for i, sigma in enumerate(sigmas):
+            plt.axvline(np.percentile(T_dist, sigma), ls="--", color=colors[i])
+        plt.legend()
+        plt.xlabel("$T_\\mathrm{LRT}$")
+        plt.savefig(path, dpi=300, bbox_inches="tight")
+        plt.close()
+
+        print(f"Plot saved at: {path}")
+
+
+def _process_one_lightcurve(args):
+    i, lc, null_kernel_spec, null_kwargs, alt_kernel_spec, alt_kwargs, engine_kwargs = (
+        args
+    )
+    null_modelling = GPModelling(
+        kernel_spec=null_kernel_spec, lightcurve=lc, **null_kwargs
+    )
+    null_modelling.derive_posteriors(**engine_kwargs)
+    null_ll = null_modelling.max_loglikelihood
+
+    alt_modelling = GPModelling(
+        kernel_spec=alt_kernel_spec,
+        lightcurve=lc,
+        **alt_kwargs,
+    )
+    alt_modelling.derive_posteriors(**engine_kwargs)
+    alt_ll = alt_modelling.max_loglikelihood
+
+    return i, null_ll, alt_ll

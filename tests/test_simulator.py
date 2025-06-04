@@ -1,11 +1,12 @@
 # @Author: Andrés Gúrpide <agurpide>
 # @Date:   28-03-2022
-# @Email:  agurpidelash@irap.omp.eu
+# @Email:  agl1f22@soton.ac.uk
 # @Last modified by:   agurpide
-# @Last modified time: 28-03-2022
+# @Last modified time: 07-05-2025
 import time
 import unittest
 
+import matplotlib.pyplot as plt
 import numpy as np
 from astropy.modeling.powerlaws import (
     BrokenPowerLaw1D,
@@ -13,7 +14,7 @@ from astropy.modeling.powerlaws import (
     SmoothlyBrokenPowerLaw1D,
 )
 from scipy.optimize import minimize
-from scipy.stats import lognorm, rv_continuous
+from scipy.stats import fit, lognorm, norm, uniform
 
 from mind_the_gaps.lightcurves import GappyLightcurve
 from mind_the_gaps.models.psd_models import BendingPowerlaw, Lorentzian
@@ -38,161 +39,39 @@ class TestSimulator(unittest.TestCase):
         return frequencies, pow_spec
 
     def model_fit(self, params, freqs, powers):
-        model = BendingPowerlaw(np.exp(params[0]), np.exp(params[1]))(freqs * 2 * np.pi)
+        model = BendingPowerlaw(params[0], params[1])(freqs)
         S = s_statistic(powers, model)
         return S
 
     def test_slope_TK95(self):
+        """
+        Test the slope of the PSD is correct by simualting an ensemble of lightcurves
+        and checking the mean slop is consistent with the input slope value.
+        """
         dt = 0.5
         points = 500
         timestamps = np.arange(0, points, dt) + dt / 2
         input_beta = 1
         psd_model = PowerLaw1D(amplitude=1, alpha=input_beta)
-        mean = 0.5
-        start = time.time()
-        rate = tk95_sim(timestamps, psd_model, mean, dt, 1.05, dt)
-        end = time.time()
-        print(
-            "Time to simulate a %d point TK lightcurve: %.2fs"
-            % (len(timestamps), (end - start))
-        )
-        frequencies, pow_spec = self.power_spectrum(timestamps, rate)
-
-        psd_slope, err, psd_norm, psd_norm_err = fit_psd_powerlaw(frequencies, pow_spec)
-        self.assertAlmostEqual(
-            -input_beta,
-            psd_slope.value,
-            None,
-            "Slope of the power spectrum is not the same as the input at the 3 sigma level!",
-            3 * err,
+        simu = Simulator(
+            psd_model, timestamps, dt, 0, aliasing_factor=1, extension_factor=1.05
         )
         Nsims = 250
-        rates = [
-            tk95_sim(timestamps, psd_model, mean, dt, 1, dt) for n in np.arange(Nsims)
-        ]
-        slopes = np.empty(len(rates))
-        for index, rate in enumerate(rates):
+        slopes = np.empty(Nsims)
+        for index in np.arange(Nsims):
+            rate = (
+                simu.generate_lightcurve()
+            )  # tk95_sim(timestamps, psd_model, mean, dt, 1, dt)
             frequencies, pow_spec = self.power_spectrum(timestamps, rate)
-            psd_slope, err, psd_norm, psd_norm_err = fit_psd_powerlaw(
-                frequencies, pow_spec
-            )
+            psd_slope, err, _, _ = fit_psd_powerlaw(frequencies, pow_spec)
             slopes[index] = psd_slope.value
-        err = 3 * np.abs(np.std(slopes))
+        err = np.abs(np.std(slopes))
         self.assertAlmostEqual(
             -input_beta,
             np.mean(slopes),
             None,
             "Average slope of %d lightcurve is not the same as the input!" % Nsims,
             err,
-        )
-
-        # Increasing the binning of the simulated lightcurve
-        rates = [
-            tk95_sim(timestamps, psd_model, mean, dt, 2, dt) for n in np.arange(Nsims)
-        ]
-        slopes = np.empty(len(rates))
-        for index, rate in enumerate(rates):
-            frequencies, pow_spec = self.power_spectrum(timestamps, rate)
-            psd_slope, err, psd_norm, psd_norm_err = fit_psd_powerlaw(
-                frequencies, pow_spec
-            )
-            slopes[index] = psd_slope.value
-        err = np.abs(3 * np.std(slopes))
-        # self.assertAlmostEqual(-input_beta, np.mean(slopes), None, "Average slope of %d lightcurve is not the same as the input!" % Nsims, err)
-
-    def test_powerspec_bendingpowerlaw(self):
-        dt = 1  # 1 day
-        n = 1000
-        times = np.arange(0, dt * n, dt) * 3600 * 24
-        dummyrates = np.ones(len(times))
-        exposures = 2000 * np.ones(len(times))
-        lc = GappyLightcurve(times, dummyrates, np.ones(len(dummyrates)), exposures)
-        variance = 162754.0
-        bendscale = 10.0 * 3600 * 24  # days
-        omega0 = 2 * np.pi / bendscale
-        psd_model = BendingPowerlaw(S0=variance, omega0=omega0)
-        simu = lc.get_simulator(psd_model, "Gaussian")
-        bnds = ((0.1, 60), (-18, np.log(1e-4)))
-        # do 200 lightcurves and fit them
-        n_sims = 200
-        omegas = []
-        for i in range(n_sims):
-            lc_ = simu.simulator.prepare_segment(2)
-            freqs, powers = self.power_spectrum(lc_.time, lc_.countrate)
-            results = minimize(
-                self.model_fit,
-                [12, np.log(1e-6)],
-                args=(freqs, powers),
-                bounds=bnds,
-                method="L-BFGS-B",
-            )
-            omegas.append(results.x[1])
-        omegas = np.exp(omegas)
-        self.assertAlmostEqual(
-            np.mean(omegas),
-            omega0,
-            None,
-            delta=np.std(omegas),
-            msg="Bend of the Bending Powerlaw does not match simulated periodograms!",
-        )
-
-    def test_variance(self):
-        """Test that the powerspectrum has the correct area after simulation"""
-        psd_model = PowerLaw1D(amplitude=15, alpha=1)
-        sim_dt = 0.1 * 3600 * 24
-        bin_exposures = 0.8 * 3600 * 24
-        timestamps = np.arange(0, 1000 * 3600 * 24, bin_exposures)
-        lc = simulate_lightcurve(timestamps, psd_model, dt=sim_dt, extension_factor=5)
-        freqs = np.fft.rfftfreq(lc.n, sim_dt)
-        pow_spec = (np.absolute(np.fft.rfft(lc.countrate)[1:])) ** 2
-        frequencies = freqs[1:]
-        pow_spec *= 2 * lc.dt / lc.meanrate**2 / lc.n  # apply appropiate normalization
-        integral = np.median(np.diff(frequencies)) * np.sum(pow_spec)
-        rms = np.var(lc.countrate) / np.mean(lc.countrate) ** 2
-        self.assertAlmostEqual(
-            integral, rms, 1, msg="Area of the power spectrum is not equal to the RMS!"
-        )
-
-    def test_variance_celerite(self):
-        var = 10
-        freq = 2 * np.pi / 10  # 1 / 10 in rad
-        psd_model = BendingPowerlaw(S0=10, omega0=freq)
-        sim_dt = 0.05
-        timestamps = np.arange(0, 5000, sim_dt)
-        extension_factor = 10
-        vars = []
-
-        for i in range(25):
-            lc = simulate_lightcurve(
-                timestamps, psd_model, dt=sim_dt, extension_factor=extension_factor
-            )  # this is just to get tseg for df
-            vars.append(np.var(lc.countrate))
-        self.assertAlmostEqual(
-            var,
-            np.mean(vars),
-            delta=0.1,
-            msg="Variance is not the same in TK95 method!",
-        )
-
-        var = 10
-        freq = 2 * np.pi / 10  # 1 / 10 in rad
-        psd_model = Lorentzian(S0=var, omega0=freq, Q=10)
-        sim_dt = 0.05
-        timestamps = np.arange(0, 5000, sim_dt)
-        extension_factor = 10
-        vars = []
-
-        for i in range(25):
-            lc = simulate_lightcurve(
-                timestamps, psd_model, dt=sim_dt, extension_factor=extension_factor
-            )  # this is just to get tseg for df
-            vars.append(np.var(lc.countrate))
-
-        self.assertAlmostEqual(
-            var,
-            np.mean(vars),
-            delta=0.1,
-            msg="Variance is not the same in TK95 method!",
         )
 
     def test_slope_E13(self):
@@ -201,39 +80,30 @@ class TestSimulator(unittest.TestCase):
         points = 500
         timestamps = np.arange(0, points, dt) + dt / 2
         input_beta = 1
+        input_mean = 100
         psd_model = PowerLaw1D(amplitude=1, alpha=input_beta)
-        mean, std = 0.5, 0.1
-        dist = norm(scale=std, loc=mean)
-        start = time.time()
-        erate = E13_sim(timestamps, psd_model, [dist], [1], dt, 1, dt)
-        end = time.time()
-        print(
-            "Time to simulate a %d point lightcurve with the E13 method: %.2f s \n"
-            % (len(timestamps), (end - start))
-        )
-        frequencies, pow_spec = self.power_spectrum(timestamps, erate)
-        self.assertEqual(len(timestamps), len(erate))
-        psd_slope, err, psd_norm, psd_norm_err = fit_psd_powerlaw(frequencies, pow_spec)
-        self.assertAlmostEqual(
-            -input_beta,
-            psd_slope.value,
-            None,
-            "Slope of the power spectrum is not the same as the input at the 3 sigma level!",
-            3 * err,
+        simulator = Simulator(
+            psd_model,
+            timestamps,
+            dt,
+            input_mean,
+            "Lognormal",
+            extension_factor=1.05,
+            aliasing_factor=1,
         )
 
         Nsims = 250
-        erates = [
-            E13_sim(timestamps, psd_model, [dist], [1], dt, 1, dt)
-            for n in np.arange(Nsims)
-        ]
         slopes = np.empty(Nsims)
-        for index, rates in enumerate(erates):
-            frequencies, pow_spec = self.power_spectrum(timestamps, rates)
+        means = np.empty(Nsims)
+
+        for index in range(Nsims):
+            rate = simulator.generate_lightcurve()
+            frequencies, pow_spec = self.power_spectrum(timestamps, rate)
             psd_slope, err, psd_norm, psd_norm_err = fit_psd_powerlaw(
                 frequencies, pow_spec
             )
             slopes[index] = psd_slope.value
+            means[index] = np.mean(rate)
         err = 3 * np.abs(np.std(slopes))
         self.assertAlmostEqual(
             -input_beta,
@@ -242,252 +112,580 @@ class TestSimulator(unittest.TestCase):
             "Average slope of %d lightcurve is not the same as the input!" % Nsims,
             err,
         )
-        # Increasing the binning of the simulated lightcurve
-        erates = [
-            E13_sim(
-                timestamps,
-                psd_model,
-                [dist],
-                [1],
-                sim_dt=0.1,
-                extension_factor=2,
-                bin_exposures=dt,
-            )
-            for n in np.arange(Nsims)
-        ]
-        slopes = np.empty(Nsims)
-        for index, rates in enumerate(erates):
-            frequencies, pow_spec = self.power_spectrum(timestamps, rates)
-            psd_slope, err, psd_norm, psd_norm_err = fit_psd_powerlaw(
-                frequencies, pow_spec
-            )
-            slopes[index] = psd_slope.value
-        err = np.abs(3 * np.std(slopes))
+        err = 3 * np.abs(np.std(means))
         self.assertAlmostEqual(
-            -input_beta,
-            np.mean(slopes),
+            input_mean,
+            np.mean(means),
             None,
-            "Slope of the power spectrum is not the same as the input!",
-            err,
-        )
-        # test other method directly from TK95
-        lcs = [
-            simulate_lightcurve(timestamps, psd_model, dt, 1) for n in np.arange(Nsims)
-        ]
-        erates = [E13_sim_TK95(lc, timestamps, [dist], [1]) for lc in lcs]
-        slopes = np.empty(Nsims)
-        for index, rates in enumerate(erates):
-            frequencies, pow_spec = self.power_spectrum(timestamps, rates)
-            psd_slope, err, psd_norm, psd_norm_err = fit_psd_powerlaw(
-                frequencies, pow_spec
-            )
-            slopes[index] = psd_slope.value
-        err = np.abs(3 * np.std(slopes))
-        self.assertAlmostEqual(
-            -input_beta,
-            np.mean(slopes),
-            None,
-            "Slope of the power spectrum is not the same as the input!",
+            "Average mean count rate of %d lightcurve is not the same as the input!"
+            % Nsims,
             err,
         )
 
-    def test_std_mean_TK95(self):
+    def test_powerspec_bendingpowerlaw_TK95(self):
+        dt = 1  # 1 day
+        n = 1000
+        times = np.arange(0.5, dt * n, dt)
+        exposures = 0.2
+        variance = 100.0
+        bendscale = 20  # days
+        omega0 = 2 * np.pi / bendscale
+        psd_model = BendingPowerlaw(S0=variance, omega0=omega0)
+        simu = Simulator(
+            psd_model,
+            times,
+            exposures,
+            10,
+            "Gaussian",
+            extension_factor=1.0,
+            aliasing_factor=2,
+        )
+        bnds = ((1e-5, 1e5), (omega0 / 100, omega0 * 100))
+        # do 200 lightcurves and fit them
+        n_sims = 200
+        omegas = []
+        for i in range(n_sims):
+            rates = simu.generate_lightcurve()
+            freqs, powers = self.power_spectrum(times, rates)
+            results = minimize(
+                self.model_fit,
+                [variance, 1 / bendscale],
+                args=(freqs, powers),
+                bounds=bnds,
+                method="L-BFGS-B",
+            )
+            omegas.append(results.x[1] * 2 * np.pi)
+        self.assertAlmostEqual(
+            np.mean(omegas),
+            omega0,
+            None,
+            delta=np.std(omegas),
+            msg="Bend of the Bending Powerlaw does not match simulated periodograms!",
+        )
+
+    def test_powerspec_bendingpowerlaw_E13(self):
+        dt = 1  # 1 day
+        n = 1000
+        times = np.arange(0.5, dt * n, dt)
+        exposures = 0.2
+        variance = 100.0
+        bendscale = 20  # days
+        omega0 = 2 * np.pi / bendscale
+        psd_model = BendingPowerlaw(S0=variance, omega0=omega0)
+        simu = Simulator(
+            psd_model,
+            times,
+            exposures,
+            10,
+            "Lognormal",
+            extension_factor=1.0,
+            aliasing_factor=2,
+            max_iter=600,
+        )
+        bnds = ((1e-5, 1e5), (omega0 / 100, omega0 * 100))
+        # do 200 lightcurves and fit them
+        n_sims = 250
+        omegas = []
+        for i in range(n_sims):
+            rates = simu.generate_lightcurve()
+            freqs, powers = self.power_spectrum(times, rates)
+            results = minimize(
+                self.model_fit,
+                [variance, 1 / bendscale],
+                args=(freqs, powers),
+                bounds=bnds,
+                method="L-BFGS-B",
+            )
+            omegas.append(results.x[1] * 2 * np.pi)
+        self.assertAlmostEqual(
+            np.mean(omegas),
+            omega0,
+            None,
+            delta=np.std(omegas),
+            msg="Bend of the Bending Powerlaw does not match simulated periodograms!",
+        )
+
+    def test_powerspectrum_normalization(self):
+        """Test that the powerspectrum has the correct area after simulation"""
+        psd_model = PowerLaw1D(amplitude=1e-10, alpha=1)
+        exposures = 0.8
+        times = np.arange(0, 1000, exposures)
+        mean = 10000
+        simu = Simulator(
+            psd_model,
+            times,
+            exposures,
+            mean,
+            "Gaussian",
+            extension_factor=1.05,
+            aliasing_factor=8,
+        )
+        lc = simu.simulate_regularly_sampled()
+        freqs = np.fft.rfftfreq(lc.n, lc.dt)
+        pow_spec = (np.absolute(np.fft.rfft(lc.countrate)[1:])) ** 2
+        frequencies = freqs[1:]
+        pow_spec *= (
+            2 * lc.dt / np.mean(lc.countrate) ** 2 / lc.n
+        )  # apply appropiate normalization
+        integral = np.median(np.diff(frequencies)) * np.sum(pow_spec)
+        rms = np.var(lc.countrate) / np.mean(lc.countrate) ** 2
+        self.assertAlmostEqual(
+            integral,
+            rms,
+            delta=0.1,
+            msg="Area of the power spectrum is not equal to the RMS!",
+        )
+
+    def test_std_mean_and_variance_TK95(self):
         dt = 1
         timestamps = np.arange(0, 8500, dt)
         variance = 10
         psd_model = BendingPowerlaw(S0=variance, omega0=np.exp(-3))  # 126 seconds
         mean = 1
+        simu = Simulator(
+            psd_model,
+            timestamps,
+            dt,
+            mean,
+            "Gaussian",
+            extension_factor=1.05,
+            aliasing_factor=1,
+        )
         vars = []
-        for i in range(30):
-            rate = tk95_sim(
-                timestamps, psd_model, mean, dt, 1.01, dt
-            )  # this is just to get tseg for df
+        means = []
+        for i in range(100):
+            rate = simu.generate_lightcurve()
+            means.append(np.mean(rate))
             vars.append(np.var(rate))
 
-        self.assertAlmostEqual(variance, np.mean(vars), delta=0.5)
-        self.assertAlmostEqual(mean, np.mean(rate), delta=0.5)
+        self.assertAlmostEqual(variance, np.mean(vars), delta=np.std(vars))
+        self.assertAlmostEqual(mean, np.mean(means), delta=np.std(means))
 
-    def test_std_mean_E13(self):
+    def test_std_mean_and_variance_E13(self):
+        dt = 1
+        timestamps = np.arange(0, 8500, dt)
+        variance = 10
+        psd_model = BendingPowerlaw(S0=variance, omega0=np.exp(-3))  # 126 seconds
+        mean = 10
+        simu = Simulator(
+            psd_model,
+            timestamps,
+            dt,
+            mean,
+            "Lognormal",
+            extension_factor=1.05,
+            aliasing_factor=1,
+            max_iter=600,
+        )
+        vars = []
+        means = []
+        for i in range(150):
+            rate = simu.generate_lightcurve()
+            means.append(np.mean(rate))
+            vars.append(np.var(rate))
+
+        self.assertAlmostEqual(variance, np.mean(vars), delta=np.std(vars))
+        self.assertAlmostEqual(mean, np.mean(means), delta=np.std(means))
+
+    def test_downsampling_1(self):
+
+        np.random.seed(20)
+        timestamps = np.append(np.arange(1, 3.1, 2), np.arange(5, 7.1, 2))
+        exposures = 0.5
         dt = 0.1
-        timestamps = np.arange(0, 4000, dt) + dt / 2
-        input_beta = 1
-        psd_model = PowerLaw1D(amplitude=1, alpha=input_beta)
-        mean, std = 0.5, 0.1
-        var = std**2
-        dist = norm(scale=std, loc=mean)
-        rate_norm = E13_sim(timestamps, psd_model, [dist], [1], dt, 1, dt)
-        self.assertAlmostEqual(
-            std,
-            np.std(rate_norm),
-            2,
-            "Error standard deviation is not preserved for norm",
+        times = np.arange(0.5, 10.1, dt)
+        counts = np.linspace(5, 20, len(times))
+        countrates = counts / exposures
+
+        lc = Lightcurve(times, countrates, input_counts=False)
+        psd_model = PowerLaw1D(amplitude=10, alpha=2)
+        simu = Simulator(
+            psd_model, timestamps, exposures, 0, extension_factor=1.0, aliasing_factor=1
         )
-        self.assertAlmostEqual(
-            mean,
-            np.mean(rate_norm),
-            2,
-            "Error mean deviation is not preserved for norm",
+        idxstrue = [
+            [3, 4, 5, 6, 7],
+            [23, 24, 25, 26, 27],
+            [43, 44, 45, 46, 47],
+            [63, 64, 65, 66, 67],
+        ]
+        truerates = []
+        for idxtrue in idxstrue:
+            truerates.append(np.mean(countrates[idxtrue[0] : idxtrue[-1] + 1]))
+
+        downsampled_rates = simu.downsample(lc)
+        self.assertListEqual(
+            truerates, downsampled_rates, msg="Downsampling does not work!"
         )
-        # conver to lognormal params
-        mu = np.log((mean**2) / np.sqrt(var + mean**2))
-        sigma = np.sqrt(np.log(var / (mean**2) + 1))
-        dist = lognorm(sigma, scale=np.exp(mu))
-        rate_lognorm = E13_sim(timestamps, psd_model, [dist], [1], dt, 1, dt)
-        nbins = int(np.sqrt(len(rate_lognorm)))
-        lognorm_fit, prefixes = fit_pdf(rate_lognorm, nbins)
-        prefix = prefixes[0]
-        std_fit = lognorm_fit.params.get("%ssigma" % prefix).value
-        mean_fit = lognorm_fit.params.get("%scenter" % prefix).value
-        self.assertAlmostEqual(
-            np.std(rate_lognorm),
-            std,
-            2,
-            "Error distribution is not preserved for lognorm",
+
+    def test_downsampling_2(self):
+
+        np.random.seed(20)
+        timestamps = np.append(np.arange(1, 3.1, 2), np.arange(5, 7.1, 2))
+        exposures = 0.6
+        dt = 0.1
+        times = np.arange(0.5, 10.1, dt)
+        counts = np.linspace(5, 20, len(times))
+        countrates = counts / exposures
+
+        lc = Lightcurve(times, countrates, input_counts=False)
+        psd_model = PowerLaw1D(amplitude=10, alpha=2)
+        simu = Simulator(
+            psd_model, timestamps, exposures, 0, extension_factor=1.0, aliasing_factor=1
         )
-        self.assertAlmostEqual(
-            np.mean(rate_lognorm),
-            mean,
-            2,
-            "Error distribution is not preserved for lognorm",
+        idxstrue = [
+            [2, 3, 4, 5, 6, 7, 8],
+            [22, 23, 24, 25, 26, 27, 28],
+            [42, 43, 44, 45, 46, 47, 48],
+            [62, 63, 64, 65, 66, 67, 68],
+        ]
+        truerates = []
+        for idxtrue in idxstrue:
+            truerates.append(np.mean(countrates[idxtrue[0] : idxtrue[-1] + 1]))
+
+        downsampled_rates = simu.downsample(lc)
+        self.assertListEqual(
+            truerates, downsampled_rates, msg="Downsampling does not work!"
+        )
+
+    def test_downsampling_3(self):
+        timestamps = np.append(np.arange(1, 3.1, 2), np.arange(5, 7.1, 2))
+        exposures = 0.1
+        dt = 0.1
+        times = np.arange(0.5, 10.1, dt)
+        counts = np.linspace(5, 20, len(times))
+        countrates = counts / exposures
+
+        lc = Lightcurve(times, countrates, input_counts=False)
+        psd_model = PowerLaw1D(amplitude=10, alpha=2)
+        simu = Simulator(
+            psd_model, timestamps, exposures, 0, extension_factor=1.0, aliasing_factor=1
+        )
+
+        idxstrue = [[5], [25], [45], [65]]
+        truerates = []
+        for idxtrue in idxstrue:
+            truerates.append(np.mean(countrates[idxtrue[0] : idxtrue[-1] + 1]))
+
+        downsampled_rates = simu.downsample(lc)
+        self.assertListEqual(
+            truerates, downsampled_rates, msg="Downsampling does not work!"
         )
 
     def test_evenly_lc_duration(self):
 
-        sim_dt = 0.01
-        timestamps = np.arange(0, 10, sim_dt)
-        mean, std = 0.5, 0.1
+        sim_dts = np.arange(0.01, 0.1, 1)
         input_beta = 1
+        mean = 0.5
         psd_model = PowerLaw1D(amplitude=1, alpha=input_beta)
-        lc = simulate_lightcurve(timestamps, psd_model, sim_dt, extension_factor=50)
-        duration = timestamps[-1] - timestamps[0]
-        lc_cut = cut_random_segment(lc, duration)
-        self.assertAlmostEqual(
-            lc_cut.tseg,
-            duration,
-            None,
-            "Lightcurve duration is not preserved for regular timestamps!",
-            sim_dt,
-        )
+        for sim_dt in sim_dts:
+            timestamps = np.arange(0, 10, sim_dt)
+            simu = Simulator(psd_model, timestamps, sim_dt, mean, extension_factor=50)
+            lc = simu.simulate_regularly_sampled()
+            duration = timestamps[-1] - timestamps[0]
+            lc_cut = cut_random_segment(lc, duration)
+            # Calculate duration manually as stingray does not work
+            duration_cut = (lc_cut.time[-1] - lc_cut.dt / 2) - (
+                lc_cut.time[0] + lc_cut.dt / 2
+            )
+            self.assertAlmostEqual(
+                duration_cut,
+                duration,
+                None,
+                "Lightcurve duration is not preserved for regular timestamps!",
+                sim_dt,
+            )
 
     def test_unevenly_lc_duration(self):
-        sim_dt = 0.01
-        timestamps = np.cumsum(np.random.exponential(0.4, 150))
-        mean, std = 0.5, 0.1
+
+        exposures = 0.1
+        timestamps = np.arange(1, 3.1, 1)
+        mean = 50
         input_beta = 1
         psd_model = PowerLaw1D(amplitude=1, alpha=input_beta)
-        lc = simulate_lightcurve(timestamps, psd_model, sim_dt, extension_factor=50)
+        simu = Simulator(psd_model, timestamps, exposures, mean, extension_factor=50)
+        lc = simu.simulate_regularly_sampled()
         duration = timestamps[-1] - timestamps[0]
         lc_cut = cut_random_segment(lc, duration)
-        duration = timestamps[-1] - timestamps[0]
+        duration_cut = (lc_cut.time[-1] - lc_cut.dt / 2) - (
+            lc_cut.time[0] + lc_cut.dt / 2
+        )
         self.assertAlmostEqual(
             lc_cut.tseg,
-            duration,
+            duration_cut,
             None,
             "Lightcurve duration is not preserved for irregular timestamps!",
-            np.median(np.diff(timestamps)) + sim_dt,
+            np.median(np.diff(timestamps)),
         )
 
-    def test_lc_binning(self):
-        sim_dt = 0.01
-        timestamps = np.cumsum(np.random.exponential(0.4, 150))
-        mean, std = 0.5, 0.1
+    def test_lc_sampling(self):
+        """
+        Check that the lightcurve sampling is correct after cutting a random segment
+        for various expoure times
+        """
         input_beta = 1
+        mean = 0.5
+        exposures = [0.01, 0.1, 1]
         psd_model = PowerLaw1D(amplitude=1, alpha=input_beta)
-        lc = simulate_lightcurve(timestamps, psd_model, sim_dt, extension_factor=50)
-        duration = timestamps[-1] - timestamps[0]
-        lc_cut = cut_random_segment(lc, duration)
-        self.assertAlmostEqual(
-            lc_cut.dt, sim_dt, 3, "Lightcurve binning is not correct!"
-        )
 
-        dt = 0.1
-        timestamps = np.arange(0, 10, dt)
-        sim_dt = 0.05
-        lc = simulate_lightcurve(timestamps, psd_model, sim_dt, extension_factor=50)
-        lc_cut = cut_random_segment(lc, duration)
-        self.assertAlmostEqual(
-            lc_cut.dt, sim_dt, 3, "Lightcurve binning is not correct!"
-        )
-
-    def test_downsampling_basic(self):
-        real_dt = 0.5
-        times = np.arange(0, 10, real_dt) + real_dt
-        rates = np.arange(len(times))
-        new_dt = 2
-        timestamps = np.arange(0, 5, new_dt) + new_dt
-        lc = Lightcurve(times, rates, input_counts=False, skip_checks=True, dt=new_dt)
-        downsampled_rates = imprint_sampling_pattern(lc, timestamps, new_dt)
-        np.testing.assert_array_almost_equal(downsampled_rates, [3, 7, 11], 2)
-        np.testing.assert_equal(len(timestamps), len(downsampled_rates))
-
-        timestamps = np.arange(0, 8, new_dt) + new_dt
-        timestamps = np.delete(timestamps, 2)
-        lc = Lightcurve(times, rates, input_counts=False, dt=new_dt, skip_checks=True)
-        downsampled_rates = imprint_sampling_pattern(lc, timestamps, new_dt)
-        # import matplotlib.pyplot as plt
-        # plt.errorbar(times, rates, xerr=real_dt / 2)
-        # plt.errorbar(timestamps, downsampled_rates, xerr=new_dt / 2)
-        # plt.show()
-        np.testing.assert_array_almost_equal(downsampled_rates, [3, 7, 15], 2)
-        np.testing.assert_equal(len(timestamps), len(downsampled_rates))
-
-    def test_downsampling(self):
-        length = 500
-        sim_dt = 0.1
-        sampling = 1.0
-        tk_timestamps = np.arange(0, length, sampling)
-        model = PowerLaw1D(amplitude=10, alpha=1)
-        tk_lc = simulate_lightcurve(tk_timestamps, model, sim_dt, 2)
-        duration_sec = tk_timestamps[-1] + sampling - (tk_timestamps[0] - sampling)
-        tk_lc_cut = get_segment(tk_lc, duration_sec, 0)
-        tk_rate = downsample(tk_lc_cut, tk_timestamps, sampling)
-        indexstart = 6
-        bins = (
-            int(sampling / sim_dt) - 2
-        )  # the oversampling minus the neighbouring bins
-        for i in range(len(tk_rate)):
-            print(i)
-            self.assertAlmostEqual(
-                tk_rate[i],
-                np.mean(tk_lc_cut.countrate[indexstart + i : indexstart + bins]),
-                delta=0.5,
-                msg="Downsampling is not working!",
+        for dt in exposures:
+            timestamps = np.arange(0, 10, dt)
+            simu = Simulator(
+                psd_model, timestamps, dt, mean, extension_factor=50, aliasing_factor=1
             )
-            indexstart += bins
+            lc = simu.simulate_regularly_sampled()
+            duration = timestamps[-1] - timestamps[0]
+            lc_cut = cut_random_segment(lc, duration)
+            self.assertEqual(lc_cut.dt, dt, "Lightcurve binning is not correct!")
 
-    def test_bending_powerlaw(self):
 
-        bin_exposures = 0.8 / 3600 / 24  # 0.8 days
-        sim_dt = 0.1 / 3600 / 24  # 0.1 days
-        timestamps = np.arange(0, (2000 / 3600 / 24), bin_exposures)
-        bend = 1 / 100  # days
-        psd_model = SmoothlyBrokenPowerLaw1D(
-            amplitude=1, alpha_1=0, alpha_2=2, x_break=bend, delta=1 / 2
-        )
-        mean, sigma = np.exp(-2.82), 0.39
-        pdfs = [lognorm(sigma, scale=mean)]
-        weights = [1]
-        erates = E13_sim(
-            timestamps,
+class TestRegularlySampledBendingPowerlaw(unittest.TestCase):
+    @classmethod
+    def setUpClass(self):
+        np.random.seed(100)
+        self.variance = 1.0
+        bendscale = 200
+        omega0 = 2 * np.pi / bendscale
+        exposures = 0.2
+        times = np.arange(0, 20000, exposures)
+        self.inputmean = 100
+        psd_model = BendingPowerlaw(S0=self.variance, omega0=omega0)
+
+        simu = Simulator(
             psd_model,
-            pdfs,
-            weights,
-            sim_dt=sim_dt,
-            extension_factor=2,
-            max_iter=1000,
-            bin_exposures=bin_exposures,
+            times,
+            exposures,
+            self.inputmean,
+            "Gaussian",
+            extension_factor=1.05,
+            aliasing_factor=1,
         )
+        means = []
+        variances = []
+        for i in range(100):
+            lc = simu.simulate_regularly_sampled()
+            means.append(np.mean(lc.countrate))
+            variances.append(np.var(lc.countrate))
+        self.outputmean = np.mean(means)
+        self.outputvariance = np.mean(variances)
+
+    def test_mean(self):
+        """
+        Test that the simulated lightcurve has the correct mean count rate.
+
+        Over multiple simulations, the average of the mean countrates should
+        converge to the input value (here, 0), within expected statistical variation.
+        The tolerance is set to one-third of the sample standard deviation.
+        """
         self.assertAlmostEqual(
-            np.mean(erates),
+            self.outputmean,
+            self.inputmean,
+            delta=0.01,
+            msg="Mean is not right in regularly sampled lightcurve!",
+        )
+
+    def test_variance(self):
+        self.assertAlmostEqual(
+            self.outputvariance,
+            self.variance,
+            delta=0.02,
+            msg="Variance is not right in regularly sampled lightcurve!",
+        )
+
+
+class TestRegularlySampledLorentzian(unittest.TestCase):
+    @classmethod
+    def setUpClass(self):
+        np.random.seed(100)
+        self.variance = 1.0
+        bendscale = 200
+        omega0 = 2 * np.pi / bendscale
+        exposures = 0.2
+        times = np.arange(0, 50000, exposures)
+        self.inputmean = 100
+        psd_model = Lorentzian(S0=self.variance, omega0=omega0, Q=10)
+        simu = Simulator(
+            psd_model,
+            times,
+            exposures,
+            self.inputmean,
+            "Gaussian",
+            extension_factor=1.05,
+            aliasing_factor=1,
+        )
+        means = []
+        variances = []
+        for i in range(100):
+            lc = simu.simulate_regularly_sampled()
+            means.append(np.mean(lc.countrate))
+            variances.append(np.var(lc.countrate))
+        self.outputmean = np.mean(means)
+        self.outputvariance = np.mean(variances)
+
+    def test_mean(self):
+        """
+        Test that the simulated lightcurve has the correct mean count rate.
+
+        Over multiple simulations, the average of the mean countrates should
+        converge to the input value (here, 0), within expected statistical variation.
+        The tolerance is set to one-third of the sample standard deviation.
+        """
+        self.assertAlmostEqual(
+            self.outputmean,
+            self.inputmean,
+            delta=0.01,
+            msg="Mean is not right in regularly sampled lightcurve!",
+        )
+
+    def test_variance(self):
+        self.assertAlmostEqual(
+            self.outputvariance,
+            self.variance,
+            delta=0.02,
+            msg="Variance is not right in regularly sampled lightcurve!",
+        )
+
+
+class TestPDF(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        np.random.seed(15)
+        cls.dt = 1
+        cls.timestamps = np.arange(0, 1000000, cls.dt)
+        bend = 1000  #
+        omega = 2 * np.pi / bend
+        cls.psd_model = BendingPowerlaw(S0=10, omega0=omega)
+        cls.max_iter = 1000
+        cls.inputmean = 10
+        cls.extension_factor = 1.05
+
+    def get_segment_var(self, simulator):
+        lc = simulator.simulate_regularly_sampled()
+        segment = cut_random_segment(lc, simulator.sim_duration)
+        sample_std = np.std(segment.countrate)
+        pdf = simulator.simulator.pdfmethod(simulator.mean, sample_std)
+        adjusted_lc = simulator.simulator.adjust_lightcurve_pdf(
+            segment, pdf, max_iter=simulator.simulator.max_iter
+        )
+        input_var = sample_std**2
+        return adjusted_lc.countrate, input_var
+
+    def test_pdf_lognormal(self):
+        pdf_type = "Lognormal"
+        simulator = Simulator(
+            self.psd_model,
+            self.timestamps,
+            self.dt,
+            self.inputmean,
+            pdf_type,
+            extension_factor=self.extension_factor,
+            aliasing_factor=1,
+            max_iter=self.max_iter,
+        )
+        adjusted_counrate, inputvar = self.get_segment_var(simulator)
+        inputmu = np.log((self.inputmean**2) / np.sqrt(inputvar + self.inputmean**2))
+        inputsigma = np.sqrt(np.log(inputvar / (self.inputmean**2) + 1))
+        fitresult = fit(
+            lognorm,
+            adjusted_counrate,
+            guess={"loc": 0, "s": inputsigma, "scale": np.exp(inputmu)},
+            bounds={"loc": [0, 0], "s": [0, 1e4], "scale": [1e-3, 1e4]},
+        )
+        s, loc, scale = fitresult.params
+        mu = np.log(scale)
+        mean = np.exp(mu + s**2 / 2)
+        variance = (np.exp(s**2) - 1) * np.exp(2.0 * mu + s**2)
+        self.assertAlmostEqual(
             mean,
-            delta=sigma,
-            msg="E13 not working with SmoothlyBrokenPowerLaw1D (mean)",
+            self.inputmean,
+            delta=0.1,
+            msg=f"Mean in {pdf_type} lightcurves is not correct!",
         )
         self.assertAlmostEqual(
-            np.std(erates),
-            sigma,
-            delta=sigma,
-            msg="E13 not working with SmoothlyBrokenPowerLaw1D (sigma)",
+            variance,
+            inputvar,
+            delta=0.2,
+            msg=f"Variance in {pdf_type} lightcurves is not correct!",
+        )
+
+    def test_pdf_uniform(self):
+        pdf_type = "Uniform"
+        simu = Simulator(
+            self.psd_model,
+            self.timestamps,
+            self.dt,
+            self.inputmean,
+            pdf_type,
+            extension_factor=self.extension_factor,
+            aliasing_factor=1,
+            max_iter=self.max_iter,
+        )
+
+        adjusted_counrate, inputvar = self.get_segment_var(simu)
+        inputb = np.sqrt(3 * inputvar) + self.inputmean
+        inputa = 2 * self.inputmean - inputb
+        fitresult = fit(
+            uniform,
+            adjusted_counrate,
+            guess={"loc": inputa, "scale": inputb - inputa},
+            bounds={"loc": [0, 1e3], "scale": [1e-3, 1e4]},
+        )
+        loc, scale = fitresult.params
+        a = loc
+        b = loc + scale
+        mean = 0.5 * (a + b)
+        variance = 1 / 12 * (b - a) ** 2
+        self.assertAlmostEqual(
+            mean,
+            self.inputmean,
+            delta=0.01,
+            msg="Mean in {pdf_type} lightcurves is not correct!",
+        )
+        self.assertAlmostEqual(
+            variance,
+            inputvar,
+            delta=0.1,
+            msg="Variance in {pdf_type} lightcurves is not correct!",
+        )
+
+    def test_pdf_gaussian(self):
+        pdf_type = "Gaussian"
+        simulator = Simulator(
+            self.psd_model,
+            self.timestamps,
+            self.dt,
+            self.inputmean,
+            pdf_type,
+            extension_factor=self.extension_factor,
+            aliasing_factor=1,
+            max_iter=self.max_iter,
+        )
+
+        lc = simulator.simulate_regularly_sampled()
+        segment = cut_random_segment(lc, simulator.sim_duration)
+        inputvar = np.var(segment.countrate)
+        adjusted_countrates = simulator.simulator.adjust_pdf(
+            segment
+        )  # this method doesn't do anything in principle
+        fitresult = fit(
+            norm,
+            adjusted_countrates,
+            guess={"loc": self.inputmean, "scale": np.sqrt(inputvar)},
+            bounds={"loc": [0, 1e3], "scale": [1e-3, 1e4]},
+        )
+        loc, scale = fitresult.params
+        mean = loc
+        variance = scale**2
+        self.assertAlmostEqual(
+            mean,
+            self.inputmean,
+            delta=0.01,
+            msg="Mean in {pdf_type} lightcurves is not correct!",
+        )
+        self.assertAlmostEqual(
+            variance,
+            inputvar,
+            delta=0.01,
+            msg="Variance in {pdf_type} lightcurves is not correct!",
         )
 
 

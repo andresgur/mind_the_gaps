@@ -21,12 +21,13 @@ class CeleriteGP(BaseGP):
         kernel_spec: KernelSpec,
         lightcurve: GappyLightcurve,
         fit_mean: bool,
-        mean_model: str = None,
+        meanmodel: str = None,
     ):
         self._lightcurve = lightcurve
         self.kernel_spec = kernel_spec
         self.kernel = self._get_kernel()
-        self.mean_model, self.fit_mean = self._build_mean_model(meanmodel=mean_model)
+        self.mean_model, self.fit_mean = self._build_mean_model(meanmodel=meanmodel)
+
         self.fit_mean = fit_mean
         self.gp = celerite.GP(
             kernel=self.kernel, mean=self.mean_model, fit_mean=fit_mean
@@ -83,6 +84,11 @@ class CeleriteGP(BaseGP):
 
         elif meanmodel.lower() == "constant":
             meanlabels = ["$\mu$"]
+            meanmodel = ConstantModel(
+                self._lightcurve.mean,
+                bounds=[(np.min(self._lightcurve.y), np.max(self._lightcurve.y))],
+            )
+            return meanmodel, True
 
         elif meanmodel.lower() == "linear":
             slope_guess = np.sign(self._lightcurve.y[-1] - self._lightcurve.y[0])
@@ -180,5 +186,21 @@ class CeleriteGP(BaseGP):
         std_res = (self._lightcurve.y - pred_mean) / np.sqrt(pred_var)
         return std_res
 
-    def predict(self, y, **kwargs):
+    def predict(self, y, **kwargs) -> tuple:
+        """Compute the conditional predictive distribution of the model by calling celerite's predict method.
+
+        Parameters
+        ----------
+        y : np.ndarray
+            Observations at the coordinates of the lightcurve times.
+        **kwargs : dict
+            Additional keyword arguments to pass to the celerite predict method.
+        Returns
+        ------
+
+        tuple
+            mu, (mu, cov), or (mu, var) depending on the values of return_cov and
+            return_var. See https://celerite.readthedocs.io/en/stable/python/gp/#celerite.GP.predict.
+
+        """
         return self.gp.predict(y, **kwargs)

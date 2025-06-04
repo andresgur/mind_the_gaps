@@ -6,45 +6,59 @@ from typing import List, Tuple
 import celerite
 import emcee
 import numpy as np
-from celerite.modeling import ConstantModel, Model
 from scipy.optimize import OptimizeResult, minimize
 
 from mind_the_gaps.engines.gp_engine import BaseGPEngine
 from mind_the_gaps.gp.celerite_gaussian_process import CeleriteGP
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
-from mind_the_gaps.models.celerite.mean_models import (
-    GaussianModel,
-    LinearModel,
-    SineModel,
-)
 
 
 class CeleriteGPEngine(BaseGPEngine):
+    """Celerite Gaussian Process Engine, used for modelling lightcurves using the Celerite library with Emcee MCMC sampling.
+    This engine wraps the CeleriteGP class and provides methods for fitting the GP, deriving posteriors, and generating lightcurves from the posteriors.
+    It allows for parallelized MCMC sampling and provides methods to check convergence, calculate autocorrelation times, and generate lightcurves from the derived posteriors.
+
+    Inherits from:
+    ---------------
+    BaseGP : Base class for Gaussian Process models
+    """
 
     posterior_params = {
         "max_steps",
         "initial_chain_params",
         "fit",
         "converge",
-        "max_steps",
         "walkers",
         "cores",
         "progress",
+        "convergenece_steps",
     }
 
     def __init__(
         self,
         kernel_spec: celerite.modeling.Model,
         lightcurve: GappyLightcurve,
-        mean_model: str,
+        meanmodel: str,
         fit_mean: bool = True,
     ):
+        """Initialize the Celerite Gaussian Process Engine.
+        Parameters
+        ----------
+        kernel_spec : KernelSpec
+            The kernel specification for the Gaussian Process, defining the kernel terms and their parameters.
+        lightcurve : GappyLightcurve
+            The lightcurve data to fit the Gaussian Process to.
+        mean_model : str
+            The type of mean model to use, can be "Constant", "Linear", "Gaussian" or "Fixed".
+        fit_mean : bool, optional
+            Whether to fit the mean model parameters during the MCMC sampling, by default True.
+        """
 
         self._lightcurve = lightcurve
         self.gp = CeleriteGP(
             kernel_spec=kernel_spec,
             lightcurve=lightcurve,
-            mean_model=mean_model,
+            meanmodel=meanmodel,
             fit_mean=fit_mean,
         )
 
@@ -55,7 +69,7 @@ class CeleriteGPEngine(BaseGPEngine):
         self._mcmc_samples = None
 
     def _log_probability(self, params: List[float]) -> float:
-        """_summary_
+        """Set the GP Parameters and return the log probability of the posterior.
 
         Parameters
         ----------
@@ -107,6 +121,7 @@ class CeleriteGPEngine(BaseGPEngine):
         """
         if initial_params is None:
             initial_params = self.initial_params
+
         solution = minimize(
             self._neg_log_like,
             initial_params,
@@ -120,6 +135,7 @@ class CeleriteGPEngine(BaseGPEngine):
         initial_chain_params: np.array = None,
         fit: bool = True,
         converge: bool = True,
+        convergence_steps: int = 500,
         max_steps: int = 10000,
         walkers: int = 12,
         cores: int = 6,
@@ -160,7 +176,7 @@ class CeleriteGPEngine(BaseGPEngine):
                 walkers, initial_params, np.array(self.gp.get_parameter_bounds())
             )
 
-        every_samples = 500
+        every_samples = convergence_steps
         # This will be useful to testing convergence
         old_tau = np.inf
 
@@ -459,7 +475,19 @@ class CeleriteGPEngine(BaseGPEngine):
         return self._autocorr
 
     @property
-    def sampler(self):
+    def sampler(self) -> emcee.EnsembleSampler:
+        """Get the sampler used to derive the posteriors.
+
+        Returns
+        -------
+        emcee.EnsembleSampler
+            The sampler used to derive the posteriors.
+
+        Raises
+        ------
+        AttributeError
+            If the posteriors have not been derived.
+        """
         if self._loglikelihoods is None:
             raise AttributeError(
                 "Posteriors have not been derived. Please run \
@@ -468,7 +496,20 @@ class CeleriteGPEngine(BaseGPEngine):
         return self._sampler
 
     @property
-    def loglikelihoods(self):
+    def loglikelihoods(self) -> np.ndarray:
+        """Get the loglikelihoods of the posteriors.
+
+        Returns
+        -------
+        np.ndarray
+            Array containing the loglikelihoods of the posteriors.
+
+
+        Raises
+        ------
+        AttributeError
+            If the posteriors have not been derived.
+        """
         if self._loglikelihoods is None:
             raise AttributeError(
                 "Posteriors have not been derived. Please run \
@@ -477,7 +518,19 @@ class CeleriteGPEngine(BaseGPEngine):
         return self._loglikelihoods
 
     @property
-    def max_loglikelihood(self):
+    def max_loglikelihood(self) -> float:
+        """Return the maximum loglikelihood from the thinned and burned chains.
+
+        Returns
+        -------
+        float
+            Maximum loglikelihood from the thinned and burned chains.
+
+        Raises
+        ------
+        AttributeError
+            If the posteriors have not been derived.
+        """
         if self._loglikelihoods is None:
             raise AttributeError(
                 "Posteriors have not been derived. Please run \
@@ -487,8 +540,20 @@ class CeleriteGPEngine(BaseGPEngine):
         return np.max(self._loglikelihoods)
 
     @property
-    def max_parameters(self):
-        """Return the parameters that maximize the loglikehood"""
+    def max_parameters(self) -> np.ndarray:
+        """Return the parameters that maximize the loglikehood
+
+        Returns
+        -------
+        np.ndarray
+            The parameters that maximize the loglikelihood from the thinned and burned chains._
+
+        Raises
+        ------
+        AttributeError
+            If the posteriors have not been derived.
+        """
+
         if self._mcmc_samples is None:
             raise AttributeError(
                 "Posteriors have not been derived. Please run \
@@ -497,8 +562,19 @@ class CeleriteGPEngine(BaseGPEngine):
         return self._mcmc_samples[np.argmax(self._loglikelihoods)]
 
     @property
-    def median_parameters(self):
-        """Return the median parameters from the thinned and burned chains"""
+    def median_parameters(self) -> np.ndarray:
+        """Return the median parameters from the thinned and burned chains
+
+        Returns
+        -------
+        np.ndarray
+            The median parameters from the thinned and burned chains.
+
+        Raises
+        ------
+        AttributeError
+            If the posteriors have not been derived.
+        """
         if self._mcmc_samples is None:
             raise AttributeError(
                 "Posteriors have not been derived. Please run \
@@ -507,12 +583,31 @@ class CeleriteGPEngine(BaseGPEngine):
         return np.median(self._mcmc_samples, axis=0)
 
     @property
-    def parameter_names(self):
+    def parameter_names(self) -> Tuple[str]:
+        """Return the names of the parameters of the GP.
+
+        Returns
+        -------
+
+        Tuple[str]
+            Tuple containing the names of the parameters of the GP.
+        """
         return self.gp.get_parameter_names()
 
     @property
-    def tau(self):
-        """The autocorrelation time of the chains"""
+    def tau(self) -> float:
+        """The autocorrelation time of the chains
+
+        Returns
+        -------
+        float
+            The autocorrelation time of the chains
+
+        Raises
+        ------
+        AttributeError
+            If the posteriors have not been derived.
+        """
         if self._mcmc_samples is None:
             raise AttributeError(
                 "Posteriors have not been derived. Please run \
@@ -521,8 +616,21 @@ class CeleriteGPEngine(BaseGPEngine):
         return self._tau
 
     @property
-    def mcmc_samples(self):
-        """The mcmc samples"""
+    def mcmc_samples(self) -> np.ndarray:
+        """Get the MCMC samples from the thinned and burned chains.
+
+        Returns
+        -------
+
+        np.ndarray
+            Array containing the MCMC samples from the thinned and burned chains.
+
+        Raises
+        ------
+        AttributeError
+            If the posteriors have not been derived.
+        """
+
         if self._mcmc_samples is None:
             raise AttributeError(
                 "Posteriors have not been derived. Please run \
@@ -542,5 +650,21 @@ class CeleriteGPEngine(BaseGPEngine):
         """
         return self._ndim
 
-    def predict(self, y, **kwargs):
+    def predict(self, y: np.ndarray, **kwargs) -> np.ndarray:
+        """Compute the conditional predictive distribution of the model by calling celerite's predict method.
+
+        Parameters
+        ----------
+        y : np.ndarray
+            Observations at the coordinates of the lightcurve times.
+        **kwargs : dict
+            Additional keyword arguments to pass to the celerite predict method.
+        Returns
+        ------
+
+        tuple
+            mu, (mu, cov), or (mu, var) depending on the values of return_cov and
+            return_var. See https://celerite.readthedocs.io/en/stable/python/gp/#celerite.GP.predict.
+
+        """
         return self.gp.predict(y, **kwargs)
