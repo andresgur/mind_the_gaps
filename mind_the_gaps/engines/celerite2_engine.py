@@ -1,4 +1,5 @@
 import copy
+import time
 import warnings
 from multiprocessing import Pool
 from typing import Dict, List
@@ -36,6 +37,7 @@ class Celerite2GPEngine(BaseGPEngine):
         "num_warmup",
         "converge_steps",
         "progress",
+        "perc",
     }
 
     def __init__(
@@ -44,7 +46,7 @@ class Celerite2GPEngine(BaseGPEngine):
         lightcurve: GappyLightcurve,
         meanmodel: str = None,
         mean_params: jax.Array = None,
-        seed: int = 0,
+        seed: int = None,
         fit_mean: bool = True,
     ):
         """Initialise the Celerite2 Gaussian Process Engine with a kernel specification,
@@ -67,6 +69,9 @@ class Celerite2GPEngine(BaseGPEngine):
         """
         self.kernel_spec = kernel_spec
         self._lightcurve = lightcurve
+        if seed == None:
+            seed = int(time.time())
+
         self.seed = seed
         self.meanmodel = meanmodel
         self.fit_mean = fit_mean
@@ -75,7 +80,6 @@ class Celerite2GPEngine(BaseGPEngine):
 
         self.mean_params = mean_params
         self.rng_key = jax.random.PRNGKey(self.seed)
-        self.rng_key, subkey = jax.random.split(self.rng_key)
 
         numpyro.enable_x64()
         numpyro.set_platform("cpu")
@@ -85,7 +89,7 @@ class Celerite2GPEngine(BaseGPEngine):
             lightcurve=self._lightcurve,
             meanmodel=self.meanmodel,
             mean_params=mean_params,
-            rng_key=self.rng_key,
+            # rng_key=self.rng_key,
         )
         self.init_params = self.kernel_spec.get_param_array()
         if self.fit_mean:
@@ -113,16 +117,14 @@ class Celerite2GPEngine(BaseGPEngine):
             whether the model is being fitted, i.e. during optimisation, or sampled, by default False
         """
 
-        self.gp.compute(t, params=params, fit=fit)
+        gp = self.gp.compute(t, params=params, fit=fit)  # , rng_key=subkey)
 
-        log_likelihood = self.gp.log_likelihood(self._lightcurve.y)
-
+        log_likelihood = gp.log_likelihood(self._lightcurve.y)
         numpyro.deterministic("log_likelihood", log_likelihood)
         numpyro.sample(
             "obs",
-            self.gp.numpyro_dist(),
+            gp.numpyro_dist(),
             obs=self._lightcurve.y,
-            rng_key=self.rng_key,
         )
 
     def minimize(self) -> jax.Array:
@@ -154,14 +156,16 @@ class Celerite2GPEngine(BaseGPEngine):
         )
 
         opt_params, res = solver.run(
-            init_params=self.init_params,  # self.gp.params,
+            init_params=self.init_params,
             bounds=(lower_bounds, upper_bounds),
         )
         self.gp.compute(params=opt_params, t=self._lightcurve.times, fit=True)
+        self.init_params = opt_params
+        self.kernel_spec.update_params_from_array(
+            self.init_params[self.gp.meanmodel.sampled_parameters :]
+        )
 
-        return opt_params
-
-    def initialise_params(self, num_chains: int, std_dev=0.1) -> Dict:
+    def initialise_params(self, num_chains: int, perc: float) -> Dict:
         """Initialise the parameters for the Gaussian Process by spreading
         the initial values around their base values using a normal distribution.
         This method generates a dictionary of parameters for each chain, where each parameter is perturbed
@@ -171,8 +175,8 @@ class Celerite2GPEngine(BaseGPEngine):
         ----------
         num_chains : int
             The number of chains to initialise parameters for.
-        std_dev : float, optional
-            Standard deviation for the normal distribution used to spread the parameters, by default 0.1.
+        perc : float
+            Percentage for the normal distribution used to spread the parameters, by default 0.1.
 
         Returns
         -------
@@ -189,11 +193,9 @@ class Celerite2GPEngine(BaseGPEngine):
                 base_value = param_spec.value
                 low, high = param_spec.bounds
 
-                spread_values = (
-                    base_value
-                    + jax.random.normal(self.rng_key, shape=(num_chains,)) * std_dev
+                spread_values = base_value + perc * jax.random.normal(
+                    self.rng_key, shape=(num_chains,)
                 )
-
                 spread_values = jnp.clip(spread_values, float(low), float(high))
 
                 param_dict[f"term{i}_{param_name}"] = jnp.array(spread_values)
@@ -208,6 +210,7 @@ class Celerite2GPEngine(BaseGPEngine):
         converge_steps: int,
         fit=True,
         progress=True,
+        perc: float = 0.1,
     ) -> None:
         """Derive the posterior distributions of the Gaussian Process parameters using MCMC sampling.
         This method initialises the parameters, runs MCMC sampling using the Numpyro with the NUTS kernel,
@@ -228,6 +231,8 @@ class Celerite2GPEngine(BaseGPEngine):
             Whether to fit the parameters before running MCMC, by default True.
         progress : bool, optional
             Whether to show a progress bar during MCMC sampling, by default True.
+        perc : float
+            Percentage for the normal distribution used to spread the parameters, by default 0.1.
 
         Raises
         ------
@@ -238,19 +243,22 @@ class Celerite2GPEngine(BaseGPEngine):
 
         old_tau = jnp.inf
         if fit:
-            self.init_params = self.minimize()
-            self.kernel_spec.update_params_from_array(
-                self.init_params[self.gp.meanmodel.sampled_parameters :]
+            self.minimize()
+            fixed_params = self.initialise_params(num_chains=num_chains, perc=perc)
+
+            kernel = NUTS(
+                self.numpyro_model,
+                adapt_step_size=True,
+                dense_mass=False,
+                init_strategy=init_to_value(values=fixed_params),
+            )
+        else:
+            kernel = NUTS(
+                self.numpyro_model,
+                adapt_step_size=True,
+                dense_mass=False,
             )
 
-        fixed_params = self.initialise_params(num_chains=num_chains)
-
-        kernel = NUTS(
-            self.numpyro_model,
-            adapt_step_size=True,
-            dense_mass=False,
-            init_strategy=init_to_value(values=fixed_params),
-        )
         mcmc = MCMC(
             kernel,
             num_warmup=num_warmup,
@@ -260,11 +268,8 @@ class Celerite2GPEngine(BaseGPEngine):
             jit_model_args=False,
             progress_bar=progress,
         )
-
-        mcmc.run(
-            self.rng_key,
-            t=self._lightcurve.times,
-        )
+        self.rng_key, subkey = jax.random.split(self.rng_key)
+        mcmc.run(subkey, t=self._lightcurve.times)
         state = mcmc.last_state
 
         mcmc = MCMC(
@@ -330,7 +335,6 @@ class Celerite2GPEngine(BaseGPEngine):
         GappyLightcurve
             A new GappyLightcurve instance generated from the Gaussian Process parameters.
         """
-        kernel_spec = copy.deepcopy(self.kernel_spec)
         if self.gp.meanmodel.sampled_mean:
             mean_params = params[: self.gp.meanmodel.sampled_parameters]
             kernel_params = params[self.gp.meanmodel.sampled_parameters :]
@@ -339,9 +343,9 @@ class Celerite2GPEngine(BaseGPEngine):
             mean_params = self.init_params[: self.gp.meanmodel.sampled_parameters]
             kernel_params = params
 
-        kernel_spec.update_params_from_array(kernel_params)
+        self.kernel_spec.update_params_from_array(kernel_params)
         gp_sample = Celerite2GP(
-            kernel_spec=kernel_spec,
+            kernel_spec=self.kernel_spec,
             meanmodel=self.meanmodel,
             lightcurve=self._lightcurve,
             rng_key=self.rng_key,

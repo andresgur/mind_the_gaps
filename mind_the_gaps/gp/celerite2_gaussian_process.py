@@ -1,3 +1,4 @@
+import copy
 import pprint as pp
 from typing import Callable, Dict, List, Union
 
@@ -33,7 +34,6 @@ class Celerite2GP(BaseGP):
         self,
         kernel_spec: KernelSpec,
         lightcurve: GappyLightcurve,
-        rng_key: jnp.array,
         meanmodel: str = None,
         mean_params: jax.Array = None,
     ):
@@ -59,7 +59,6 @@ class Celerite2GP(BaseGP):
 
         self.kernel_spec = kernel_spec
         self._lightcurve = lightcurve
-        self.rng_key = rng_key
         self.mean_params = mean_params
         self.meanmodel = self._build_mean_model(meanmodel, mean_params)
         if self.meanmodel.sampled_mean:
@@ -68,7 +67,7 @@ class Celerite2GP(BaseGP):
             )
         else:
             init_params = self.kernel_spec.get_param_array()
-        self.compute(self._lightcurve.times, fit=True, params=init_params)
+        self.gp = self.compute(self._lightcurve.times, fit=True, params=init_params)
 
     def _build_mean_model(
         self, meanmodel: str, mean_params: jax.Array
@@ -115,7 +114,9 @@ class Celerite2GP(BaseGP):
         """
         return self.gp.numpyro_dist()
 
-    def compute(self, t: jax.Array, fit: bool, params: jax.Array = None) -> None:
+    def compute(
+        self, t: jax.Array, fit: bool, params: jax.Array = None, rng_key=None
+    ) -> None:
         """Set up the Celerite2 kernel, GaussianProcess and call compute on it with
         the appropriate params.
 
@@ -133,18 +134,20 @@ class Celerite2GP(BaseGP):
             mean_params = params[: self.meanmodel.sampled_parameters]
             kernel_params = params[self.meanmodel.sampled_parameters :]
             self.kernel_spec.update_params_from_array(kernel_params)
-            mean = self.meanmodel.compute_mean(fit=fit, params=mean_params)
+            mean = self.meanmodel.compute_mean(
+                fit=fit, params=mean_params  # , rng_key=subkey
+            )
         else:
-            mean = self.meanmodel.compute_mean(fit=fit, rng_key=self.rng_key)
-
-        kernel = self.kernel_spec.get_kernel(fit=fit)
-
-        self.gp = celerite2.jax.GaussianProcess(kernel, mean=mean)
-        self.gp.compute(
+            mean = self.meanmodel.compute_mean(fit=fit)  # , rng_key=subkey)
+        kernel = self.kernel_spec.get_kernel(fit=fit)  # , rng_key=subkey)
+        gp = celerite2.jax.GaussianProcess(kernel, mean=mean)
+        gp.compute(
             t,
             yerr=self._lightcurve.dy,
             check_sorted=False,
         )
+
+        return gp
 
     def _get_kernel(self, fit=True) -> j_terms.Term:
         """Get the kernel for the Gaussian Process based on the kernel specification.
@@ -165,7 +168,6 @@ class Celerite2GP(BaseGP):
             If a parameter in the kernel specification is not fixed and does not have a prior distribution.
         """
 
-        rng_key = self.rng_key
         terms = []
 
         for i, term in enumerate(self.kernel_spec.terms):
@@ -183,7 +185,8 @@ class Celerite2GP(BaseGP):
                 else:
                     dist_cls = param_spec.prior
                     val = numpyro.sample(
-                        full_name, dist_cls(*param_spec.bounds), rng_key=rng_key
+                        full_name,
+                        dist_cls(*param_spec.bounds),  # rng_key=rng_key
                     )
 
                 kwargs[name] = jnp.exp(val)
@@ -290,3 +293,39 @@ class Celerite2GP(BaseGP):
         else:
             param_names = self.kernel_spec.get_param_names()
         return param_names
+
+    def standarized_residuals(self, include_noise=True):
+        """Returns the standarized residuals (see e.g. Kelly et al. 2011) Eq. 49.
+        You should set the gp parameters to your best or mean (median) parameter values prior to calling this method
+
+        Parameters
+        ----------
+        include_noise: bool,
+            True to include any jitter term into the standard deviation calculation. False ignores this contribution.
+        """
+        pred_mean, pred_var = self.gp.predict(
+            self._lightcurve.y, return_var=True, return_cov=False
+        )
+        if include_noise:
+            pred_var += self.gp.kernel.jitter
+        std_res = (self._lightcurve.y - pred_mean) / jnp.sqrt(pred_var)
+        return std_res
+
+    def predict(self, y: jax.Array, **kwargs) -> Union[tuple, jax.Array]:
+        """Compute the conditional predictive distribution of the model by calling celerite2's predict method.
+
+        Parameters
+        ----------
+        y : np.ndarray
+            Observations at the coordinates of the lightcurve times.
+        **kwargs : dict
+            Additional keyword arguments to pass to the celerite predict method.
+        Returns
+        ------
+
+        tuple
+            mu, (mu, cov), or (mu, var) depending on the values of return_cov and
+            return_var. See https://github.com/exoplanet-dev/celerite2/blob/main/python/celerite2/core.py
+
+        """
+        return self.gp.predict(y, **kwargs)

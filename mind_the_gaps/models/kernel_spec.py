@@ -279,6 +279,7 @@ class KernelSpec:
                     val = numpyro.sample(
                         full_name, dist_cls(*param_spec.bounds), rng_key=rng_key
                     )
+                    # jax.debug.print("val{}", val)
 
                 kwargs[name] = jnp.exp(val)
             terms.append(term.term_class(**kwargs))
@@ -286,6 +287,8 @@ class KernelSpec:
         kernel = terms[0]
         for t in terms[1:]:
             kernel += t
+        # jax.debug.print("celerite2 kernel terms in kernel: {}", self.get_param_array())
+        # print(self.get_param_array())
         return kernel
 
     def _get_celerite_kernel(self) -> celerite.modeling.Model:

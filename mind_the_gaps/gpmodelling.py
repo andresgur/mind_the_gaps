@@ -82,7 +82,7 @@ class GPModelling:
         meanmodel: str = None,
         fit_mean: bool = True,
         mean_params: jax.Array = None,
-        seed: int = 0,
+        seed: int = None,
     ) -> Union[CeleriteGPEngine, Celerite2GPEngine]:
         """
         Factory method to select and instantiate the appropriate GP modelling engine.
@@ -295,45 +295,36 @@ class GPModellingComparison:
         null_kernel_spec: KernelSpec,
         alt_kernel_spec: KernelSpec,
         lightcurve: GappyLightcurve,
+        null_mean_params: jax.Array = None,
+        alt_mean_params: jax.Array = None,
         **modelling_kwargs: Mapping[str, Any],
     ):
-        def _get_gpmodel_handle_kwargs(kernel_spec, lightcurve, mean_params, **kwargs):
-            args = {
-                "kernel_spec": kernel_spec,
-                "lightcurve": lightcurve,
-                **kwargs,
-            }
-            if mean_params is not None:
-                args["mean_params"] = mean_params
-            return GPModelling(**args)
 
         self.null_kernel_spec = null_kernel_spec
         self.alt_kernel_spec = alt_kernel_spec
         self.lightcurve = lightcurve
 
         self.likelihoods = []
-        null_mean_params = None
-        alt_mean_params = None
-        if mean_params := modelling_kwargs.pop("mean_params", None):
-            null_mean_params = mean_params[0]
-            alt_mean_params = mean_params[1]
+        self.null_mean_params = null_mean_params
+        self.alt_mean_params = alt_mean_params
+        self.modelling_kwargs = modelling_kwargs
 
-        self.null_model = _get_gpmodel_handle_kwargs(
+        self.null_model = GPModelling(
             kernel_spec=null_kernel_spec,
             lightcurve=lightcurve,
-            mean_params=null_mean_params,
+            mean_params=self.null_mean_params,
             **modelling_kwargs,
         )
 
-        self.alt_model = _get_gpmodel_handle_kwargs(
+        self.alt_model = GPModelling(
             kernel_spec=alt_kernel_spec,
             lightcurve=lightcurve,
-            mean_params=alt_mean_params,
+            mean_params=self.alt_mean_params,
             **modelling_kwargs,
         )
 
     def derive_posteriors(self, **engine_kwargs: Mapping[str, Any]):
-        self.engine_kwargs = engine_kwargs
+        # self.engine_kwargs = engine_kwargs
         self.null_model.derive_posteriors(**engine_kwargs)
         self.alt_model.derive_posteriors(**engine_kwargs)
 
@@ -341,7 +332,7 @@ class GPModellingComparison:
         return self.null_model.generate_from_posteriors(nsims)
         # self.alt_model.generate_from_posteriors(nsims)
 
-    def process_lightcurves(self, nsims, **engine_kwargs):
+    def process_lightcurves(self, nsims, **posterior_kwargs):
         self.likelihoods_null = []
         self.likelihoods_alt = []
 
@@ -353,20 +344,26 @@ class GPModellingComparison:
             null_modelling = GPModelling(
                 kernel_spec=self.null_kernel_spec,
                 lightcurve=lc,
-                **self.null_modelling_kwargs,
+                mean_params=self.null_mean_params,
+                **self.modelling_kwargs,
             )
-            null_modelling.derive_posteriors(**engine_kwargs)
+            null_modelling.derive_posteriors(**posterior_kwargs)
             self.likelihoods_null.append(null_modelling.max_loglikelihood)
 
             alternative_modelling = GPModelling(
                 kernel_spec=self.alt_kernel_spec,
                 lightcurve=lc,
-                **self.alt_modelling_kwargs,
+                mean_params=self.alt_mean_params,
+                **self.modelling_kwargs,
             )
-            alternative_modelling.derive_posteriors(**engine_kwargs)
+            alternative_modelling.derive_posteriors(**posterior_kwargs)
             self.likelihoods_alt.append(alternative_modelling.max_loglikelihood)
 
     def likelihood_ratio_test(self, path: str = "LRT.png") -> None:
+        if self.likelihoods_null is None:
+            raise ValueError(
+                "You need to run process_lightcurves or process_lightcurves_par first."
+            )
         path = os.path.abspath(path)
         plt.figure()
         T_dist = -2 * (np.array(self.likelihoods_null) - np.array(self.likelihoods_alt))
@@ -390,7 +387,7 @@ class GPModellingComparison:
 
         print(f"Plot saved at: {path}")
 
-    def process_lightcurves_par(self, nsims, par_workers=None, **engine_kwargs):
+    def process_lightcurves_par(self, nsims, par_workers=None, **posterior_kwargs):
         self.likelihoods_null = [None] * nsims
         self.likelihoods_alt = [None] * nsims
         lcs = self.null_model.generate_from_posteriors(nsims=nsims)
@@ -400,16 +397,15 @@ class GPModellingComparison:
                 i,
                 lc,
                 self.null_kernel_spec,
-                self.null_modelling_kwargs,
                 self.alt_kernel_spec,
-                self.alt_modelling_kwargs,
-                engine_kwargs,
+                self.modelling_kwargs,
+                posterior_kwargs,
             )
             for i, lc in enumerate(lcs)
         ]
 
         with ProcessPoolExecutor(
-            max_workers=par_workers or multiprocessing.cpu_count()
+            max_workers=par_workers  # or multiprocessing.cpu_count()
         ) as executor:
             futures = [
                 executor.submit(_process_one_lightcurve, args) for args in args_list
@@ -451,21 +447,21 @@ class GPModellingComparison:
 
 
 def _process_one_lightcurve(args):
-    i, lc, null_kernel_spec, null_kwargs, alt_kernel_spec, alt_kwargs, engine_kwargs = (
+    (i, lc, null_kernel_spec, alt_kernel_spec, modelling_kwargs, posterior_kwargs) = (
         args
     )
     null_modelling = GPModelling(
-        kernel_spec=null_kernel_spec, lightcurve=lc, **null_kwargs
+        kernel_spec=null_kernel_spec, lightcurve=lc, **modelling_kwargs
     )
-    null_modelling.derive_posteriors(**engine_kwargs)
+    null_modelling.derive_posteriors(**posterior_kwargs)
     null_ll = null_modelling.max_loglikelihood
 
     alt_modelling = GPModelling(
         kernel_spec=alt_kernel_spec,
         lightcurve=lc,
-        **alt_kwargs,
+        **modelling_kwargs,
     )
-    alt_modelling.derive_posteriors(**engine_kwargs)
+    alt_modelling.derive_posteriors(**posterior_kwargs)
     alt_ll = alt_modelling.max_loglikelihood
 
     return i, null_ll, alt_ll

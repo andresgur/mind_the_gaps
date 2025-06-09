@@ -85,7 +85,9 @@ class ConstantMean(MeanFunction):
         self.sampled_mean = True
 
     def compute_mean(
-        self, params: jnp.array = None, fit: bool = True, rng_key: int = None
+        self,
+        params: jnp.array = None,
+        fit: bool = True,  # rng_key: int = None
     ) -> jnp.array:
         """Return the constant mean value of the lightcurve.
 
@@ -110,7 +112,7 @@ class ConstantMean(MeanFunction):
             return numpyro.sample(
                 "mean",
                 dist.Uniform(jnp.min(self._lightcurve.y), jnp.max(self._lightcurve.y)),
-                rng_key=rng_key,
+                # rng_key=rng_key,
             )
 
 
@@ -136,7 +138,7 @@ class LinearMean(MeanFunction):
 
     def compute_mean(
         self,
-        rng_key: int,
+        # rng_key: int,
         params: jnp.array = None,
         fit: bool = True,
         bounds: dict = None,
@@ -159,6 +161,7 @@ class LinearMean(MeanFunction):
         jnp.array
             The computed mean value at the times of the lightcurve.
         """
+
         if fit and jnp.size(params) == self.no_parameters:
             m, b = params  # [: self.count_parameters]
 
@@ -166,12 +169,13 @@ class LinearMean(MeanFunction):
             m = numpyro.sample(
                 "m",
                 dist.Uniform(bounds["mean_params"][0][0], bounds["mean_params"][0][1]),
-                rng_key=rng_key,
+                # rng_key=subkey,
             )
+            rng_key, subkey = jax.random.split(rng_key)
             b = numpyro.sample(
                 "b",
                 dist.Uniform(bounds["mean_params"][1][0], bounds["mean_params"][1][1]),
-                rng_key=rng_key,
+                # rng_key=subkey,
             )
         return m * self._lightcurve.t + b
 
@@ -199,7 +203,7 @@ class GaussianMean(MeanFunction):
     def compute_mean(
         self,
         t: jnp.array,
-        rng_key: int,
+        # rng_key: int,
         fit: bool = True,
         params: jnp.array = None,
         bounds: dict = None,
@@ -231,16 +235,16 @@ class GaussianMean(MeanFunction):
             A = numpyro.sample(
                 "amplitude",
                 dist.Uniform(bounds["mean_params"][0][0], bounds["mean_params"][0][1]),
-                rng_key=rng_key,
+                # rng_key=rng_key,
             )
             mu = numpyro.sample(
                 "mu",
                 dist.Uniform(bounds["mean_params"][1][0], bounds["mean_params"][1][1]),
-                rng_key=rng_key,
+                # rng_key=rng_key,
             )
             sigma = numpyro.sample(
                 "sigma",
                 dist.Uniform(bounds["mean_params"][2][0], bounds["mean_params"][2][1]),
-                rng_key=rng_key,
+                # rng_key=rng_key,
             )
         return A * jnp.exp(-((t - mu) ** 2) / (2 * sigma**2))

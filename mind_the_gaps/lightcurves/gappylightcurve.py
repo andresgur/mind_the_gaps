@@ -3,13 +3,15 @@
 # @Email:  agurpidelash@irap.omp.eu
 # @Last modified by:   agurpide
 # @Last modified time: 28-02-2022
-import numpy as np
+from random import sample
 from typing import List, Union
+
+import numpy as np
+from astropy.modeling import Model as AstropyModel
 from numpy import floating
 from numpy.typing import ArrayLike, NDArray
-from random import sample
+
 from mind_the_gaps.simulator import Simulator
-from astropy.modeling import Model as AstropyModel
 
 
 class ExposureTimeError(Exception):
@@ -21,14 +23,15 @@ class GappyLightcurve:
     """
     A class to store parameters of a irregularly-sampled lightcurve
     """
+
     def __init__(
-            self,
-            times: ArrayLike,
-            y: ArrayLike,
-            dy: Union[ArrayLike, None] = None,
-            exposures: Union[float, ArrayLike, None] = None,
-            bkg_rate: Union[ArrayLike, None] = None,
-            bkg_rate_err: Union[ArrayLike, None] = None
+        self,
+        times: ArrayLike,
+        y: ArrayLike,
+        dy: Union[ArrayLike, None] = None,
+        exposures: Union[float, ArrayLike, None] = None,
+        bkg_rate: Union[ArrayLike, None] = None,
+        bkg_rate_err: Union[ArrayLike, None] = None,
     ):
         """
 
@@ -39,7 +42,7 @@ class GappyLightcurve:
         y:
             Observed flux or count rate
         dy:
-            1 sigma uncertainty on y. Optional, 
+            1 sigma uncertainty on y. Optional,
         exposures:
             Exposure time of each datapoint in seconds
         bkg_rate:
@@ -58,16 +61,18 @@ class GappyLightcurve:
                 self._exposures = np.full(len(times), exposures)
             else:
                 self._exposures = exposures
-            epsilon = 1.01 # to avoid numerically distinct but equal
-            wrong = np.count_nonzero(np.diff(self._times) < self._exposures[:-1] * epsilon / 2 )
-            if wrong >0:
-                raise ExposureTimeError("Some timestamps (%d) have a spacing below the exposure sampling time!" % wrong)
-        
+            epsilon = 1.01  # to avoid numerically distinct but equal
+            # wrong = np.count_nonzero(np.diff(self._times) < self._exposures[:-1] * epsilon / 2 )
+            # if wrong >0:
+            #    raise ExposureTimeError("Some timestamps (%d) have a spacing below the exposure sampling time!" % wrong)
+
         else:
             self._exposures = np.zeros(len(times))
 
         self._bkg_rate = bkg_rate if bkg_rate is not None else np.zeros(len(times))
-        self._bkg_rate_err = bkg_rate_err if bkg_rate_err is not None else np.zeros(len(times))
+        self._bkg_rate_err = (
+            bkg_rate_err if bkg_rate_err is not None else np.zeros(len(times))
+        )
 
     @property
     def times(self) -> ArrayLike:
@@ -170,12 +175,7 @@ class GappyLightcurve:
         """Mean count rate"""
         return np.mean(self._y)
 
-
-    def truncate(
-            self,
-            tmin: floating = -np.inf,
-            tmax: floating = np.inf
-    ):
+    def truncate(self, tmin: floating = -np.inf, tmax: floating = np.inf):
         """
         Create a new GappyLightcurve instance by cutting the data between tmin and tmax.
 
@@ -192,9 +192,15 @@ class GappyLightcurve:
             New instance representing the cut data.
         """
         if tmin >= tmax:
-            raise ValueError("Minimum truncation time (%.2es) is greater than or equal to maximum truncation time (%.3es)!" %(tmin, tmax))
+            raise ValueError(
+                "Minimum truncation time (%.2es) is greater than or equal to maximum truncation time (%.3es)!"
+                % (tmin, tmax)
+            )
         if tmax < self._times[0]:
-            raise ValueError("Maximum truncation time (%.2f) is lower than initial lightcurve time (%.2f)" % (tmax, self._times[0]))
+            raise ValueError(
+                "Maximum truncation time (%.2f) is lower than initial lightcurve time (%.2f)"
+                % (tmax, self._times[0])
+            )
         mask = (self._times >= tmin) & (self._times <= tmax)
 
         return GappyLightcurve(
@@ -203,13 +209,10 @@ class GappyLightcurve:
             self._dy[mask],
             self._exposures[mask],
             self._bkg_rate[mask],
-            self._bkg_rate_err[mask]
+            self._bkg_rate_err[mask],
         )
 
-    def split(
-            self,
-            interval: float
-    ) -> List['GappyLightcurve']:
+    def split(self, interval: float) -> List["GappyLightcurve"]:
         """
         Split the lightcurve based on the input (time) interval
 
@@ -234,13 +237,13 @@ class GappyLightcurve:
             j = i + 1
         return lightcurves
 
-    def rand_remove(
-            self,
-            points_remove: int
-    ) -> 'GappyLightcurve':
+    def rand_remove(self, points_remove: int) -> "GappyLightcurve":
         """Randomly remove a given number of points from the lightcurve"""
         if points_remove > self.n:
-            return ValueError("Number of points to remove (%d) is greater than number of lightcurve datapoints (%d)"  % (points_remove, self.n))
+            return ValueError(
+                "Number of points to remove (%d) is greater than number of lightcurve datapoints (%d)"
+                % (points_remove, self.n)
+            )
         ints = sample(range(len(self._times)), points_remove)
         mask = np.ones(len(self._times), dtype=bool)
         mask[ints] = False
@@ -250,23 +253,30 @@ class GappyLightcurve:
             self._dy[mask],
             self._exposures[mask],
             self._bkg_rate[mask],
-            self._bkg_rate_err[mask]
+            self._bkg_rate_err[mask],
         )
 
-    def to_csv(
-            self,
-            outname: str
-    ):
+    def to_csv(self, outname: str):
         """Save lightcurve properties to csv file"""
-        outputs = np.array([self._times, self._y, self._dy, self._exposures, self._bkg_rate, self._bkg_rate_err])
-        np.savetxt(outname, outputs.T, fmt="%.8e\t%.5f\t%.5f\t%.3f\t%.5f\t%.5f", header="t\trate\terror\texposure\tbkg_rate\tbkg_rate_err")
-
+        outputs = np.array(
+            [
+                self._times,
+                self._y,
+                self._dy,
+                self._exposures,
+                self._bkg_rate,
+                self._bkg_rate_err,
+            ]
+        )
+        np.savetxt(
+            outname,
+            outputs.T,
+            fmt="%.8e\t%.5f\t%.5f\t%.3f\t%.5f\t%.5f",
+            header="t\trate\terror\texposure\tbkg_rate\tbkg_rate_err",
+        )
 
     def get_simulator(
-            self,
-            psd_model: AstropyModel,
-            pdf: str = "gaussian",
-            **kwargs
+        self, psd_model: AstropyModel, pdf: str = "gaussian", **kwargs
     ) -> Simulator:
         """
         Creates an instance of mind_the_gaps.Simulator based on the lightcurve
@@ -286,5 +296,13 @@ class GappyLightcurve:
         Simulator
             An instance of the Simulator class initialized with the lightcurve properties.
         """
-        return Simulator(psd_model, self._times, self._exposures, self.mean, pdf,
-                         self._bkg_rate, self._bkg_rate_err, **kwargs)
+        return Simulator(
+            psd_model,
+            self._times,
+            self._exposures,
+            self.mean,
+            pdf,
+            self._bkg_rate,
+            self._bkg_rate_err,
+            **kwargs,
+        )
