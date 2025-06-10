@@ -225,7 +225,6 @@ class Celerite2GP(BaseGP):
         """
         self.compute(self._lightcurve.times, params=params, fit=fit)
         nll_value = -self.gp.log_likelihood(self._lightcurve.y)
-        jax.debug.print("Negative Log Likelihood: {} {}", nll_value, params)
         return nll_value
 
     def get_parameter_vector(self) -> jax.Array:
