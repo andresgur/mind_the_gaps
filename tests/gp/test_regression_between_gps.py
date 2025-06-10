@@ -6,11 +6,13 @@ import celerite.terms as cel_terms
 import jax
 import numpy as np
 import numpyro.distributions as dist
+import tinygp
 from celerite2.jax.distribution import CeleriteNormal
 from jax import numpy as jnp
 
 from mind_the_gaps.gp.celerite2_gaussian_process import Celerite2GP
 from mind_the_gaps.gp.celerite_gaussian_process import CeleriteGP
+from mind_the_gaps.gp.tinygp_gaussian_process import TinyGP
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
 from mind_the_gaps.models.kernel_spec import (
     KernelParameterSpec,
@@ -106,11 +108,44 @@ class GPRegressionTest(unittest.TestCase):
             ]
         )
 
+        tinygp_spec = KernelSpec(
+            terms=[
+                KernelTermSpec(
+                    term_class=tinygp.kernels.quasisep.Celerite,
+                    parameters={
+                        "a": KernelParameterSpec(
+                            value=np.log(a),
+                            fixed=False,
+                            prior=dist.Uniform,
+                            bounds=(0.1, 20.0),
+                        ),
+                        "b": KernelParameterSpec(
+                            value=np.log(b),
+                            fixed=False,
+                            prior=dist.Uniform,
+                            bounds=(0.1, 20.0),
+                        ),
+                        "c": KernelParameterSpec(
+                            value=np.log(c),
+                            fixed=False,
+                            prior=dist.Uniform,
+                            bounds=(0.01, 10.0),
+                        ),
+                        "d": KernelParameterSpec(
+                            value=np.log(d),
+                            fixed=False,
+                            prior=dist.Uniform,
+                            bounds=(0.01, 10.0),
+                        ),
+                    },
+                )
+            ],
+        )
+
         self.lc = GappyLightcurve(times=times, y=flux_centered, dy=errors)
         self.cel2_gp = Celerite2GP(
             kernel_spec=cel2_kernel_spec,
             lightcurve=self.lc,
-            rng_key=jax.random.PRNGKey(0),
             meanmodel="fixed",
             mean_params=jnp.array([self.lc.mean]),
         )
@@ -120,10 +155,23 @@ class GPRegressionTest(unittest.TestCase):
             fit_mean=True,
         )
 
+        self.tinygp_gp = TinyGP(
+            kernel_spec=tinygp_spec,
+            lightcurve=self.lc,
+            meanmodel="fixed",
+            mean_params=jnp.array([self.lc.mean]),
+        )
+
     def test_gp_regression(self):
         self.assertAlmostEqual(
             self.cel2_gp.negative_log_likelihood(
                 self.cel2_gp.kernel_spec.get_param_array()
+            ),
+            -self.cel_gp.log_likelihood(self.lc.y),
+        )
+        self.assertAlmostEqual(
+            self.tinygp_gp.negative_log_likelihood(
+                self.tinygp_gp.kernel_spec.get_param_array()
             ),
             -self.cel_gp.log_likelihood(self.lc.y),
         )

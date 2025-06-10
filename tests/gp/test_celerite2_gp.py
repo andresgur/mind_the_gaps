@@ -52,15 +52,12 @@ class TestCelerite2GP(unittest.TestCase):
         self.gp_model = Celerite2GP(
             kernel_spec=self.kernel_spec,
             lightcurve=self.mock_lc,
-            rng_key=self.rng_key,
             meanmodel="constant",
             mean_params=self.mean_params,
         )
 
     def test_initialization(self):
-        gp = Celerite2GP(
-            kernel_spec=self.kernel_spec, lightcurve=self.mock_lc, rng_key=self.rng_key
-        )
+        gp = Celerite2GP(kernel_spec=self.kernel_spec, lightcurve=self.mock_lc)
         self.assertIsInstance(gp, Celerite2GP)
         self.assertEqual(gp._lightcurve, self.mock_lc)
 

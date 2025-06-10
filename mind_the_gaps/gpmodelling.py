@@ -25,8 +25,10 @@ from matplotlib import pyplot as plt
 from scipy.stats import percentileofscore
 from tinygp.kernels.base import Kernel
 
+from mind_the_gaps.engines.base_numpyro_engine import BaseNumpyroGPEngine
 from mind_the_gaps.engines.celerite2_engine import Celerite2GPEngine
 from mind_the_gaps.engines.celerite_engine import CeleriteGPEngine
+from mind_the_gaps.engines.tinygp_engine import TinyGPEngine
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
 from mind_the_gaps.models.kernel_spec import KernelSpec
 
@@ -122,7 +124,7 @@ class GPModelling:
                 model_type = "celerite"
             elif issubclass(kernel_spec.terms[0].term_class, Term):
                 model_type = "celerite2"
-            elif isinstance(kernel_spec.terms[0].term_class, Kernel):
+            elif issubclass(kernel_spec.terms[0].term_class, Kernel):
                 model_type = "tinygp"
             else:
                 raise ValueError(
@@ -146,8 +148,13 @@ class GPModelling:
                 fit_mean=fit_mean,
             )
         elif model_type == "tinygp":
-            raise NotImplementedError(
-                "TinyGP is not yet implemented in mind_the_gaps. Please use celerite or celerite2."
+            return TinyGPEngine(
+                kernel_spec=kernel_spec,
+                lightcurve=lightcurve,
+                meanmodel=meanmodel,
+                mean_params=mean_params,
+                seed=seed,
+                fit_mean=fit_mean,
             )
         else:
             raise ValueError(f"Unsupported model_type: {model_type}")
@@ -202,7 +209,7 @@ class GPModelling:
             Define image quality in DPI, by default 100
         """
         samples = self.modelling_engine.mcmc_samples
-        if isinstance(self.modelling_engine, Celerite2GPEngine):
+        if isinstance(self.modelling_engine, BaseNumpyroGPEngine):
             samples = {k: v for k, v in samples.items() if k != "log_likelihood"}
         corner_fig = corner.corner(
             samples,

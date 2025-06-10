@@ -107,7 +107,7 @@ class ConstantMean(MeanFunction):
         """
         if fit and jnp.size(params) == self.no_parameters:
 
-            return params
+            return params[0]
         else:
             return numpyro.sample(
                 "mean",
@@ -138,7 +138,6 @@ class LinearMean(MeanFunction):
 
     def compute_mean(
         self,
-        # rng_key: int,
         params: jnp.array = None,
         fit: bool = True,
         bounds: dict = None,
@@ -171,7 +170,7 @@ class LinearMean(MeanFunction):
                 dist.Uniform(bounds["mean_params"][0][0], bounds["mean_params"][0][1]),
                 # rng_key=subkey,
             )
-            rng_key, subkey = jax.random.split(rng_key)
+
             b = numpyro.sample(
                 "b",
                 dist.Uniform(bounds["mean_params"][1][0], bounds["mean_params"][1][1]),

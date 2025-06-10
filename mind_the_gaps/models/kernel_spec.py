@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro
 from celerite2.jax.terms import Term
+from tinygp.kernels.base import Kernel
 
 
 @dataclass
@@ -28,6 +29,7 @@ class KernelParameterSpec:
         fixed: bool = False,
         prior: Optional[Callable[..., Any]] = None,
         bounds: Optional[Tuple[float, float]] = None,
+        zeroed: bool = False,
     ):
         """Initialize a kernel parameter specification.
         This class is used to define a parameter in a kernel specification, including its value,
@@ -43,11 +45,17 @@ class KernelParameterSpec:
             Prior distribution class for celerite2 kernels, by default None
         bounds : Optional[Tuple[float, float]], optional
             Bounds for the parameter, by default None
+        zeroed : bool, optional
+            Whether the parameter should be initialized to a very small value (e.g., -1.0e-10),
+            by default False
         """
         self.value = value
         self.fixed = fixed
         self.prior = prior
         self.bounds = bounds
+        self.zeroed = zeroed
+        if self.zeroed:
+            self.fixed = True
 
 
 @dataclass
@@ -105,7 +113,9 @@ class KernelSpec:
         self.terms = terms
         self.celerite2 = False
 
-        if issubclass(self.terms[0].term_class, Term):
+        if issubclass(self.terms[0].term_class, Term) or issubclass(
+            self.terms[0].term_class, Kernel
+        ):
             self.celerite2 = True
 
     def __add__(self, other: "KernelSpec") -> "KernelSpec":
@@ -192,7 +202,9 @@ class KernelSpec:
 
         for term in self.terms:
             for param in term.parameters.values():
-                if not param.fixed:
+                if param.fixed or param.zeroed:
+                    pass
+                else:
                     if param.bounds is None:
                         raise ValueError(f"Non-fixed parameter is missing bounds.")
                     bounds.append(param.bounds)
@@ -216,18 +228,13 @@ class KernelSpec:
                     names.append(f"term{i}.{name}")
         return names
 
-    def get_kernel(
-        self, fit=True, rng_key=None
-    ) -> Union[celerite.modeling.Model, Term]:
+    def get_kernel(self, fit=True) -> celerite.modeling.Model | Term:
         """Get the kernel for the Gaussian Process based on the kernel specification.
 
         Parameters
         ----------
         fit : bool, optional
             For celerite2 kernels: whether the parameters are being fit or sampled, by default True
-        rng_key : _type_, optional
-        rng_key : jax.Array, optional
-            For celerite2 kernels: Random key for sampling, by default None
 
         Returns
         -------
@@ -236,11 +243,11 @@ class KernelSpec:
         """
 
         if self.celerite2:
-            return self._get_celerite2_kernel(fit=fit, rng_key=rng_key)
+            return self._get_celerite2_kernel(fit=fit)
         else:
             return self._get_celerite_kernel()
 
-    def _get_celerite2_kernel(self, fit=True, rng_key=None) -> Term:
+    def _get_celerite2_kernel2(self, fit=True, rng_key=None) -> Term:
         """Get the celerite2 kernel for the Gaussian Process based on the kernel specification.
 
         Parameters
@@ -279,7 +286,6 @@ class KernelSpec:
                     val = numpyro.sample(
                         full_name, dist_cls(*param_spec.bounds), rng_key=rng_key
                     )
-                    # jax.debug.print("val{}", val)
 
                 kwargs[name] = jnp.exp(val)
             terms.append(term.term_class(**kwargs))
@@ -287,8 +293,32 @@ class KernelSpec:
         kernel = terms[0]
         for t in terms[1:]:
             kernel += t
-        # jax.debug.print("celerite2 kernel terms in kernel: {}", self.get_param_array())
-        # print(self.get_param_array())
+        return kernel
+
+    def _get_celerite2_kernel(self, fit=True) -> Term:
+
+        terms = []
+        for i, term in enumerate(self.terms):
+            kwargs = {
+                name: (
+                    -1.0e-10
+                    if param_spec.zeroed
+                    else jnp.exp(
+                        param_spec.value
+                        if (fit or param_spec.fixed)
+                        else numpyro.sample(
+                            f"terms[{i}]:log_{name}",
+                            param_spec.prior(*param_spec.bounds),
+                        )
+                    )
+                )
+                for name, param_spec in term.parameters.items()
+            }
+            terms.append(term.term_class(**kwargs))
+
+        kernel = terms[0]
+        for t in terms[1:]:
+            kernel += t
         return kernel
 
     def _get_celerite_kernel(self) -> celerite.modeling.Model:

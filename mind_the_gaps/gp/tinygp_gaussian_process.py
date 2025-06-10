@@ -1,14 +1,13 @@
-import copy
 import pprint as pp
 from typing import Callable, Dict, List, Union
 
-import celerite2.jax
-import celerite2.jax.terms as j_terms
 import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro
-from celerite2.jax.distribution import CeleriteNormal
+import tinygp
+from jax import jit, vmap
+from tinygp.kernels.quasisep import Celerite
 
 from mind_the_gaps.gp.gaussian_process import BaseGP
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
@@ -18,11 +17,51 @@ from mind_the_gaps.models.celerite2.mean_terms import (
     GaussianMean,
     LinearMean,
 )
+
+# from mind_the_gaps.models.celerite2.kernel_terms import ConstantModel, Model
+from mind_the_gaps.models.celerite.mean_models import (
+    GaussianModel,
+    LinearModel,
+    SineModel,
+)
 from mind_the_gaps.models.kernel_spec import KernelSpec
 
 
-class Celerite2GP(BaseGP):
-    """Wrapper round the Celerite2 Gaussian Process to handle compute, building the mean,
+@jit
+def get_psd_value_jax(
+    alpha_real,
+    beta_real,
+    alpha_complex_real,
+    alpha_complex_imag,
+    beta_complex_real,
+    beta_complex_imag,
+    omega,
+):
+    w2 = omega**2
+    p = 0.0
+
+    # Real terms
+    p += jnp.sum(alpha_real * beta_real / (beta_real**2 + w2))
+
+    # Complex terms
+    w02 = beta_complex_real**2 + beta_complex_imag**2
+    num = (
+        alpha_complex_real * beta_complex_real + alpha_complex_imag * beta_complex_imag
+    ) * w02 + (
+        alpha_complex_real * beta_complex_real - alpha_complex_imag * beta_complex_imag
+    ) * w2
+    denom = w2**2 + 2.0 * (beta_complex_real**2 - beta_complex_imag**2) * w2 + w02**2
+    p += jnp.sum(num / denom)
+
+    return jnp.sqrt(2.0 / jnp.pi) * p
+
+
+# Vectorized for an array of omega
+get_psd_jax = vmap(get_psd_value_jax, in_axes=(None, None, None, None, None, None, 0))
+
+
+class TinyGP(BaseGP):
+    """Wrapper round the TinyGP Gaussian Process to handle compute, building the mean,
     returning parameters names etc.
 
     Inherits from:
@@ -37,24 +76,18 @@ class Celerite2GP(BaseGP):
         meanmodel: str = None,
         mean_params: jax.Array = None,
     ):
-        """Initialize the Celerite2 Gaussian Process with a kernel specification,
-        lightcurve, and random number generator key. It sets up the mean model based on
-        the provided meanmodel and mean_params. If the meanmodel is None, it defaults to
-        a fixed mean model. The kernel parameters are initialized from the kernel_spec.
+        """Initialise the celerite2 Gaussian Process
 
         Parameters
         ----------
         kernel_spec : KernelSpec
-            Specification of the kernel to use, containing the terms and their parameters.
+            KernelSpec object that defines the kernel terms and stores param values & bounds.
         lightcurve : GappyLightcurve
-            The lightcurve data to fit the Gaussian Process to.
+            The lightcurve for the Gaussian process.
         rng_key : jnp.array
-            Random number generator key for sampling.
-
-        meanmodel : str, optional
-            The type of mean model to use, can be "Constant", "Linear", "Gaussian" or "Fixed", defaults to "Fixed".
-        mean_params : jax.Array, optional
-            Parameters for the mean model, if applicable. If None, defaults to a fixed mean based on the lightcurve.
+            _description_
+        meanmodel : str
+            Mean model for the gaussian process either "Constant", "Linear" or "Gaussian", by default None
         """
 
         self.kernel_spec = kernel_spec
@@ -67,6 +100,7 @@ class Celerite2GP(BaseGP):
             )
         else:
             init_params = self.kernel_spec.get_param_array()
+
         self.gp = self.compute(self._lightcurve.times, fit=True, params=init_params)
 
     def _build_mean_model(
@@ -77,15 +111,11 @@ class Celerite2GP(BaseGP):
         Parameters
         ----------
         meanmodel : str
-            Mean model to use, : "Constant", "Linear", "Gaussian", "Fixeddefaults to a fixed parameter of the mean if None
+            Mean model to use, : "Constant", "Linear", "Gaussian" defaults to a fixed parameter of the mean if None
         Returns
         -------
-        Union[ConstantMean,LinearMean, GaussianMean, FixedMean]
+        Union[ConstantMean,LinearMean, GaussianMean, float]
             Mean numpyro model for the kernel, can be a ConstantMean, LinearMean, GaussianMean or a float
-        Raises
-        ------
-        ValueError
-            If the meanmodel is not one of the accepted options.
         """
 
         if meanmodel is None or meanmodel.lower() == "fixed":
@@ -104,23 +134,11 @@ class Celerite2GP(BaseGP):
                 f"Invalid mean model specified: '{meanmodel}'. Must be None, 'fixed', 'constant', 'linear', or 'gaussian'."
             )
 
-    def numpyro_dist(self) -> CeleriteNormal:
-        """Get the numpyro distribution for the Gaussian Process.
-
-        Returns
-        -------
-        CeleriteNormal
-            Numpyro distribution for the Gaussian Process.
-        """
+    def numpyro_dist(self):
         return self.gp.numpyro_dist()
 
-    def compute(
-        self,
-        t: jax.Array,
-        fit: bool,
-        params: jax.Array = None,
-    ) -> None:
-        """Set up the Celerite2 kernel, GaussianProcess and call compute on it with
+    def compute(self, t: jax.Array, fit: bool, params: jax.Array = None) -> None:
+        """Set up the TinyGP kernel, GaussianProcess and call compute on it with
         the appropriate params.
 
         Parameters
@@ -131,7 +149,7 @@ class Celerite2GP(BaseGP):
             Times for the lightcurve observations
 
         fit : bool
-            Whether the GP is being fitted (i.e. during parameter optiization) or sampled.
+            Whether the GP is being fitted
         """
         if fit:
             mean_params = params[: self.meanmodel.sampled_parameters]
@@ -140,55 +158,35 @@ class Celerite2GP(BaseGP):
             mean = self.meanmodel.compute_mean(fit=fit, params=mean_params)
         else:
             mean = self.meanmodel.compute_mean(fit=fit)
-        kernel = self.kernel_spec.get_kernel(fit=fit)
-        self.gp = celerite2.jax.GaussianProcess(kernel, mean=mean)
-        self.gp.compute(
-            t,
-            yerr=self._lightcurve.dy,
-            check_sorted=False,
+
+        kernel = self._get_kernel(fit=fit)
+        self.gp = tinygp.GaussianProcess(
+            kernel=kernel,
+            X=t,
+            diag=self._lightcurve.dy**2,
+            mean=mean,
         )
+        # return gp
 
-    def _get_kernel(self, fit=True) -> j_terms.Term:
-        """Get the kernel for the Gaussian Process based on the kernel specification.
-
-        Parameters
-        ----------
-        fit : bool, optional
-            Whether the parameters are being fit or sampled, by default True
-
-        Returns
-        -------
-        j_terms.Term
-            The Celerite2 kernel term constructed from the kernel specification.
-
-        Raises
-        ------
-        ValueError
-            If a parameter in the kernel specification is not fixed and does not have a prior distribution.
-        """
+    def _get_kernel(self, fit=True):
 
         terms = []
-
         for i, term in enumerate(self.kernel_spec.terms):
-            kwargs = {}
-
-            for name, param_spec in term.parameters.items():
-                full_name = f"terms[{i}]:log_{name}"
-                if not param_spec.fixed and param_spec.prior is None:
-                    raise ValueError(
-                        f"Missing prior distribution for parameter '{full_name}'"
+            kwargs = {
+                name: (
+                    -1.0e-10
+                    if param_spec.zeroed
+                    else jnp.exp(
+                        param_spec.value
+                        if (fit or param_spec.fixed)
+                        else numpyro.sample(
+                            f"terms[{i}]:log_{name}",
+                            param_spec.prior(*param_spec.bounds),
+                        )
                     )
-                if fit or param_spec.fixed:
-                    val = param_spec.value
-
-                else:
-                    dist_cls = param_spec.prior
-                    val = numpyro.sample(
-                        full_name,
-                        dist_cls(*param_spec.bounds),
-                    )
-
-                kwargs[name] = jnp.exp(val)
+                )
+                for name, param_spec in term.parameters.items()
+            }
             terms.append(term.term_class(**kwargs))
 
         kernel = terms[0]
@@ -196,7 +194,7 @@ class Celerite2GP(BaseGP):
             kernel += t
         return kernel
 
-    def get_psd(self) -> np.ndarray:
+    def get_psd(self, freq_in_hz=True) -> np.ndarray:
         """Get the power spectral density for the kernel at the current parameters
 
         Returns
@@ -206,10 +204,10 @@ class Celerite2GP(BaseGP):
         """
         kernel = self.kernel_spec.get_kernel(fit=True)
 
-        return kernel.get_psd
+        return self.get_psd_from_kernel(kernel, freq_in_hz=True)
 
     def negative_log_likelihood(self, params: jax.Array, fit=True) -> float:
-        """Calculate the negtaive log likelihood.
+        """Calcultae the negtaive log likelihood
 
         Parameters
         ----------
@@ -224,8 +222,9 @@ class Celerite2GP(BaseGP):
             Negative Log Likelihood
         """
         self.compute(self._lightcurve.times, params=params, fit=fit)
-        nll_value = -self.gp.log_likelihood(self._lightcurve.y)
-        jax.debug.print("Negative Log Likelihood: {} {}", nll_value, params)
+        nll_value = -self.gp.log_probability(y=self._lightcurve.y)
+        jax.debug.print("nll_value: {} params: {}", nll_value, params)
+
         return nll_value
 
     def get_parameter_vector(self) -> jax.Array:
@@ -261,7 +260,7 @@ class Celerite2GP(BaseGP):
         float
             Log likelihood of the model
         """
-        return self.gp.log_likelihood(y=observations)
+        return self.gp.log_probability(y=observations)
 
     def get_parameter_bounds(self) -> Dict:
         """Returns the bounds on the kernel parameters.
@@ -293,38 +292,65 @@ class Celerite2GP(BaseGP):
             param_names = self.kernel_spec.get_param_names()
         return param_names
 
-    def standarized_residuals(self, include_noise=True):
-        """Returns the standarized residuals (see e.g. Kelly et al. 2011) Eq. 49.
-        You should set the gp parameters to your best or mean (median) parameter values prior to calling this method
-
-        Parameters
-        ----------
-        include_noise: bool,
-            True to include any jitter term into the standard deviation calculation. False ignores this contribution.
+    def get_psd_from_kernel(self, kernel, freq_in_hz=True, real_eps=1e-5):
         """
-        pred_mean, pred_var = self.gp.predict(
-            self._lightcurve.y, return_var=True, return_cov=False
-        )
-        if include_noise:
-            pred_var += self.gp.kernel.jitter
-        std_res = (self._lightcurve.y - pred_mean) / jnp.sqrt(pred_var)
-        return std_res
+        Build a callable PSD function from a tinygp Celerite kernel.
 
-    def predict(self, y: jax.Array, **kwargs) -> Union[tuple, jax.Array]:
-        """Compute the conditional predictive distribution of the model by calling celerite2's predict method.
+        Args:
+            kernel: A tinygp kernel (sum of Celerite terms)
+            freq_in_hz: If True, expects frequencies in Hz and converts to omega
+            real_eps: Threshold for deciding whether b and d are "zero" (real term)
 
-        Parameters
-        ----------
-        y : np.ndarray
-            Observations at the coordinates of the lightcurve times.
-        **kwargs : dict
-            Additional keyword arguments to pass to the celerite predict method.
-        Returns
-        ------
-
-        tuple
-            mu, (mu, cov), or (mu, var) depending on the values of return_cov and
-            return_var. See https://github.com/exoplanet-dev/celerite2/blob/main/python/celerite2/core.py
-
+        Returns:
+            A function psd(omega) or psd(f) → PSD values
         """
-        return self.gp.predict(y, **kwargs)
+        if hasattr(kernel, "terms"):
+            terms = kernel.terms
+        else:
+            terms = [kernel]
+
+        alpha_real = []
+        beta_real = []
+        alpha_complex_real = []
+        alpha_complex_imag = []
+        beta_complex_real = []
+        beta_complex_imag = []
+
+        for term in terms:
+            if not isinstance(term, tinygp.kernels.quasisep.Celerite):
+                raise NotImplementedError(f"Unsupported kernel type: {type(term)}")
+
+            a = term.a
+            b = term.b
+            c = term.c
+            d = term.d
+
+            if jnp.abs(b) < real_eps and jnp.abs(d) < real_eps:
+                alpha_real.append(a)
+                beta_real.append(c)
+            else:
+                alpha_complex_real.append(a)
+                alpha_complex_imag.append(b)
+                beta_complex_real.append(c)
+                beta_complex_imag.append(d)
+
+        alpha_real = jnp.array(alpha_real)
+        beta_real = jnp.array(beta_real)
+        alpha_complex_real = jnp.array(alpha_complex_real)
+        alpha_complex_imag = jnp.array(alpha_complex_imag)
+        beta_complex_real = jnp.array(beta_complex_real)
+        beta_complex_imag = jnp.array(beta_complex_imag)
+
+        def psd_fn(freqs):
+            omega = 2 * jnp.pi * freqs if freq_in_hz else freqs
+            return get_psd_jax(
+                alpha_real,
+                beta_real,
+                alpha_complex_real,
+                alpha_complex_imag,
+                beta_complex_real,
+                beta_complex_imag,
+                omega,
+            )
+
+        return psd_fn
