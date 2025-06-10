@@ -1,13 +1,14 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-import celerite2.jax.terms as j_terms
 import numpyro.distributions as dist
-from celerite2.jax.distribution import CeleriteNormal
+import tinygp
 from jax import numpy as jnp
 from numpyro.handlers import seed, trace
+from tinygp.numpyro_support import TinyDistribution
 
 from mind_the_gaps.gp.celerite2_gaussian_process import Celerite2GP
+from mind_the_gaps.gp.tinygp_gaussian_process import TinyGP
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
 from mind_the_gaps.models.kernel_spec import (
     KernelParameterSpec,
@@ -24,6 +25,7 @@ class TestCelerite2GP(unittest.TestCase):
         self.mock_lc.times = jnp.linspace(0, 1, 10)
         self.mock_lc.y = jnp.sin(self.mock_lc.times)
         self.mock_lc.dy = 0.1 * jnp.ones_like(self.mock_lc.times)
+        self.mock_lc.mean.return_value = jnp.mean(self.mock_lc.y)
 
         self.param1 = KernelParameterSpec(
             value=1.0, prior=dist.Uniform, fixed=False, bounds=(0.1, 5.0)
@@ -36,7 +38,7 @@ class TestCelerite2GP(unittest.TestCase):
             value=4.0, prior=dist.Uniform, fixed=False, bounds=(0.1, 5.0)
         )
         self.term_spec = KernelTermSpec(
-            term_class=j_terms.ComplexTerm,
+            term_class=tinygp.kernels.quasisep.Celerite,
             parameters={
                 "a": self.param1,
                 "b": self.param2,
@@ -49,7 +51,7 @@ class TestCelerite2GP(unittest.TestCase):
         self.rng_key = jnp.array([0, 0], dtype=jnp.uint32)
 
         self.mean_params = jnp.array([1.0])
-        self.gp_model = Celerite2GP(
+        self.gp_model = TinyGP(
             kernel_spec=self.kernel_spec,
             lightcurve=self.mock_lc,
             meanmodel="constant",
@@ -57,27 +59,15 @@ class TestCelerite2GP(unittest.TestCase):
         )
 
     def test_initialization(self):
-        gp = Celerite2GP(kernel_spec=self.kernel_spec, lightcurve=self.mock_lc)
-        self.assertIsInstance(gp, Celerite2GP)
-        self.assertEqual(gp._lightcurve, self.mock_lc)
-
-    @patch("celerite2.jax.GaussianProcess.compute")
-    def test_compute(self, mock_compute):
-
-        if self.gp_model.meanmodel.sampled_mean:
-            params = jnp.concatenate([self.mean_params, jnp.array([1.5, 2.5, 3.5])])
-        else:
-            params = jnp.array([1.5, 2.5, 3.5])
-        self.gp_model.compute(self.mock_lc.times, fit=True, params=params)
-        self.assertTrue(hasattr(self.gp_model, "gp"))
-        self.assertTrue(hasattr(self.gp_model.gp, "compute"))
-        mock_compute.assert_called_with(
-            self.mock_lc.times, yerr=self.mock_lc.dy, check_sorted=False
+        gp = TinyGP(
+            kernel_spec=self.kernel_spec, lightcurve=self.mock_lc, meanmodel="fixed"
         )
+        self.assertIsInstance(gp, TinyGP)
+        self.assertEqual(gp._lightcurve, self.mock_lc)
 
     def test_get_kernel_fit(self):
         kernel = self.gp_model.kernel_spec.get_kernel(fit=True)
-        self.assertIsInstance(kernel, j_terms.ComplexTerm)
+        self.assertIsInstance(kernel, tinygp.kernels.quasisep.Celerite)
         self.assertEqual(kernel.a, jnp.exp(self.param1.value))
         self.assertEqual(kernel.b, jnp.exp(self.param2.value))
         self.assertEqual(kernel.c, jnp.exp(self.param3.value))
@@ -102,7 +92,7 @@ class TestCelerite2GP(unittest.TestCase):
         sampled_c = jnp.exp(tr["terms[0]:log_c"]["value"])
         sampled_d = jnp.exp(tr["terms[0]:log_d"]["value"])
 
-        self.assertIsInstance(kernel, j_terms.ComplexTerm)
+        self.assertIsInstance(kernel, tinygp.kernels.quasisep.Celerite)
         self.assertAlmostEqual(kernel.a, sampled_a, places=5)
         self.assertAlmostEqual(kernel.b, jnp.exp(self.param2.value), places=5)
         self.assertAlmostEqual(kernel.c, sampled_c, places=5)
@@ -115,7 +105,7 @@ class TestCelerite2GP(unittest.TestCase):
             self.gp_model.kernel_spec.get_kernel(fit=False)
 
     def test_numpyro_dist(self):
-        mock_dist = MagicMock(spec=CeleriteNormal)
+        mock_dist = MagicMock(spec=TinyDistribution)
         self.gp_model.gp = MagicMock()
         self.gp_model.gp.numpyro_dist.return_value = mock_dist
 

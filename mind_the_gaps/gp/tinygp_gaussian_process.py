@@ -204,7 +204,7 @@ class TinyGP(BaseGP):
         """
         kernel = self.kernel_spec.get_kernel(fit=True)
 
-        return self.get_psd_from_kernel(kernel, freq_in_hz=True)
+        return self.get_psd_from_kernel(kernel, freq_in_hz=freq_in_hz)
 
     def negative_log_likelihood(self, params: jax.Array, fit=True) -> float:
         """Calcultae the negtaive log likelihood
@@ -223,7 +223,6 @@ class TinyGP(BaseGP):
         """
         self.compute(self._lightcurve.times, params=params, fit=fit)
         nll_value = -self.gp.log_probability(y=self._lightcurve.y)
-        jax.debug.print("nll_value: {} params: {}", nll_value, params)
 
         return nll_value
 

@@ -299,21 +299,21 @@ class KernelSpec:
 
         terms = []
         for i, term in enumerate(self.terms):
-            kwargs = {
-                name: (
-                    -1.0e-10
-                    if param_spec.zeroed
-                    else jnp.exp(
-                        param_spec.value
-                        if (fit or param_spec.fixed)
-                        else numpyro.sample(
-                            f"terms[{i}]:log_{name}",
-                            param_spec.prior(*param_spec.bounds),
+            kwargs = {}
+            for name, param_spec in term.parameters.items():
+                if not param_spec.zeroed and not (fit or param_spec.fixed):
+                    if param_spec.prior is None:
+                        raise ValueError(
+                            f"Missing prior for parameter '{name}' in term {i}"
                         )
+                    sample = numpyro.sample(
+                        f"terms[{i}]:log_{name}",
+                        param_spec.prior(*param_spec.bounds),
                     )
-                )
-                for name, param_spec in term.parameters.items()
-            }
+                    value = jnp.exp(sample)
+                else:
+                    value = -1.0e-10 if param_spec.zeroed else jnp.exp(param_spec.value)
+                kwargs[name] = value
             terms.append(term.term_class(**kwargs))
 
         kernel = terms[0]

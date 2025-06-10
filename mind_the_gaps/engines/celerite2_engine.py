@@ -28,7 +28,7 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
 
     Inherits from:
     ---------------
-    BaseGP : Base class for Gaussian Process models
+    BaseNumpyroGPEngine : Base class for Numpyro GP engines
     """
 
     posterior_params = {
@@ -291,6 +291,7 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
         GappyLightcurve
             A new GappyLightcurve instance generated from the Gaussian Process parameters.
         """
+        kernel_spec = copy.deepcopy(self.kernel_spec)
         if self.gp.meanmodel.sampled_mean:
             mean_params = params[: self.gp.meanmodel.sampled_parameters]
             kernel_params = params[self.gp.meanmodel.sampled_parameters :]
@@ -301,7 +302,7 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
 
         self.kernel_spec.update_params_from_array(kernel_params)
         gp_sample = Celerite2GP(
-            kernel_spec=self.kernel_spec,
+            kernel_spec=kernel_spec,
             meanmodel=self.meanmodel,
             lightcurve=self._lightcurve,
             mean_params=mean_params,
@@ -360,242 +361,3 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
             lightcurves.append(self._generate_lc_from_params(params=params))
 
         return lightcurves
-
-    def _auto_window(self, taus: jax.Array, c: int) -> jax.Array:
-        """Determine the window size for the autocorrelation function based on the specified threshold `c`.
-
-        Parameters
-        ----------
-        taus : jax.Array
-            The autocorrelation times as a jax array.
-        c : int
-            The threshold factor to determine the window size.
-
-        Returns
-        -------
-        jax.Array
-            The index of the first autocorrelation time that exceeds the threshold `c` times the autocorrelation time.
-            If no such index exists, returns the last index of `taus`.
-        """
-        m = jnp.arange(len(taus)) < c * taus
-        if jnp.any(m):
-            return jnp.argmin(m)
-        return len(taus) - 1
-
-    def _function_1d(self, x: jax.Array) -> jax.Array:
-        """Estimate the normalized autocorrelation function of a 1-D series
-
-        Args:
-            x: The series as a 1-D jax array.
-
-        Returns:
-            jax.array: The autocorrelation function of the time series.
-
-        """
-
-        x = jnp.atleast_1d(x)
-        if len(x.shape) != 1:
-            raise ValueError("invalid dimensions for 1D autocorrelation function")
-        n = self._next_pow_two(len(x))
-
-        f = jnp.fft.fft(x - jnp.mean(x), n=2 * n)
-        acf = jnp.fft.ifft(f * jnp.conjugate(f))[: len(x)].real
-        acf /= acf[0]
-        return acf
-
-    def _next_pow_two(self, n):
-        """Returns the next power of two greater than or equal to `n`"""
-        i = 1
-        while i < n:
-            i = i << 1
-        return i
-
-    def _auto_corr_time(
-        self, samples: Dict, num_chains: int, c: int = 5, tol: int = 50, quiet=True
-    ) -> float:
-        """Estimate the autocorrelation time of the MCMC samples.
-        Jax version of the Emcee approach to get autocorrelation time. (See https://emcee.readthedocs.io/en/stable/user/autocorr/#autocorrelation-analysis)
-
-        Parameters
-        ----------
-        samples : Dict
-            Dictionary of MCMC samples, where keys are parameter names and values are jax arrays of samples.
-        num_chains : int
-            Number of chains in the MCMC samples.
-        c : int, optional
-            Step size of the window search, by default 5
-        tol : int, optional
-            Minimum number of autocorrelation times to trust the estimate, by default 50
-        quiet : bool, optional
-            Warn when chain is too short rather than raise a ValueError, by default False
-
-        Returns
-        -------
-        jax.Array
-            An estimate of the integrated autocorrelation time of the chain for each parameter.
-
-        Raises
-        ------
-        ValueError
-            If the dimensions of the input samples are invalid or if the chain is shorter than the specified tolerance times the integrated autocorrelation time.
-        """
-
-        x = jnp.stack(
-            [samples[key].T for key in samples.keys() if key != "log_likelihood"],
-            axis=-1,
-        )
-        x = jnp.atleast_1d(x)
-
-        if len(x.shape) == 2:
-            x = x[:, :, jnp.newaxis]
-        if len(x.shape) != 3:
-            raise ValueError("invalid dimensions")
-
-        n_t, n_c, n_d = x.shape
-        tau_est = jnp.empty(n_d)
-        windows = jnp.empty(n_d, dtype=int)
-
-        for d in range(n_d):
-            f = jnp.zeros(n_t)
-            for c in range(n_c):
-                f += self._function_1d(x[:, c, d])
-            f /= n_c
-            taus = 2.0 * jnp.cumsum(f) - 1.0
-            windows = windows.at[d].set(self._auto_window(taus, c))
-            tau_est = tau_est.at[d].set(taus[windows[d]])
-
-        return tau_est
-
-    @property
-    def max_loglikelihood(self) -> float:
-        """Return the maximum loglikelihood from the derived posteriors.
-
-        Returns
-        -------
-        float
-            The maximum loglikelihood value from the derived posteriors.
-
-        Raises
-        ------
-        AttributeError
-            If the posteriors have not been derived yet, i.e., if `derive_posteriors` has not been called.
-        """
-        if self._loglikelihoods is None:
-            raise AttributeError(
-                "Posteriors have not been derived. Please run \
-                    derive_posteriors prior to populate the attributes."
-            )
-
-        return self._loglikelihoods.max()
-
-    @property
-    def autocorr(self) -> List[float]:
-        """Return the autocorrelation time of the chains.
-
-        Returns
-        -------
-        List[float]
-            The autocorrelation time for each parameter in the chains.
-
-        Raises
-        ------
-        AttributeError
-            If the posteriors have not been derived yet, i.e., if `derive_posteriors` has not been called.
-        """
-        if self._autocorr is None:
-            raise AttributeError(
-                "Posteriors have not been derived. Please run \
-                    derive_posteriors prior to populate the attributes."
-            )
-
-        return self._autocorr
-
-    @property
-    def max_parameters(self) -> jax.Array:
-        """Return the parameters corresponding to the maximum loglikelihood.
-
-        Returns
-        -------
-        jax.Array
-            An array containing the parameters corresponding to the maximum loglikelihood from the derived posteriors.
-
-        Raises
-        ------
-        AttributeError
-            If the posteriors have not been derived yet, i.e., if `derive_posteriors` has not been called.
-        """
-        if self._mcmc_samples is None:
-            raise AttributeError(
-                "Posteriors have not been derived. Please run \
-                    derive_posteriors prior to populate the attributes."
-            )
-        flat_idx = jnp.argmax(self._loglikelihoods)
-        idx = jnp.unravel_index(flat_idx, self._loglikelihoods.shape)
-        chain_idx = int(idx[0])
-        step_idx = int(idx[1])
-
-        # Extract and stack the parameter values at that index (excluding log_likelihood)
-        values = [
-            self._mcmc_samples[param][chain_idx, step_idx]
-            for param in self._mcmc_samples
-            if param != "log_likelihood"
-        ]
-
-        return jnp.array(values)
-
-    @property
-    def median_parameters(self) -> jax.Array:
-        """Return the median parameters from the derived posteriors.
-
-        Returns
-        -------
-        jax.Array
-            An array containing the median parameters from the derived posteriors.
-
-        Raises
-        ------
-        AttributeError
-            If the posteriors have not been derived yet, i.e., if `derive_posteriors` has not been called.
-        """
-        if self._mcmc_samples is None:
-            raise AttributeError(
-                "Posteriors have not been derived. Please run \
-                derive_posteriors prior to populate the attributes."
-            )
-        return [
-            jnp.median(self._mcmc_samples[param].reshape(-1))
-            for param in self._mcmc_samples
-            if param != "log_likelihood"
-        ]
-
-    @property
-    def parameter_names(self) -> List[str]:
-        """Return the names of the parameters in the Gaussian Process.
-
-        Returns
-        -------
-        List[str]
-            A list of parameter names used in the Gaussian Process.
-        """
-        self.gp.get_parameter_names()
-
-    @property
-    def tau(self) -> jax.Array:
-        """Return the autocorrelation time of the chains.
-
-        Returns
-        -------
-        jax.Array
-            An array containing the autocorrelation time for each parameter in the chains.
-
-        Raises
-        ------
-        AttributeError
-            If the posteriors have not been derived yet, i.e., if `derive_posteriors` has not been called.
-        """
-        if self._mcmc_samples is None:
-            raise AttributeError(
-                "Posteriors have not been derived. Please run \
-                derive_posteriors prior to populate the attributes."
-            )
-        return self._tau

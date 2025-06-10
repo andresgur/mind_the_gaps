@@ -28,6 +28,15 @@ from mind_the_gaps.models.kernel_spec import KernelSpec
 
 
 class TinyGPEngine(BaseNumpyroGPEngine):
+    """TinyGP Gaussian Process Engine, used for modelling lightcurves using the TinyGP library with Numpyro MCMC sampling.
+    This engine wraps the CeleriteGP class and provides methods for fitting the GP, deriving posteriors, and generating lightcurves from the posteriors.
+    It allows for parallelised MCMC sampling and provides methods to check convergence, calculate autocorrelation times, and generate lightcurves from the derived posteriors.
+
+    Inherits from:
+    ---------------
+    BaseNumpyroGPEngine : Base class for Numpyro GP engines
+    """
+
     posterior_params = BaseNumpyroGPEngine.posterior_params | {"aies"}
 
     def __init__(
@@ -39,6 +48,24 @@ class TinyGPEngine(BaseNumpyroGPEngine):
         seed: int = 0,
         fit_mean: bool = True,
     ):
+        """Initialise the TinyGP Gaussian Process Engine with a kernel specification,
+
+        Parameters
+        ----------
+        BaseGPEngine : _base class for Gaussian Process engines
+        kernel_spec : KernelSpec
+            Specification of the kernel to use, containing the terms and their parameters.
+        lightcurve : GappyLightcurve
+            The lightcurve data to fit the Gaussian Process to.
+        meanmodel : str, optional
+            The type of mean model to use, can be "Constant", "Linear", "Gaussian" or "Fixed", defaults to None.
+        mean_params : jax.Array, optional
+            Parameters for the mean model, if applicable. If None, defaults to a fixed mean based on the lightcurve.
+        seed : int, optional
+            Random seed for reproducibility, by default 0.
+        fit_mean : bool, optional
+            Whether to fit the mean model parameters, by default True.
+        """
         super().__init__(
             kernel_spec=kernel_spec,
             lightcurve=lightcurve,
@@ -54,40 +81,6 @@ class TinyGPEngine(BaseNumpyroGPEngine):
             mean_params=mean_params,
         )
 
-    def initialize_params(self, num_chains: int, std_dev=0.1) -> Dict:
-        """
-        Generate multiple initial parameter values for NUTS sampling, ensuring they
-        respect bounds and have a Gaussian spread.
-
-        Args:
-            init_params (list or array): Initial parameter values.
-            num_chains (int): Number of MCMC chains.
-            bounds (dict): Dictionary with parameter names as keys and (min, max) tuples as values.
-            std_dev (float): Standard deviation for Gaussian noise.
-
-        Returns:
-            dict: Dictionary of JAX arrays with shape (num_chains, param_dim).
-        """
-        param_dict = {}
-        i = 0
-        for term in self.kernel_spec.terms:
-            for param_name, param_spec in term.parameters.items():
-                if param_spec.fixed:
-                    continue
-
-                base_value = param_spec.value
-                low, high = param_spec.bounds
-
-                spread_values = base_value + np.random.normal(
-                    0, std_dev, size=num_chains
-                )
-
-                spread_values = np.clip(spread_values, float(low), float(high))
-
-                param_dict[f"term{i}_{param_name}"] = jnp.array(spread_values)
-            i += 1
-        return param_dict
-
     def derive_posteriors(
         self,
         num_warmup: int,
@@ -97,31 +90,70 @@ class TinyGPEngine(BaseNumpyroGPEngine):
         fit=True,
         progress=True,
         aies: bool = False,
+        perc: float = 0.1,
     ) -> None:
+        """Derive the posterior distributions of the Gaussian Process parameters using MCMC sampling.
+        This method initialises the parameters, runs MCMC sampling using the Numpyro with the NUTS kernel,
+        and checks for convergence based on the autocorrelation time of the samples.
+        It updates the Gaussian Process with the sampled parameters and stores the samples for further analysis.
 
+        Parameters
+        ----------
+        num_warmup : int
+            Number of warmup steps for the MCMC sampling.
+        num_chains : int
+            Number of chains to run in parallel for MCMC sampling.
+        max_steps : int
+            Maximum number of steps for the MCMC sampling.
+        converge_steps : int
+            Number of steps to check for convergence in the MCMC sampling.
+        fit : bool, optional
+            Whether to fit the parameters before running MCMC, by default True.
+        progress : bool, optional
+            Whether to show a progress bar during MCMC sampling, by default True.
+        perc : float
+            Percentage for the normal distribution used to spread the parameters, by default 0.1.
+        aies : bool, optional
+            Whether to use the AIES kernel for MCMC sampling instead of NUTS, by default False.
+        Raises
+        ------
+        ValueError
+            If `max_steps` is less than `converge_steps`, as it would not allow for at least one iteration of MCMC sampling.
+
+        """
         old_tau = jnp.inf
         if fit:
-            self.init_params = self.minimize()
-            self.kernel_spec.update_params_from_array(
-                self.init_params[self.gp.meanmodel.sampled_parameters :]
-            )
-
-        fixed_params = self.initialize_params(num_chains=num_chains)
-
-        if aies:
-            kernel = AIES(
-                self.numpyro_model,  # , init_strategy=init_to_value(values=fixed_params)
-                moves={AIES.DEMove(): 0.5, AIES.StretchMove(): 0.5},
-            )
-            chain_method = "vectorized"
+            self.minimize()
+            fixed_params = self.initialise_params(num_chains=num_chains, perc=perc)
+            if aies:
+                chain_method = "vectorized"
+                kernel = AIES(
+                    self.numpyro_model,
+                    init_strategy=init_to_value(values=fixed_params),
+                    moves={AIES.DEMove(): 0.5, AIES.StretchMove(): 0.5},
+                )
+            else:
+                chain_method = "parallel"
+                kernel = NUTS(
+                    self.numpyro_model,
+                    adapt_step_size=True,
+                    dense_mass=False,
+                    init_strategy=init_to_value(values=fixed_params),
+                )
         else:
-            kernel = NUTS(
-                self.numpyro_model,
-                adapt_step_size=True,
-                dense_mass=False,
-                init_strategy=init_to_value(values=fixed_params),
-            )
-            chain_method = "parallel"
+            if aies:
+                chain_method = "vectorized"
+                kernel = AIES(
+                    self.numpyro_model,
+                    moves={AIES.DEMove(): 0.5, AIES.StretchMove(): 0.5},
+                )
+            else:
+                chain_method = "parallel"
+                kernel = NUTS(
+                    self.numpyro_model,
+                    adapt_step_size=True,
+                    dense_mass=False,
+                )
 
         mcmc = MCMC(
             kernel,
@@ -189,12 +221,23 @@ class TinyGPEngine(BaseNumpyroGPEngine):
         self._loglikelihoods = idata.posterior["log_likelihood"].values
 
     def _generate_lc_from_params(self, params: jax.Array) -> GappyLightcurve:
+        """Generate a lightcurve from the Gaussian Process parameters.
+        This method creates a new GappyLightcurve instance by sampling from the Gaussian Process defined by the kernel specification.
+
+        Parameters
+        ----------
+        params : jax.Array
+            Parameters for the Gaussian Process, which include both the mean model parameters and the kernel parameters.
+
+        Returns
+        -------
+        GappyLightcurve
+            A new GappyLightcurve instance generated from the Gaussian Process parameters.
+        """
         kernel_spec = copy.deepcopy(self.kernel_spec)
         if self.gp.meanmodel.sampled_mean:
             mean_params = params[: self.gp.meanmodel.sampled_parameters]
             kernel_params = params[self.gp.meanmodel.sampled_parameters :]
-
-            # mean = self.meanmodel.compute_mean(fit=True, params=mean_params)
         else:
             mean_params = self.init_params[: self.gp.meanmodel.sampled_parameters]
             kernel_params = params
@@ -214,159 +257,3 @@ class TinyGPEngine(BaseNumpyroGPEngine):
         noisy_rates, dy = simulator.add_noise(rates)
         lc = GappyLightcurve(self._lightcurve.times, noisy_rates, dy)
         return lc
-
-    def generate_from_posteriors(self, nsims: int):
-        if self._mcmc_samples is None:
-            raise RuntimeError(
-                "Posteriors have not been derived. Please run derive_posteriors prior to calling this method."
-            )
-        if nsims >= len(next(iter(self._mcmc_samples.values()))):
-            warnings.warn(
-                f"The number of simulation requested {nsims} is higher than the number of posterior samples {len(next(iter(self._mcmc_samples.values())))}, so many samples will be drawn more than once"
-            )
-        flat_samples = {
-            key: v.reshape(-1)
-            for key, v in self._mcmc_samples.items()
-            if key != "log_likelihood"
-        }
-
-        total_samples = len(next(iter(flat_samples.values())))
-
-        sampled_indices = np.random.choice(total_samples, nsims, replace=True)
-        sampled_params = np.column_stack(
-            [v[sampled_indices] for v in flat_samples.values()]
-        )
-
-        lightcurves = []
-        for params in sampled_params:
-            lightcurves.append(self._generate_lc_from_params(params=params))
-
-        return lightcurves
-
-    def auto_window(self, taus: jax.Array, c: int) -> jax.Array:
-        m = jnp.arange(len(taus)) < c * taus
-        if jnp.any(m):
-            return jnp.argmin(m)
-        return len(taus) - 1
-
-    def function_1d(self, x: jax.Array) -> jax.Array:
-        """Estimate the normalized autocorrelation function of a 1-D series
-
-        Args:
-            x: The series as a 1-D jax array.
-
-        Returns:
-            jax.array: The autocorrelation function of the time series.
-
-        """
-
-        x = jnp.atleast_1d(x)
-        if len(x.shape) != 1:
-            raise ValueError("invalid dimensions for 1D autocorrelation function")
-        n = self.next_pow_two(len(x))
-
-        f = jnp.fft.fft(x - jnp.mean(x), n=2 * n)
-        acf = jnp.fft.ifft(f * jnp.conjugate(f))[: len(x)].real
-        acf /= acf[0]
-        return acf
-
-    def next_pow_two(self, n):
-        """Returns the next power of two greater than or equal to `n`"""
-        i = 1
-        while i < n:
-            i = i << 1
-        return i
-
-    def _auto_corr_time(self, samples, num_chains, c=5, tol=50, quiet=False):
-
-        x = jnp.stack([samples[key].T for key in samples.keys()], axis=-1)
-        x = jnp.atleast_1d(x)
-
-        if len(x.shape) == 2:
-            x = x[:, :, jnp.newaxis]
-        if len(x.shape) != 3:
-            raise ValueError("invalid dimensions")
-
-        n_t, n_c, n_d = x.shape
-        tau_est = jnp.empty(n_d)
-        windows = jnp.empty(n_d, dtype=int)
-
-        # Loop over parameters
-        for d in range(n_d):
-            f = jnp.zeros(n_t)
-            for c in range(n_c):
-                f += self.function_1d(x[:, c, d])
-            f /= n_c
-            taus = 2.0 * jnp.cumsum(f) - 1.0
-            windows = windows.at[d].set(self.auto_window(taus, c))
-            tau_est = tau_est.at[d].set(taus[windows[d]])
-
-        # Check convergence
-        flag = tol * tau_est > n_t
-
-        # Warn or raise in the case of non-convergence
-        if jnp.any(flag):
-            msg = (
-                "The chain is shorter than {0} times the integrated "
-                "autocorrelation time for {1} parameter(s). Use this estimate "
-                "with caution and run a longer chain!\n"
-            ).format(tol, jnp.sum(flag))
-            msg += "N/{0} = {1:.0f};\ntau: {2}".format(tol, n_t / tol, tau_est)
-            if not quiet:
-                pass
-                # raise Exception
-
-        return tau_est
-
-    @property
-    def max_loglikelihood(self):
-        if self._loglikelihoods is None:
-            raise AttributeError(
-                "Posteriors have not been derived. Please run \
-                    derive_posteriors prior to populate the attributes."
-            )
-
-        return self._loglikelihoods.max()
-
-    @property
-    def autocorr(self) -> List[float]:
-        if self._autocorr is None:
-            raise AttributeError(
-                "Posteriors have not been derived. Please run \
-                    derive_posteriors prior to populate the attributes."
-            )
-
-        return self._autocorr
-
-    @property
-    def max_parameters(self):
-        """Return the parameters that maximize the loglikehood"""
-        if self._mcmc_samples is None:
-            raise AttributeError(
-                "Posteriors have not been derived. Please run \
-                    derive_posteriors prior to populate the attributes."
-            )
-        return self._mcmc_samples[jnp.argmax(self._loglikelihoods)]
-
-    @property
-    def median_parameters(self):
-        if self._mcmc_samples is None:
-            raise AttributeError(
-                "Posteriors have not been derived. Please run \
-                derive_posteriors prior to populate the attributes."
-            )
-        return jnp.median(self._mcmc_samples, axis=0)
-
-    @property
-    def parameter_names(self):
-        raise NotImplementedError
-
-    @property
-    def tau(self):
-        """The autocorrelation time of the chains"""
-        if self._mcmc_samples is None:
-            raise AttributeError(
-                "Posteriors have not been derived. Please run \
-                derive_posteriors prior to populate the attributes."
-            )
-        return self._tau
