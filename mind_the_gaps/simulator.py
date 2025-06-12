@@ -221,6 +221,7 @@ class Simulator:
 
         dt = np.diff(times)
         # check that the sampling is consistent with the exposure times of each timestamp
+
         wrong = np.count_nonzero(dt < self.sim_dt * 0.99)
         if wrong > 0:
             raise ValueError(

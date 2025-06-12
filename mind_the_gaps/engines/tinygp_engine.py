@@ -248,7 +248,6 @@ class TinyGPEngine(BaseNumpyroGPEngine):
             kernel_spec=kernel_spec,
             meanmodel=self.meanmodel,
             lightcurve=self._lightcurve,
-            rng_key=self.rng_key,
             mean_params=mean_params,
         )
         psd_model = gp_sample.get_psd()

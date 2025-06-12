@@ -1,5 +1,7 @@
+import operator
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from functools import reduce
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
 import celerite
@@ -7,7 +9,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro
-from celerite2.jax.terms import Term
+from celerite2.jax.terms import Term, TermSum
 from tinygp.kernels.base import Kernel
 
 
@@ -293,6 +295,7 @@ class KernelSpec:
         kernel = terms[0]
         for t in terms[1:]:
             kernel += t
+
         return kernel
 
     def _get_celerite2_kernel(self, fit=True) -> Term:
@@ -315,7 +318,6 @@ class KernelSpec:
                     value = -1.0e-10 if param_spec.zeroed else jnp.exp(param_spec.value)
                 kwargs[name] = value
             terms.append(term.term_class(**kwargs))
-
         kernel = terms[0]
         for t in terms[1:]:
             kernel += t

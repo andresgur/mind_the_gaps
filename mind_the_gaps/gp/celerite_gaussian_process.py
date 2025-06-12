@@ -38,10 +38,9 @@ class CeleriteGP(BaseGP):
     def compute(self) -> None:
 
         self.gp.compute(
-            self._lightcurve.times  # .to_value(
+            self._lightcurve.times,  # .to_value(
             # "s"
             # ),  # if reading lc need to get vals with: .to_value("s"),
-            ,
             self._lightcurve.dy + 1e-12,
         )
 

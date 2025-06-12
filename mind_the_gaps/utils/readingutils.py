@@ -347,7 +347,7 @@ def read_standard_lightcurve(input_file):
     """
 
     lightcurve = np.genfromtxt(input_file, names=True)
-    timestamps = lightcurve["t"] << u.s
+    timestamps = lightcurve["t"]  # << u.s
     rates = lightcurve["rate"]
     errors = lightcurve["error"]
     exposures = lightcurve["exposure"]

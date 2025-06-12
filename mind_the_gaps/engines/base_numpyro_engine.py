@@ -5,10 +5,10 @@ from typing import Dict, List
 import jax
 import jax.numpy as jnp
 import jaxopt
+import numpy as np
 import numpyro
 
 from mind_the_gaps.engines.gp_engine import BaseGPEngine
-from mind_the_gaps.gp.celerite2_gaussian_process import Celerite2GP
 
 # from mind_the_gaps.gp.tinygp_gaussian_process import TinyGP
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
@@ -81,6 +81,7 @@ class BaseNumpyroGPEngine(BaseGPEngine):
         self._mcmc_samples = {}
         self._autocorr = []
         self.gp = None
+        self._ndim = len(self.init_params)
 
     def numpyro_model(
         self,
@@ -185,82 +186,6 @@ class BaseNumpyroGPEngine(BaseGPEngine):
                 param_dict[f"term{i}_{param_name}"] = jnp.array(spread_values)
             i += 1
         return param_dict
-
-    @property
-    def parameter_names(self) -> List[str]:
-        """Return the names of the parameters in the Gaussian Process.
-
-        Returns
-        -------
-        List[str]
-            A list of parameter names used in the Gaussian Process.
-        """
-        self.gp.get_parameter_names()
-
-    @property
-    def tau(self) -> jax.Array:
-        """Return the autocorrelation time of the chains.
-
-        Returns
-        -------
-        jax.Array
-            An array containing the autocorrelation time for each parameter in the chains.
-
-        Raises
-        ------
-        AttributeError
-            If the posteriors have not been derived yet, i.e., if `derive_posteriors` has not been called.
-        """
-        if self._mcmc_samples is None:
-            raise AttributeError(
-                "Posteriors have not been derived. Please run \
-                derive_posteriors prior to populate the attributes."
-            )
-        return self._tau
-
-    @property
-    def autocorr(self) -> List[float]:
-        """Return the autocorrelation time of the chains.
-
-        Returns
-        -------
-        List[float]
-            The autocorrelation time for each parameter in the chains.
-
-        Raises
-        ------
-        AttributeError
-            If the posteriors have not been derived yet, i.e., if `derive_posteriors` has not been called.
-        """
-        if self._autocorr is None:
-            raise AttributeError(
-                "Posteriors have not been derived. Please run \
-                    derive_posteriors prior to populate the attributes."
-            )
-
-        return self._autocorr
-
-    @property
-    def max_loglikelihood(self) -> float:
-        """Return the maximum loglikelihood from the derived posteriors.
-
-        Returns
-        -------
-        float
-            The maximum loglikelihood value from the derived posteriors.
-
-        Raises
-        ------
-        AttributeError
-            If the posteriors have not been derived yet, i.e., if `derive_posteriors` has not been called.
-        """
-        if self._loglikelihoods is None:
-            raise AttributeError(
-                "Posteriors have not been derived. Please run \
-                    derive_posteriors prior to populate the attributes."
-            )
-
-        return self._loglikelihoods.max()
 
     def _auto_window(self, taus: jax.Array, c: int) -> jax.Array:
         """Determine the window size for the autocorrelation function based on the specified threshold `c`.
@@ -547,3 +472,15 @@ class BaseNumpyroGPEngine(BaseGPEngine):
             lightcurves.append(self._generate_lc_from_params(params=params))
 
         return lightcurves
+
+    @property
+    def k(self):
+        """
+        Number of variable parameters
+
+        Returns
+        -------
+        int
+            Number of variable parameters
+        """
+        return self._ndim

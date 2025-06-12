@@ -405,6 +405,8 @@ class GPModellingComparison:
                 lc,
                 self.null_kernel_spec,
                 self.alt_kernel_spec,
+                self.null_mean_params,
+                self.alt_mean_params,
                 self.modelling_kwargs,
                 posterior_kwargs,
             )
@@ -454,17 +456,28 @@ class GPModellingComparison:
 
 
 def _process_one_lightcurve(args):
-    (i, lc, null_kernel_spec, alt_kernel_spec, modelling_kwargs, posterior_kwargs) = (
-        args
-    )
+    (
+        i,
+        lc,
+        null_kernel_spec,
+        alt_kernel_spec,
+        null_mean_params,
+        alt_mean_params,
+        modelling_kwargs,
+        posterior_kwargs,
+    ) = args
     null_modelling = GPModelling(
-        kernel_spec=null_kernel_spec, lightcurve=lc, **modelling_kwargs
+        kernel_spec=null_kernel_spec,
+        lightcurve=lc,
+        mean_params=null_mean_params,
+        **modelling_kwargs,
     )
     null_modelling.derive_posteriors(**posterior_kwargs)
     null_ll = null_modelling.max_loglikelihood
 
     alt_modelling = GPModelling(
         kernel_spec=alt_kernel_spec,
+        mean_params=alt_mean_params,
         lightcurve=lc,
         **modelling_kwargs,
     )

@@ -327,3 +327,22 @@ class Celerite2GP(BaseGP):
 
         """
         return self.gp.predict(y, **kwargs)
+
+    def standarized_residuals(self, include_noise=True):
+        """Returns the standarized residuals (see e.g. Kelly et al. 2011) Eq. 49.
+        You should set the gp parameters to your best or mean (median) parameter values prior to calling this method
+
+        Parameters
+        ----------
+        include_noise: bool,
+            True to include any jitter term into the standard deviation calculation. False ignores this contribution.
+        """
+        pred_mean, pred_var = self.gp.predict(
+            self._lightcurve.y, return_var=True, return_cov=False
+        )
+
+        # if include_noise:
+        #    ....
+
+        std_res = (self._lightcurve.y - pred_mean) / jnp.sqrt(pred_var)
+        return std_res
