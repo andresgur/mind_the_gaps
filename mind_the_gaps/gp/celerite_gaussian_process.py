@@ -44,6 +44,12 @@ class CeleriteGP(BaseGP):
             self._lightcurve.dy + 1e-12,
         )
 
+    def compute_fit():
+        pass
+
+    def compute_sample():
+        pass
+
     def get_parameter_vector(self) -> np.array:
         return self.gp.get_parameter_vector()
 

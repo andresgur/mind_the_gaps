@@ -10,7 +10,11 @@ ArrayType = TypeVar("Array", np.ndarray, jnp.ndarray)
 class BaseGP(metaclass=ABCMeta):
 
     @abstractmethod
-    def compute(self, times: ArrayType, errors: ArrayType):
+    def compute_sample(self, times: ArrayType, errors: ArrayType):
+        raise NotImplementedError
+
+    @abstractmethod
+    def compute_fit(self, times: ArrayType, errors: ArrayType):
         raise NotImplementedError
 
     @abstractmethod

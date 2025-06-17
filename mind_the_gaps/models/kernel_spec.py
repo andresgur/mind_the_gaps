@@ -1,3 +1,4 @@
+import itertools
 import operator
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -92,7 +93,63 @@ class KernelTermSpec:
         """
         self.term_class = term_class
         self.parameters = OrderedDict(parameters)
+
         self.extras = kwargs
+
+    def _resolve_params(self):
+
+        self._zeroed_params = {}
+        self._fixed_params = {}
+        self._sampled_params = {}
+
+        for name, param_spec in self.parameters.items():
+            if param_spec.fixed:
+                if param_spec.zeroed:
+                    param_spec.value = -1.0e-10
+                    self._zeroed_params[name] = param_spec
+                else:
+                    self._fixed_params[name] = param_spec
+            else:
+                if param_spec.prior is None:
+                    raise ValueError(
+                        f"Missing prior distribution for parameter '{name}'"
+                    )
+                self._sampled_params[name] = param_spec
+
+    def _get_term_fit(self):
+        _params = {}
+        for name, param_spec in itertools.chain(
+            self._fixed_params.items(),
+            self._sampled_params.items(),
+        ):
+            # jax.debug.print(
+            #    "Fit value:{} exp:{}", param_spec.value, jnp.exp(param_spec.value)
+            # )
+            _params[name] = jnp.exp(param_spec.value)
+        for name, param_spec in self._zeroed_params.items():
+            _params[name] = -1.0e-10
+
+        # print(f"Params dict{_params}")
+        return self.term_class(**_params)
+
+    def _get_term_sampled(self, i):
+        _params = {}
+        for name, param_spec in itertools.chain(
+            self._fixed_params.items(), self._sampled_params.items()
+        ):
+
+            sample = numpyro.sample(
+                f"terms[{i}]:log_{name}", param_spec.prior(*param_spec.bounds)
+            )
+
+            _params[name] = jnp.exp(sample)
+            # jax.debug.print("name {}, value {}", sample, jnp.exp(sample))
+            # print(name)
+        for name, param_spec in self._zeroed_params.items():
+            # jax.debug.print("zeroed {}", param_spec.value)
+            _params[name] = param_spec.value
+
+        return self.term_class(**_params)
 
 
 @dataclass
@@ -119,6 +176,9 @@ class KernelSpec:
             self.terms[0].term_class, Kernel
         ):
             self.celerite2 = True
+            for term in self.terms:
+                term._resolve_params()
+        # print("")
 
     def __add__(self, other: "KernelSpec") -> "KernelSpec":
         if not isinstance(other, KernelSpec):
@@ -156,6 +216,7 @@ class KernelSpec:
             for term in self.terms:
                 for name, param in term.parameters.items():
                     if not param.fixed:
+                        # jax.debug.print("In update_params {} {}", array[i], i)
                         param.value = jnp.array(array[i])
                         i += 1
         else:
@@ -318,6 +379,25 @@ class KernelSpec:
                     value = -1.0e-10 if param_spec.zeroed else jnp.exp(param_spec.value)
                 kwargs[name] = value
             terms.append(term.term_class(**kwargs))
+        kernel = terms[0]
+        for t in terms[1:]:
+            kernel += t
+        return kernel
+
+    def _get_celerite2_kernel_fit(self) -> Term:
+        terms = []
+        for i, term in enumerate(self.terms):
+            terms.append(term._get_term_fit())
+        kernel = terms[0]
+        for t in terms[1:]:
+            kernel += t
+
+        return kernel
+
+    def _get_celerite2_kernel_sample(self) -> Term:
+        terms = []
+        for i, term in enumerate(self.terms):
+            terms.append(term._get_term_sampled(i))
         kernel = terms[0]
         for t in terms[1:]:
             kernel += t

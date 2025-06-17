@@ -43,7 +43,26 @@ class FixedMean(MeanFunction):
         self.bounds = jnp.array([])
         self.sampled_mean = False
 
-    def compute_mean(self, fit=None, params: jnp.array = None, rng_key: int = None):
+    def compute_mean(self, params: jnp.array = None):
+        """Return the fixed mean value of the lightcurve.
+
+        Parameters
+        ----------
+        fit : bool, optional
+            Whether the mean parameters are being fitted during optimisation, by default None
+        params : jax.Array, optional
+            Parameters to use for the mean function if being fitted for optimisation, by default None
+        rng_key : int, optional
+            Random number generator key for sampling, by default None
+
+        Returns
+        -------
+        jnp.array
+            The fixed mean value of the lightcurve.
+        """
+        return self.mean_value
+
+    def sampled_mean(self, params: jnp.array = None):
         """Return the fixed mean value of the lightcurve.
 
         Parameters
@@ -87,7 +106,6 @@ class ConstantMean(MeanFunction):
     def compute_mean(
         self,
         params: jnp.array = None,
-        fit: bool = True,  # rng_key: int = None
     ) -> jnp.array:
         """Return the constant mean value of the lightcurve.
 
@@ -105,15 +123,27 @@ class ConstantMean(MeanFunction):
         jnp.array
 
         """
-        if fit and jnp.size(params) == self.no_parameters:
+        return params[0]
 
-            return params[0]
-        else:
-            return numpyro.sample(
-                "mean",
-                dist.Uniform(jnp.min(self._lightcurve.y), jnp.max(self._lightcurve.y)),
-                # rng_key=rng_key,
-            )
+    def sample_mean(
+        self,
+        params: jnp.array = None,
+    ) -> jnp.array:
+        """Return a sampled mean value of the lightcurve.
+
+        Parameters
+        ----------
+        params : jnp.array, optional
+            parameters to use for the mean function, by default None
+        Returns
+        -------
+        jnp.array
+
+        """
+        return numpyro.sample(
+            "mean",
+            dist.Uniform(jnp.min(self._lightcurve.y), jnp.max(self._lightcurve.y)),
+        )
 
 
 class LinearMean(MeanFunction):

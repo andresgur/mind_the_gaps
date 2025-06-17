@@ -1,5 +1,4 @@
-import pprint as pp
-from typing import Callable, Dict, List, Union
+from typing import Dict, List, Union
 
 import jax
 import jax.numpy as jnp
@@ -101,7 +100,7 @@ class TinyGP(BaseGP):
         else:
             init_params = self.kernel_spec.get_param_array()
 
-        self.gp = self.compute(self._lightcurve.times, fit=True, params=init_params)
+        self.gp = self.compute_fit(self._lightcurve.times, params=init_params)
 
     def _build_mean_model(
         self, meanmodel: str, mean_params: jax.Array
@@ -137,6 +136,61 @@ class TinyGP(BaseGP):
     def numpyro_dist(self):
         return self.gp.numpyro_dist()
 
+    def compute_fit(
+        self,
+        t: jax.Array,
+        params: jax.Array = None,
+    ) -> None:
+        """Set up the Celerite2 kernel, GaussianProcess and call compute on it with
+        the appropriate params.
+
+        Parameters
+        ----------
+        params : jnp.array
+            Parameter values for the kernel
+        t : jnp.array
+            Times for the lightcurve observations
+
+        fit : bool
+            Whether the GP is being fitted (i.e. during parameter optiization) or sampled.
+        """
+
+        mean_params = params[: self.meanmodel.sampled_parameters]
+        kernel_params = params[self.meanmodel.sampled_parameters :]
+
+        self.kernel_spec.update_params_from_array(kernel_params)
+        mean = self.meanmodel.compute_mean(params=mean_params)
+        kernel = self.kernel_spec._get_celerite2_kernel_fit()
+        self.gp = tinygp.GaussianProcess(
+            kernel=kernel,
+            X=t,
+            diag=self._lightcurve.dy**2,
+            mean=mean,
+        )
+
+    def compute_sample(
+        self,
+        t: jax.Array,
+    ) -> None:
+        """Sample the parameters, set up the Celerite2 kernel, GaussianProcess and call compute on it with
+        the appropriate params.
+
+        Parameters
+        ----------
+        params : jnp.array
+            Parameter values for the kernel
+        t : jnp.array
+            Times for the lightcurve observations
+
+        fit : bool
+            Whether the GP is being fitted (i.e. during parameter optiization) or sampled.
+        """
+        mean = self.meanmodel.sample_mean()
+        kernel = self.kernel_spec._get_celerite2_kernel_sample()
+        self.gp = tinygp.GaussianProcess(
+            kernel=kernel, X=t, diag=self._lightcurve.dy**2, mean=mean
+        )
+
     def compute(self, t: jax.Array, fit: bool, params: jax.Array = None) -> None:
         """Set up the TinyGP kernel, GaussianProcess and call compute on it with
         the appropriate params.
@@ -155,9 +209,9 @@ class TinyGP(BaseGP):
             mean_params = params[: self.meanmodel.sampled_parameters]
             kernel_params = params[self.meanmodel.sampled_parameters :]
             self.kernel_spec.update_params_from_array(kernel_params)
-            mean = self.meanmodel.compute_mean(fit=fit, params=mean_params)
+            mean = self.meanmodel.compute_mean(params=mean_params)
         else:
-            mean = self.meanmodel.compute_mean(fit=fit)
+            mean = self.meanmodel.compute_mean()
 
         kernel = self._get_kernel(fit=fit)
         self.gp = tinygp.GaussianProcess(
@@ -221,7 +275,7 @@ class TinyGP(BaseGP):
         float
             Negative Log Likelihood
         """
-        self.compute(self._lightcurve.times, params=params, fit=fit)
+        self.compute_fit(self._lightcurve.times, params=params)
         nll_value = -self.gp.log_probability(y=self._lightcurve.y)
 
         return nll_value
@@ -244,7 +298,7 @@ class TinyGP(BaseGP):
         params : jnp.array
             Parameters to compute the GP for.
         """
-        self.compute(params=params, t=self._lightcurve.times, fit=True)
+        self.compute_fit(params=params, t=self._lightcurve.times)
 
     def log_likelihood(self, observations: jax.Array) -> float:
         """Get the log likelihood of the GP model

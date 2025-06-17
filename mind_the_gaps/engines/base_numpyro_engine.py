@@ -86,8 +86,6 @@ class BaseNumpyroGPEngine(BaseGPEngine):
     def numpyro_model(
         self,
         t: jax.Array,
-        params: jax.Array | None = None,
-        fit: bool = False,
     ) -> None:
         """Numpyro model for the Gaussian Process, which defines the prior distributions (Using the KernelSpec)
         and the likelihood of the model given the lightcurve data. This method computes
@@ -96,16 +94,12 @@ class BaseNumpyroGPEngine(BaseGPEngine):
         ----------
         t : jax.Array
             The time array of the lightcurve.
-        params : jax.Array, optional
-            parameters for the Gaussian Process, by default None
-        fit : bool, optional
-            whether the model is being fitted, i.e. during optimisation, or sampled, by default False
         """
 
-        self.gp.compute(t, params=params, fit=fit)
-
+        self.gp.compute_sample(t)
         log_likelihood = self.gp.log_likelihood(self._lightcurve.y)
         numpyro.deterministic("log_likelihood", log_likelihood)
+
         numpyro.sample(
             "obs",
             self.gp.numpyro_dist(),
@@ -144,7 +138,7 @@ class BaseNumpyroGPEngine(BaseGPEngine):
             init_params=self.init_params,
             bounds=(lower_bounds, upper_bounds),
         )
-        self.gp.compute(params=opt_params, t=self._lightcurve.times, fit=True)
+        self.gp.compute_fit(params=opt_params, t=self._lightcurve.times)
         self.init_params = opt_params
         self.kernel_spec.update_params_from_array(
             self.init_params[self.gp.meanmodel.sampled_parameters :]

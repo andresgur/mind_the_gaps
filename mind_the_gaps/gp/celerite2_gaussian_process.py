@@ -67,7 +67,7 @@ class Celerite2GP(BaseGP):
             )
         else:
             init_params = self.kernel_spec.get_param_array()
-        self.gp = self.compute(self._lightcurve.times, fit=True, params=init_params)
+        self.gp = self.compute_fit(self._lightcurve.times, params=init_params)
 
     def _build_mean_model(
         self, meanmodel: str, mean_params: jax.Array
@@ -114,10 +114,9 @@ class Celerite2GP(BaseGP):
         """
         return self.gp.numpyro_dist()
 
-    def compute(
+    def compute_fit(
         self,
         t: jax.Array,
-        fit: bool,
         params: jax.Array = None,
     ) -> None:
         """Set up the Celerite2 kernel, GaussianProcess and call compute on it with
@@ -133,14 +132,38 @@ class Celerite2GP(BaseGP):
         fit : bool
             Whether the GP is being fitted (i.e. during parameter optiization) or sampled.
         """
-        if fit:
-            mean_params = params[: self.meanmodel.sampled_parameters]
-            kernel_params = params[self.meanmodel.sampled_parameters :]
-            self.kernel_spec.update_params_from_array(kernel_params)
-            mean = self.meanmodel.compute_mean(fit=fit, params=mean_params)
-        else:
-            mean = self.meanmodel.compute_mean(fit=fit)
-        kernel = self.kernel_spec.get_kernel(fit=fit)
+
+        mean_params = params[: self.meanmodel.sampled_parameters]
+        kernel_params = params[self.meanmodel.sampled_parameters :]
+        self.kernel_spec.update_params_from_array(kernel_params)
+        mean = self.meanmodel.compute_mean(params=mean_params)
+        kernel = self.kernel_spec._get_celerite2_kernel_fit()
+        self.gp = celerite2.jax.GaussianProcess(kernel, mean=mean)
+        self.gp.compute(
+            t,
+            yerr=self._lightcurve.dy,
+            check_sorted=False,
+        )
+
+    def compute_sample(
+        self,
+        t: jax.Array,
+    ) -> None:
+        """Sample the parameters, set up the Celerite2 kernel, GaussianProcess and call compute on it with
+        the appropriate params.
+
+        Parameters
+        ----------
+        params : jnp.array
+            Parameter values for the kernel
+        t : jnp.array
+            Times for the lightcurve observations
+
+        fit : bool
+            Whether the GP is being fitted (i.e. during parameter optiization) or sampled.
+        """
+        mean = self.meanmodel.sample_mean()
+        kernel = self.kernel_spec._get_celerite2_kernel_sample()
         self.gp = celerite2.jax.GaussianProcess(kernel, mean=mean)
         self.gp.compute(
             t,
@@ -223,7 +246,7 @@ class Celerite2GP(BaseGP):
         float
             Negative Log Likelihood
         """
-        self.compute(self._lightcurve.times, params=params, fit=fit)
+        self.compute_fit(self._lightcurve.times, params=params)
         nll_value = -self.gp.log_likelihood(self._lightcurve.y)
         return nll_value
 
@@ -245,7 +268,7 @@ class Celerite2GP(BaseGP):
         params : jnp.array
             Parameters to compute the GP for.
         """
-        self.compute(params=params, t=self._lightcurve.times, fit=True)
+        self.compute_fit(params=params, t=self._lightcurve.times, fit=True)
 
     def log_likelihood(self, observations: jax.Array) -> float:
         """Get the log likelihood of the GP model

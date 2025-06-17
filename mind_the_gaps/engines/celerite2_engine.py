@@ -115,48 +115,11 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
             init_params=self.init_params,
             bounds=(lower_bounds, upper_bounds),
         )
-        self.gp.compute(params=opt_params, t=self._lightcurve.times, fit=True)
+        self.gp.compute_fit(params=opt_params, t=self._lightcurve.times)
         self.init_params = opt_params
         self.kernel_spec.update_params_from_array(
             self.init_params[self.gp.meanmodel.sampled_parameters :]
         )
-
-    def initialise_params(self, num_chains: int, perc: float) -> Dict:
-        """Initialise the parameters for the Gaussian Process by spreading
-        the initial values around their base values using a normal distribution.
-        This method generates a dictionary of parameters for each chain, where each parameter is perturbed
-        by a small random value drawn from a normal distribution centered around the base value.
-
-        Parameters
-        ----------
-        num_chains : int
-            The number of chains to initialise parameters for.
-        perc : float
-            Percentage for the normal distribution used to spread the parameters, by default 0.1.
-
-        Returns
-        -------
-        Dict
-            A dictionary where keys are parameter names and values are jax arrays of spread values for each chain.
-        """
-        param_dict = {}
-        i = 0
-        for term in self.kernel_spec.terms:
-            for param_name, param_spec in term.parameters.items():
-                if param_spec.fixed:
-                    continue
-
-                base_value = param_spec.value
-                low, high = param_spec.bounds
-
-                spread_values = base_value + perc * jax.random.normal(
-                    self.rng_key, shape=(num_chains,)
-                )
-                spread_values = jnp.clip(spread_values, float(low), float(high))
-
-                param_dict[f"term{i}_{param_name}"] = jnp.array(spread_values)
-            i += 1
-        return param_dict
 
     def derive_posteriors(
         self,
@@ -221,7 +184,7 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
             num_samples=1,
             num_chains=num_chains,
             chain_method="parallel",
-            jit_model_args=False,
+            jit_model_args=True,
             progress_bar=progress,
         )
         self.rng_key, subkey = jax.random.split(self.rng_key)
