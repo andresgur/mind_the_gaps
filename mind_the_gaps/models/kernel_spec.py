@@ -163,12 +163,12 @@ class KernelSpec:
             A list of kernel term specifications (KernelTermSpec) that define the kernel.
         """
         self.terms = terms
-        self.celerite2 = False
+        self.use_jax = False
 
         if issubclass(self.terms[0].term_class, Term) or issubclass(
             self.terms[0].term_class, Kernel
         ):
-            self.celerite2 = True
+            self.use_jax = True
             for term in self.terms:
                 term._resolve_params()
         # print("")
@@ -205,7 +205,7 @@ class KernelSpec:
                 f"{non_fixed}"
             )
 
-        if self.celerite2:
+        if self.use_jax:
             for term in self.terms:
                 for name, param in term.parameters.items():
                     if not param.fixed:
@@ -235,7 +235,7 @@ class KernelSpec:
                 if not param.fixed:
                     values.append(param.value)
 
-        if self.celerite2:
+        if self.use_jax:
             return jnp.array(values)
         else:
             return np.array(values, dtype=np.float64)
@@ -264,9 +264,7 @@ class KernelSpec:
                         raise ValueError(f"Non-fixed parameter is missing bounds.")
                     bounds.append(param.bounds)
 
-        return (
-            jnp.array(bounds) if self.celerite2 else np.array(bounds, dtype=np.float64)
-        )
+        return jnp.array(bounds) if self.use_jax else np.array(bounds, dtype=np.float64)
 
     def get_param_names(self) -> List[str]:
         """Get the names of the non_fixed parameters in the kernel specification.
@@ -289,7 +287,6 @@ class KernelSpec:
         Parameters
         ----------
         fit : bool, optional
-            For celerite2 kernels: whether the parameters are being fit or sampled, by default True
 
         Returns
         -------
@@ -297,12 +294,12 @@ class KernelSpec:
             _description_
         """
 
-        if self.celerite2:
-            return self._get_celerite2_kernel(fit=fit)
+        if self.use_jax:
+            return self._get_jax_kernel(fit=fit)
         else:
             return self._get_celerite_kernel()
 
-    def _get_celerite2_kernel2(self, fit=True, rng_key=None) -> Term:
+    def _get_jax_kernel(self, fit=True) -> Term:
         """Get the celerite2 kernel for the Gaussian Process based on the kernel specification.
 
         Parameters
@@ -322,37 +319,6 @@ class KernelSpec:
         ValueError
             If a parameter in the kernel specification is not fixed and does not have a prior distribution.
         """
-        terms = []
-
-        for i, term in enumerate(self.terms):
-            kwargs = {}
-
-            for name, param_spec in term.parameters.items():
-                full_name = f"terms[{i}]:log_{name}"
-                if not param_spec.fixed and param_spec.prior is None:
-                    raise ValueError(
-                        f"Missing prior distribution for parameter '{full_name}'"
-                    )
-                if fit or param_spec.fixed:
-                    val = param_spec.value
-
-                else:
-                    dist_cls = param_spec.prior
-                    val = numpyro.sample(
-                        full_name, dist_cls(*param_spec.bounds), rng_key=rng_key
-                    )
-
-                kwargs[name] = jnp.exp(val)
-            terms.append(term.term_class(**kwargs))
-
-        kernel = terms[0]
-        for t in terms[1:]:
-            kernel += t
-
-        return kernel
-
-    def _get_celerite2_kernel(self, fit=True) -> Term:
-
         terms = []
         for i, term in enumerate(self.terms):
             kwargs = {}
@@ -376,7 +342,7 @@ class KernelSpec:
             kernel += t
         return kernel
 
-    def _get_celerite2_kernel_fit(self) -> Term:
+    def _get_jax_kernel_fit(self) -> Term:
         terms = []
         for i, term in enumerate(self.terms):
             terms.append(term._get_term_fit())
@@ -386,7 +352,7 @@ class KernelSpec:
 
         return kernel
 
-    def _get_celerite2_kernel_sample(self) -> Term:
+    def _get_jax_kernel_sample(self) -> Term:
         terms = []
         for i, term in enumerate(self.terms):
             terms.append(term._get_term_sampled(i))
@@ -423,38 +389,3 @@ class KernelSpec:
             kernel += term
 
         return kernel
-
-
-def clone_kernel_spec(kernel_spec: KernelSpec) -> KernelSpec:
-    new_terms = []
-    for term in kernel_spec.terms:
-        new_params = OrderedDict()
-        for name, param in term.parameters.items():
-            # Materialize value from tracer if needed
-            val = param.value
-            if hasattr(
-                val, "aval"
-            ):  # heuristic: has 'aval' means JAX tracer or DeviceArray
-                val = jax.device_get(val)
-            else:
-                val = val  # already concrete
-
-            # Create a fresh KernelParameterSpec (copy all fields)
-            new_param = KernelParameterSpec(
-                value=val,
-                fixed=param.fixed,
-                prior=param.prior,
-                bounds=param.bounds,
-                zeroed=param.zeroed,
-            )
-            new_params[name] = new_param
-
-        # Create a new KernelTermSpec (copy extras too)
-        new_term = KernelTermSpec(
-            term_class=term.term_class,
-            parameters=new_params,
-            **getattr(term, "extras", {}),
-        )
-        new_terms.append(new_term)
-
-    return KernelSpec(new_terms)

@@ -135,7 +135,7 @@ class Celerite2GP(BaseGP):
         kernel_params = params[self.meanmodel.sampled_parameters :]
         self.kernel_spec.update_params_from_array(kernel_params)
         mean = self.meanmodel.compute_mean(params=mean_params)
-        kernel = self.kernel_spec._get_celerite2_kernel_fit()
+        kernel = self.kernel_spec._get_jax_kernel_fit()
         self.gp = celerite2.jax.GaussianProcess(kernel, mean=mean)
         self.gp.compute(
             t,
@@ -163,7 +163,7 @@ class Celerite2GP(BaseGP):
             Whether the GP is being fitted (i.e. during parameter optiization) or sampled.
         """
         mean = self.meanmodel.sample_mean()
-        kernel = self.kernel_spec._get_celerite2_kernel_sample()
+        kernel = self.kernel_spec._get_jax_kernel_sample()
         self.gp = celerite2.jax.GaussianProcess(kernel, mean=mean)
         self.gp.compute(
             t,

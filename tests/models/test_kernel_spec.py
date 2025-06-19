@@ -118,9 +118,9 @@ class KernelSpecCelerite2TestCase(unittest.TestCase):
         self.assertIsInstance(combined, KernelSpec)
         self.assertEqual(len(combined.terms), 2)
 
-    def test_get_celerite2_kernel(self):
+    def test_get_jax_kernel(self):
 
-        kernel = self.kernel_spec._get_celerite2_kernel()
+        kernel = self.kernel_spec._get_jax_kernel()
         self.assertIsInstance(kernel, cel2_terms.ComplexTerm)
 
 
