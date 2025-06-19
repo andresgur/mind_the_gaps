@@ -39,6 +39,7 @@ class TestCelerite2GPEngine(unittest.TestCase):
         self.mock_gp_instance.meanmodel.sampled_mean = False
         self.mock_gp_instance.negative_log_likelihood = MagicMock(return_value=1.0)
         self.mock_gp_instance.compute = MagicMock()
+        self.mock_gp_instance.compute_fit = MagicMock(return_value=jnp.array([0.0]))
         self.mock_gp_instance.get_psd.return_value = MagicMock()
         self.mock_gp_instance.numpyro_dist.return_value = MagicMock()
         self.mock_gp_instance.log_likelihood.return_value = 1.0
@@ -58,11 +59,13 @@ class TestCelerite2GPEngine(unittest.TestCase):
             mock_instance.run.return_value = (jnp.array([1.5, 2.1]), MagicMock())
             result = self.engine.minimize()
 
-            self.assertTrue(self.mock_gp_instance.compute.called)
-            np.testing.assert_array_equal(result, jnp.array([1.5, 2.1]))
+            self.assertTrue(self.mock_gp_instance.compute_fit.called)
+            np.testing.assert_array_equal(
+                self.engine.init_params, jnp.array([1.5, 2.1])
+            )
 
-    def test_initialize_params_generates_values_within_bounds(self):
-        params = self.engine.initialize_params(num_chains=10, std_dev=1.0)
+    def test_initialise_params_generates_values_within_bounds(self):
+        params = self.engine.initialise_params(num_chains=10, perc=0.1)
         self.assertIn("term0_param1", params)
         values = params["term0_param1"]
         self.assertEqual(values.shape[0], 10)

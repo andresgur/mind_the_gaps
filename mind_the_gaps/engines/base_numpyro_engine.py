@@ -100,8 +100,6 @@ class BaseNumpyroGPEngine(BaseGPEngine):
         """
 
         self.gp.compute_sample(t)
-        # log_likelihood = self.gp.log_likelihood(self._lightcurve.y)
-        # numpyro.deterministic("log_likelihood", log_likelihood)
         numpyro.sample("obs", self.gp.numpyro_dist(), obs=self._lightcurve.y)
 
     def minimize(self) -> jax.Array:
@@ -437,7 +435,10 @@ class BaseNumpyroGPEngine(BaseGPEngine):
         RuntimeError
             If the posteriors have not been derived yet, i.e., if `derive_posteriors` has not been called.
         """
-
+        if self._mcmc_samples is None:
+            raise RuntimeError(
+                "Posteriors have not been derived. Please run derive_posteriors prior to calling this method."
+            )
         flat_samples = {
             key: v.reshape(-1)
             for key, v in self._mcmc_samples.items()
@@ -445,10 +446,7 @@ class BaseNumpyroGPEngine(BaseGPEngine):
         }
 
         total_samples = len(next(iter(flat_samples.values())))
-        if self._mcmc_samples is None:
-            raise RuntimeError(
-                "Posteriors have not been derived. Please run derive_posteriors prior to calling this method."
-            )
+
         if nsims >= total_samples:
             warnings.warn(
                 f"The number of simulation requested {nsims} is higher than the number of posterior samples {len(next(iter(self._mcmc_samples.values())))}, so many samples will be drawn more than once"

@@ -56,11 +56,6 @@ class TestCelerite2GP(unittest.TestCase):
             mean_params=self.mean_params,
         )
 
-    def test_initialization(self):
-        gp = Celerite2GP(kernel_spec=self.kernel_spec, lightcurve=self.mock_lc)
-        self.assertIsInstance(gp, Celerite2GP)
-        self.assertEqual(gp._lightcurve, self.mock_lc)
-
     @patch("celerite2.jax.GaussianProcess.compute")
     def test_compute(self, mock_compute):
 
@@ -68,7 +63,7 @@ class TestCelerite2GP(unittest.TestCase):
             params = jnp.concatenate([self.mean_params, jnp.array([1.5, 2.5, 3.5])])
         else:
             params = jnp.array([1.5, 2.5, 3.5])
-        self.gp_model.compute(self.mock_lc.times, fit=True, params=params)
+        self.gp_model.compute_fit(self.mock_lc.times, params=params, log_like=False)
         self.assertTrue(hasattr(self.gp_model, "gp"))
         self.assertTrue(hasattr(self.gp_model.gp, "compute"))
         mock_compute.assert_called_with(

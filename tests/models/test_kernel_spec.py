@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 
 import jax.numpy as jnp
 import numpy as np
+import numpyro.distributions as dist
 from celerite import terms as cel_terms
 from celerite2.jax import terms as cel2_terms
 
@@ -91,10 +92,16 @@ class KernelSpecTestCase(unittest.TestCase):
 
 class KernelSpecCelerite2TestCase(unittest.TestCase):
     def setUp(self):
-        self.param1 = KernelParameterSpec(value=1.0, fixed=False, bounds=(0.1, 5.0))
+        self.param1 = KernelParameterSpec(
+            value=1.0, fixed=False, prior=dist.Uniform, bounds=(0.1, 5.0)
+        )
         self.param2 = KernelParameterSpec(value=1e-6, fixed=True)
-        self.param3 = KernelParameterSpec(value=3.0, fixed=False, bounds=(0.1, 5.0))
-        self.param4 = KernelParameterSpec(value=4.0, fixed=False, bounds=(0.1, 5.0))
+        self.param3 = KernelParameterSpec(
+            value=3.0, fixed=False, prior=dist.Uniform, bounds=(0.1, 5.0)
+        )
+        self.param4 = KernelParameterSpec(
+            value=4.0, fixed=False, prior=dist.Uniform, bounds=(0.1, 5.0)
+        )
         self.term_spec = KernelTermSpec(
             term_class=cel2_terms.ComplexTerm,
             parameters={
