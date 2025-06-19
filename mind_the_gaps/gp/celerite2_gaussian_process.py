@@ -115,9 +115,7 @@ class Celerite2GP(BaseGP):
         return self.gp.numpyro_dist()
 
     def compute_fit(
-        self,
-        t: jax.Array,
-        params: jax.Array = None,
+        self, t: jax.Array, params: jax.Array = None, log_like: bool = True
     ) -> None:
         """Set up the Celerite2 kernel, GaussianProcess and call compute on it with
         the appropriate params.
@@ -144,6 +142,8 @@ class Celerite2GP(BaseGP):
             yerr=self._lightcurve.dy,
             check_sorted=False,
         )
+        if log_like:
+            return self.gp.log_likelihood(self._lightcurve.y)
 
     def compute_sample(
         self,

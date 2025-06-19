@@ -122,14 +122,10 @@ class KernelTermSpec:
             self._fixed_params.items(),
             self._sampled_params.items(),
         ):
-            # jax.debug.print(
-            #    "Fit value:{} exp:{}", param_spec.value, jnp.exp(param_spec.value)
-            # )
             _params[name] = jnp.exp(param_spec.value)
         for name, param_spec in self._zeroed_params.items():
             _params[name] = -1.0e-10
 
-        # print(f"Params dict{_params}")
         return self.term_class(**_params)
 
     def _get_term_sampled(self, i):
@@ -143,10 +139,7 @@ class KernelTermSpec:
             )
 
             _params[name] = jnp.exp(sample)
-            # jax.debug.print("name {}, value {}", sample, jnp.exp(sample))
-            # print(name)
         for name, param_spec in self._zeroed_params.items():
-            # jax.debug.print("zeroed {}", param_spec.value)
             _params[name] = param_spec.value
 
         return self.term_class(**_params)
@@ -216,7 +209,6 @@ class KernelSpec:
             for term in self.terms:
                 for name, param in term.parameters.items():
                     if not param.fixed:
-                        # jax.debug.print("In update_params {} {}", array[i], i)
                         param.value = jnp.array(array[i])
                         i += 1
         else:
@@ -431,3 +423,38 @@ class KernelSpec:
             kernel += term
 
         return kernel
+
+
+def clone_kernel_spec(kernel_spec: KernelSpec) -> KernelSpec:
+    new_terms = []
+    for term in kernel_spec.terms:
+        new_params = OrderedDict()
+        for name, param in term.parameters.items():
+            # Materialize value from tracer if needed
+            val = param.value
+            if hasattr(
+                val, "aval"
+            ):  # heuristic: has 'aval' means JAX tracer or DeviceArray
+                val = jax.device_get(val)
+            else:
+                val = val  # already concrete
+
+            # Create a fresh KernelParameterSpec (copy all fields)
+            new_param = KernelParameterSpec(
+                value=val,
+                fixed=param.fixed,
+                prior=param.prior,
+                bounds=param.bounds,
+                zeroed=param.zeroed,
+            )
+            new_params[name] = new_param
+
+        # Create a new KernelTermSpec (copy extras too)
+        new_term = KernelTermSpec(
+            term_class=term.term_class,
+            parameters=new_params,
+            **getattr(term, "extras", {}),
+        )
+        new_terms.append(new_term)
+
+    return KernelSpec(new_terms)

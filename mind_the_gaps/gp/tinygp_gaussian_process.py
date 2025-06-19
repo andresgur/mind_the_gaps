@@ -1,4 +1,4 @@
-from typing import Dict, List, Union
+from typing import Callable, Dict, List, Union
 
 import jax
 import jax.numpy as jnp
@@ -137,9 +137,7 @@ class TinyGP(BaseGP):
         return self.gp.numpyro_dist()
 
     def compute_fit(
-        self,
-        t: jax.Array,
-        params: jax.Array = None,
+        self, t: jax.Array, params: jax.Array = None, log_like: bool = False
     ) -> None:
         """Set up the Celerite2 kernel, GaussianProcess and call compute on it with
         the appropriate params.
@@ -167,6 +165,8 @@ class TinyGP(BaseGP):
             diag=self._lightcurve.dy**2,
             mean=mean,
         )
+        if log_like:
+            return self.gp.log_probability(self._lightcurve.y)
 
     def compute_sample(
         self,

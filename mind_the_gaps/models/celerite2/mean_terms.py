@@ -62,7 +62,7 @@ class FixedMean(MeanFunction):
         """
         return self.mean_value
 
-    def sampled_mean(self, params: jnp.array = None):
+    def sample_mean(self, params: jnp.array = None):
         """Return the fixed mean value of the lightcurve.
 
         Parameters

@@ -62,6 +62,8 @@ class BaseNumpyroGPEngine(BaseGPEngine):
         self.fit_mean = fit_mean
         if self.meanmodel is None or self.meanmodel.lower() == "fixed":
             self.fit_mean = False
+        else:
+            self.fit_mean = True
 
         self.mean_params = mean_params
         if seed is None:
@@ -82,6 +84,7 @@ class BaseNumpyroGPEngine(BaseGPEngine):
         self._autocorr = []
         self.gp = None
         self._ndim = len(self.init_params)
+        self._converged = False
 
     def numpyro_model(
         self,
@@ -97,14 +100,9 @@ class BaseNumpyroGPEngine(BaseGPEngine):
         """
 
         self.gp.compute_sample(t)
-        log_likelihood = self.gp.log_likelihood(self._lightcurve.y)
-        numpyro.deterministic("log_likelihood", log_likelihood)
-
-        numpyro.sample(
-            "obs",
-            self.gp.numpyro_dist(),
-            obs=self._lightcurve.y,
-        )
+        # log_likelihood = self.gp.log_likelihood(self._lightcurve.y)
+        # numpyro.deterministic("log_likelihood", log_likelihood)
+        numpyro.sample("obs", self.gp.numpyro_dist(), obs=self._lightcurve.y)
 
     def minimize(self) -> jax.Array:
         """Minimize the negative log likelihood of the Gaussian Process using jaxopt L-BFGS-B method.
@@ -221,7 +219,7 @@ class BaseNumpyroGPEngine(BaseGPEngine):
         f = jnp.fft.fft(x - jnp.mean(x), n=2 * n)
         acf = jnp.fft.ifft(f * jnp.conjugate(f))[: len(x)].real
         acf /= acf[0]
-        return acf
+        return jnp.asarray(acf)
 
     def _next_pow_two(self, n):
         """Returns the next power of two greater than or equal to `n`"""
@@ -478,3 +476,57 @@ class BaseNumpyroGPEngine(BaseGPEngine):
             Number of variable parameters
         """
         return self._ndim
+
+    def _get_log_likes(self):
+        from jax import lax
+
+        samples = jax.tree_util.tree_map(lambda x: x.reshape(-1), self._mcmc_samples)
+        param_names = sorted(samples.keys())
+        param_matrix = jnp.stack([samples[k] for k in param_names], axis=-1)
+
+        def compute_likelihood(p):
+            return self.gp.compute_fit(
+                params=p, t=self._lightcurve.times, log_like=True
+            )
+
+        self._loglikelihoods = lax.map(compute_likelihood, param_matrix)
+
+    def _thin_and_discard_samples(self, max_steps: int):
+        """
+        Thin and discard MCMC samples based on autocorrelation time and convergence.
+
+        Parameters
+        ----------
+        max_steps : int
+            The total number of MCMC steps (iterations) performed.
+
+        Returns
+        -------
+        tuple:
+            discard (int): Number of samples discarded as burn-in.
+            thin (int): Thinning factor applied.
+        """
+        mean_tau = jnp.mean(self._tau)
+
+        if self._converged:
+
+            discard = int(mean_tau * 40)
+            if discard > max_steps:
+                discard = int(mean_tau * 10)
+            thin = int(mean_tau / 2)
+        else:
+            import warnings
+
+            warnings.warn(
+                "The chains did not converge after " + str(max_steps) + " iterations!"
+            )
+            thin = int(mean_tau / 4) if mean_tau > 0 else 1
+            discard = int(mean_tau * 5) if mean_tau > 0 else 0
+
+        discard = max(discard, 0)
+        thin = max(thin, 1)
+
+        # Apply thinning and discard burn-in
+        self._mcmc_samples = {
+            key: val[:, discard::thin] for key, val in self._mcmc_samples.items()
+        }

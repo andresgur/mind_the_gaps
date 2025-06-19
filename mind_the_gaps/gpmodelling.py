@@ -4,6 +4,7 @@
 # @Last modified by:   agurpide
 # @Last modified time: 28-05-2024
 
+import copy
 import os
 import sys
 
@@ -40,7 +41,6 @@ class GPModelling:
 
     def __init__(
         self,
-        # kernel: Union[celerite.modeling.Model, Kernel, Term],
         kernel_spec: KernelSpec,
         lightcurve: GappyLightcurve,
         meanmodel: str = None,
@@ -309,6 +309,8 @@ class GPModellingComparison:
 
         self.null_kernel_spec = null_kernel_spec
         self.alt_kernel_spec = alt_kernel_spec
+        self._null_kernel_spec = copy.deepcopy(null_kernel_spec)
+        self._alt_kernel_spec = copy.deepcopy(alt_kernel_spec)
         self.lightcurve = lightcurve
 
         self.likelihoods = []
@@ -403,8 +405,8 @@ class GPModellingComparison:
             (
                 i,
                 lc,
-                self.null_kernel_spec,
-                self.alt_kernel_spec,
+                self._null_kernel_spec,
+                self._alt_kernel_spec,
                 self.null_mean_params,
                 self.alt_mean_params,
                 self.modelling_kwargs,
@@ -412,7 +414,6 @@ class GPModellingComparison:
             )
             for i, lc in enumerate(lcs)
         ]
-
         with ProcessPoolExecutor(
             max_workers=par_workers  # or multiprocessing.cpu_count()
         ) as executor:

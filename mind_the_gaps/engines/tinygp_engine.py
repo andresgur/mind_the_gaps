@@ -16,7 +16,7 @@ import jaxopt
 import matplotlib.pyplot as plt
 import numpy as np
 import numpyro
-from numpyro.infer import AIES, MCMC, NUTS
+from numpyro.infer import AIES, MCMC, NUTS, Predictive
 from numpyro.infer.ensemble import EnsembleSampler
 from numpyro.infer.initialization import init_to_value
 
@@ -121,7 +121,9 @@ class TinyGPEngine(BaseNumpyroGPEngine):
             If `max_steps` is less than `converge_steps`, as it would not allow for at least one iteration of MCMC sampling.
 
         """
+
         old_tau = jnp.inf
+
         if fit:
             self.minimize()
             fixed_params = self.initialise_params(num_chains=num_chains, perc=perc)
@@ -165,10 +167,7 @@ class TinyGPEngine(BaseNumpyroGPEngine):
             progress_bar=progress,
         )
 
-        mcmc.run(
-            self.rng_key,
-            t=self._lightcurve.times,
-        )
+        mcmc.run(self.rng_key, self._lightcurve.times)
         state = mcmc.last_state
 
         mcmc = MCMC(
@@ -188,12 +187,9 @@ class TinyGPEngine(BaseNumpyroGPEngine):
             )
         for iteration in range(num_iterations):
 
-            mcmc.run(
-                mcmc.post_warmup_state.rng_key,
-                t=self._lightcurve.times,
-            )
+            mcmc.run(mcmc.post_warmup_state.rng_key, self._lightcurve.times)
             mcmc.post_warmup_state = mcmc.last_state
-            idata = az.from_numpyro(mcmc)
+            # idata = az.from_numpyro(mcmc)
 
             samples = mcmc.get_samples(group_by_chain=True)
             if iteration == 0:
@@ -211,6 +207,7 @@ class TinyGPEngine(BaseNumpyroGPEngine):
             if jnp.all(tau * 100 < (iteration + 1) * converge_steps) and np.all(
                 np.abs(old_tau - tau) / tau < 0.01
             ):
+                self._converged = True
                 print(f"MCMC converged after {(iteration+1)*converge_steps} steps.")
                 break
             else:
@@ -218,7 +215,10 @@ class TinyGPEngine(BaseNumpyroGPEngine):
             old_tau = tau
         self._tau = tau
         self._mcmc = mcmc
-        self._loglikelihoods = idata.posterior["log_likelihood"].values
+        log_like = True
+        self._thin_and_discard_samples(max_steps=(iteration + 1) * converge_steps)
+        if log_like:
+            self._get_log_likes()
 
     def _generate_lc_from_params(self, params: jax.Array) -> GappyLightcurve:
         """Generate a lightcurve from the Gaussian Process parameters.
@@ -234,7 +234,7 @@ class TinyGPEngine(BaseNumpyroGPEngine):
         GappyLightcurve
             A new GappyLightcurve instance generated from the Gaussian Process parameters.
         """
-        kernel_spec = copy.deepcopy(self.kernel_spec)
+        # kernel_spec = copy.deepcopy(self.kernel_spec)
         if self.gp.meanmodel.sampled_mean:
             mean_params = params[: self.gp.meanmodel.sampled_parameters]
             kernel_params = params[self.gp.meanmodel.sampled_parameters :]
@@ -242,10 +242,10 @@ class TinyGPEngine(BaseNumpyroGPEngine):
             mean_params = self.init_params[: self.gp.meanmodel.sampled_parameters]
             kernel_params = params
 
-        kernel_spec.update_params_from_array(kernel_params)
+        self.kernel_spec.update_params_from_array(kernel_params)
         # Is this needed? Can get psd from kernel directly without getting the gp
         gp_sample = TinyGP(
-            kernel_spec=kernel_spec,
+            kernel_spec=self.kernel_spec,
             meanmodel=self.meanmodel,
             lightcurve=self._lightcurve,
             mean_params=mean_params,

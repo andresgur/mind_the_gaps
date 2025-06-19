@@ -18,7 +18,7 @@ from mind_the_gaps.engines.base_numpyro_engine import BaseNumpyroGPEngine
 from mind_the_gaps.engines.gp_engine import BaseGPEngine
 from mind_the_gaps.gp.celerite2_gaussian_process import Celerite2GP
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
-from mind_the_gaps.models.kernel_spec import KernelSpec
+from mind_the_gaps.models.kernel_spec import KernelSpec, clone_kernel_spec
 
 
 class Celerite2GPEngine(BaseNumpyroGPEngine):
@@ -207,12 +207,13 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
                 f"max_steps ({max_steps}) must be at least as large as converge_steps ({converge_steps}) to run at least one iteration."
             )
         for iteration in range(num_iterations):
+            # self.rng_key, subkey = jax.random.split(self.rng_key)
             mcmc.run(
                 mcmc.post_warmup_state.rng_key,
                 t=self._lightcurve.times,
             )
             mcmc.post_warmup_state = mcmc.last_state
-            idata = az.from_numpyro(mcmc)
+            # idata = az.from_numpyro(mcmc)
 
             samples = mcmc.get_samples(group_by_chain=True)
 
@@ -231,6 +232,7 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
             if jnp.all(tau * 100 < (iteration + 1) * converge_steps) and np.all(
                 jnp.abs(old_tau - tau) / tau < 0.01
             ):
+                self._converged = True
                 print(f"MCMC converged after {(iteration+1)*converge_steps} steps.")
                 break
             else:
@@ -238,7 +240,12 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
             old_tau = tau
         self._tau = tau
         self._mcmc = mcmc
-        self._loglikelihoods = idata.posterior["log_likelihood"].values
+        log_like = True
+        self._thin_and_discard_samples(max_steps=(iteration + 1) * converge_steps)
+        if log_like:
+            self._get_log_likes()
+
+        # self._loglikelihoods = idata.posterior["log_likelihood"].values
 
     def _generate_lc_from_params(self, params: jax.Array) -> GappyLightcurve:
         """Generate a lightcurve from the Gaussian Process parameters.
@@ -254,7 +261,8 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
         GappyLightcurve
             A new GappyLightcurve instance generated from the Gaussian Process parameters.
         """
-        kernel_spec = copy.deepcopy(self.kernel_spec)
+        # kernel_spec = copy.deepcopy(self.kernel_spec)
+        # kernel_spec = clone_kernel_spec(self.kernel_spec)
         if self.gp.meanmodel.sampled_mean:
             mean_params = params[: self.gp.meanmodel.sampled_parameters]
             kernel_params = params[self.gp.meanmodel.sampled_parameters :]
@@ -265,7 +273,7 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
 
         self.kernel_spec.update_params_from_array(kernel_params)
         gp_sample = Celerite2GP(
-            kernel_spec=kernel_spec,
+            kernel_spec=self.kernel_spec,
             meanmodel=self.meanmodel,
             lightcurve=self._lightcurve,
             mean_params=mean_params,
@@ -276,3 +284,17 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
         noisy_rates, dy = simulator.add_noise(rates)
         lc = GappyLightcurve(self._lightcurve.times, noisy_rates, dy)
         return lc
+
+    def _get_log_likes(self):
+        from jax import lax
+
+        samples = jax.tree_util.tree_map(lambda x: x.reshape(-1), self._mcmc_samples)
+        param_names = sorted(samples.keys())
+        param_matrix = jnp.stack([samples[k] for k in param_names], axis=-1)
+
+        def compute_likelihood(p):
+            return self.gp.compute_fit(
+                params=p, t=self._lightcurve.times, log_like=True
+            )
+
+        self._loglikelihoods = lax.map(compute_likelihood, param_matrix)
