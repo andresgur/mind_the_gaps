@@ -1,6 +1,6 @@
 # Mind the Gaps
 
-[![DOI](https://zenodo.org/badge/727285474.svg)](https://doi.org/10.5281/zenodo.14600069)[![docs](https://img.shields.io/github/actions/workflow/status/andresgur/mind_the_gaps/ci.yml?label=docs)](https://andresgur.github.io/mind_the_gaps/index.html)
+[![DOI](https://zenodo.org/badge/727285474.svg)](https://doi.org/10.5281/zenodo.14600069) [![docs](https://img.shields.io/github/actions/workflow/status/andresgur/mind_the_gaps/ci.yml?label=docs)](https://andresgur.github.io/mind_the_gaps/index.html)
 
 
 Gaussian Processes time series modelling with focus on period detection on irregularly-sampled stochastically-varying astronomical time series
