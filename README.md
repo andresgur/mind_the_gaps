@@ -2,11 +2,14 @@
 
 [![DOI](https://zenodo.org/badge/727285474.svg)](https://doi.org/10.5281/zenodo.14600069)
 
+[![Docs](https://img.shields.io/badge/docs-online-blue.svg)](https://andresgur.github.io/mind_the_gaps/index.html)
+
+
 Gaussian Processes time series modelling with focus on period detection on irregularly-sampled stochastically-varying astronomical time series
 
 ![Mind The Gaps](docs/mind_the_gaps.jpg)
 
-The method effectively combines Gaussian Process modelling with the likelihood ratio test outline in [Protassov et al. 2002](https://ui.adsabs.harvard.edu/abs/2002ApJ...571..545P/abstract). At present, the code uses the **celerite** kernels proposed by [Foreman-Mackey et al. 2017](https://iopscience.iop.org/article/10.3847/1538-3881/aa9332)
+The method effectively Gaussian Process modelling with the likelihood ratio test outline in [Protassov et al. 2002](https://ui.adsabs.harvard.edu/abs/2002ApJ...571..545P/abstract). At present, the code uses the **celerite** kernels proposed by [Foreman-Mackey et al. 2017](https://iopscience.iop.org/article/10.3847/1538-3881/aa9332)
 
 
 ## Installation
@@ -26,7 +29,7 @@ pip install .
 > Users are welcome to use/test the code and provide feedback but beware, the code is still in alpha phase, so expect bugs, errors and crashes! If you are intending to use the code, my recommendation would be to get in touch first!
 
 
-The code can be used as a standalone to generate lightcurves or as it is designed for, to test for a periodicity in a lightcurve. At a minimum your lightcurve should have timestamps, rates, uncertainties and exposures, and it can also contain background rates and uncertainties on the background. I suspect the simulator is more powerful than anything out there, as it allows to chose the type of noise (Gaussian, Poissonian or Kraft) and simulate with any given observing window (regular or otherwise). Moreover, as opposed to some codes out there, the variance and the mean are also randomized in each simulation.
+The code can be used as a standalone to generate lightcurves or as it is designed for, to test for a periodicity in a lightcurve. At a minimum your lightcurve should have timestamps, rates, uncertainties and exposures, and it can also contain background rates and uncertainties on the background.
 
 When it comes to attempting to detect a periodicity, 
 usually the first task is to identify the null hypothesis (a stochastic-only model) and the alternative model, 
@@ -40,6 +43,8 @@ Once you've established these two (note you can also have several sets of null h
 4. Build a histogram of the fit-improvements (LRT) found for the simulated lightcurves and check where the value observed in the data falls in the histogram. An outlier (say p<0.05) suggest the fit-improvement observed in the data is highly unlikely. High p-values indicate the fit-improvement is simply due to noise.
 
 Another notebook in [tutorials](docs/notebooks/) shows how to implement this process using functions and objects from the package.
+
+The simulator can be used to simulate with any given observing window (regular or otherwise) and it allows to chose the type of flux density distribution of your fluxes (Gaussian, Lognormal) as well as the type of noise (Gaussian, Poissonian or Kraft). Moreover, as opposed to some codes out there, the variance and the mean are also randomized in each simulation.
 
 ## Documentation
 Documentation is [available online](https://andresgur.github.io/mind_the_gaps/).
