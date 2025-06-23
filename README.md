@@ -1,8 +1,6 @@
 # Mind the Gaps
 
-[![DOI](https://zenodo.org/badge/727285474.svg)](https://doi.org/10.5281/zenodo.14600069)
-
-[![Docs](https://img.shields.io/badge/docs-online-blue.svg)](https://andresgur.github.io/mind_the_gaps/index.html)
+[![DOI](https://zenodo.org/badge/727285474.svg)](https://doi.org/10.5281/zenodo.14600069)[![docs](https://img.shields.io/github/actions/workflow/status/andresgur/mind_the_gaps/ci.yml?label=docs)](https://andresgur.github.io/mind_the_gaps/index.html)
 
 
 Gaussian Processes time series modelling with focus on period detection on irregularly-sampled stochastically-varying astronomical time series
@@ -15,13 +13,17 @@ The method effectively Gaussian Process modelling with the likelihood ratio test
 ## Installation
 To install the repository, first clone to your computer:
 ```shell
-`git clone https://github.com/andresgur/mind_the_gaps`
+git clone https://github.com/andresgur/mind_the_gaps
 ```
 
 Then enter the `mind_the_gaps` main directory, and pip install it by running:
 ```
 pip install .
 ```
+
+## Documentation
+
+Documentation can be found at [andresgur.github.io/mind_the_gaps/index.html](https://andresgur.github.io/mind_the_gaps/index.html)
 
 ## Usage
 
