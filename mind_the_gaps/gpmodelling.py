@@ -61,7 +61,7 @@ class GPModelling:
 
     def _build_mean_model(
             self,
-            meanmodel: str
+            meanmodel: str = None
     ) -> Tuple[celerite.modeling.Model, bool]:
         """
         Construct the GP mean model based on lightcurve properties and input string
@@ -69,14 +69,14 @@ class GPModelling:
         Parameters
         ----------
         meanmodel
-            ???
+            A string indicating the mean model to be used. If None, a constant model is used.
 
         Returns
         -------
         celerite.modeling.Model
             A celerite model
         bool
-            Whether to the mean model is fitted or not
+            Whether the mean model is fitted or not
         """
         maxy = np.max(self._lightcurve.y)
 
@@ -153,6 +153,18 @@ class GPModelling:
 
 
     def _neg_log_like(self, params):
+        """Function to calculate the negative log likelihood of the GP given a set of parameters
+        
+        Parameters
+        ----------
+        params
+            List of parameters of the GP at which to calculate the posteriors
+        
+        Returns
+        -------
+        float
+            Returns the negative log likelihood of the GP given the input parameters
+        """
         self.gp.set_parameter_vector(params)
         return -self.gp.log_likelihood(self._lightcurve.y)
 
@@ -162,15 +174,16 @@ class GPModelling:
             initial_params: ArrayLike = None
     ):
         """
-        Fit the GP by running a minimization rutine
+        Fit the GP by running a minimization rutine using scipy.optimize.minimize with the L-BFGS-B method.
 
         Parameters
         ----------
         initial_params
-            Set of initial paramteres. If not given uses those given at initialization
+            Set of initial paramteres for the minimization. If not given uses those given at initialization of the class.
 
         Returns
         -------
+        scipy.optimize.OptimizeResult
             Returns the output of scipy.minimize
         """
         if initial_params is None:
@@ -199,18 +212,20 @@ class GPModelling:
         ----------
         initial_chain_params
             Set of initial parameters for the chains. If not given will use randomized from the parameters given at initialization
-        fit
+        fit:
             Whether to run a minimization routine prior to running the MCMC chains
-        converge
-            Whether to stop the chains if convergence is detected
-        max_steps
+        converge:
+            Whether to stop the chains if convergence is detected based on the autocorrelation time
+        max_steps:
             Maximum number of steps for the chains
-        convergence_steps
+        convergence_steps:
             Number of steps to check for convergence
-        walkers
+        walkers:
             Number of walkers for the chains
         cores:
             Number of cores for parallelization
+        progress:
+            Whether to show a progress bar during the MCMC sampling. If fitting multiple lightcurves in parallel best to turn it off.
         """
         # set the initial parameters if not given
         if initial_chain_params is None:
@@ -290,8 +305,8 @@ class GPModelling:
         bounds
             Bounds (min, max) for each of the parameters (in same order)
         percent
-            By which percentage factor (0-1) scale the initial parameters for the standard deviation
-                of the Gaussians. Default: 0.1 (i.e. 10%)
+            The percentage (0-1) by which to scale the initial parameters for the standard deviation
+            of the Gaussians. Default: 0.1 (i.e., 10%).
         max_attempts
             Attempts before giving up (if the parameters fall always outside the imposed bounds)
 
@@ -340,8 +355,8 @@ class GPModelling:
             include_noise: bool = True
     ):
         """
-        Returns the standarized residuals (see e.g. Kelly et al. 2011) Eq. 49.
-        You should set the gp parameters to your best or mean (median) parameter values prior to calling this method
+        Calculate the standarized residuals of the model (see e.g. Kelly et al. 2011) Eq. 49.
+        You should set the gp parameters prior to calling this method
 
         Parameters
         ----------
@@ -389,12 +404,14 @@ class GPModelling:
 
     @property
     def loglikelihoods(self):
+        """An array containing the loglikelihoods of the MCMC samples"""
         if self._loglikelihoods is None:
             raise AttributeError("Posteriors have not been derived. Please run derive_posteriors prior to populate the attributes.")
         return self._loglikelihoods
 
     @property
     def autocorr(self):
+        """An array containing the autocorrelation time of the MCMC samples as a function of step"""
         return self._autocorr
 
     @property
@@ -405,12 +422,14 @@ class GPModelling:
 
     @property
     def mcmc_samples(self):
+        """An array containing the MCMC parameters for all the walkers and steps"""
         if self._mcmc_samples is None:
             raise AttributeError("Posteriors have not been derived. Please run derive_posteriors prior to populate the attributes.")
         return self._mcmc_samples
 
     @property
     def max_loglikelihood(self):
+        """The maximum loglikelihood of the MCMC samples"""
         if self._loglikelihoods is None:
             raise AttributeError("Posteriors have not been derived. Please run derive_posteriors prior to populate the attributes.")
 
@@ -418,14 +437,14 @@ class GPModelling:
 
     @property
     def max_parameters(self):
-        """Return the parameters that maximize the loglikehood"""
+        """The parameters that maximize the loglikehood"""
         if self._mcmc_samples is None:
             raise AttributeError("Posteriors have not been derived. Please run derive_posteriors prior to populate the attributes.")
         return self._mcmc_samples[np.argmax(self._loglikelihoods)]
 
     @property
     def median_parameters(self):
-        """Return the median parameters from the thinned and burned chains"""
+        """The median parameters from the thinned and burned chains"""
         if self._mcmc_samples is None:
             raise AttributeError("Posteriors have not been derived. Please run derive_posteriors prior to populate the attributes.")
         return np.median(self._mcmc_samples, axis=0)
@@ -474,7 +493,7 @@ class GPModelling:
         cpus
             Number of cpus to use for parallelization
         pdf
-            PDF for the simulations: Gaussian, Lognormal or Uniform
+            Desired PDF for the generated lightcurves: Gaussian, Lognormal or Uniform
         extension_factor
             Extension factor for the generation of the lightcurves, to introduce rednoise leakage
         """
@@ -498,6 +517,19 @@ class GPModelling:
             parameters: ArrayLike,
             simulator,
     ) -> GappyLightcurve:
+        """
+        Internal method to generate a lightcurve from the given set of parameters
+        Parameters
+        ----------
+        parameters
+            Parameters for the GP PSD model
+        simulator
+            An instance of the simulator to generate the lightcurve
+        Returns
+        -------
+        GappyLightcurve
+            Returns a GappyLightcurve object with the generated lightcurve
+        """
         self.gp.set_parameter_vector(parameters)
         # set the new PSD with update params
         simulator.psd_model = self.gp.kernel.get_psd
