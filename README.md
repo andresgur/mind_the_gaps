@@ -21,10 +21,6 @@ Then enter the `mind_the_gaps` main directory, and pip install it by running:
 pip install .
 ```
 
-## Documentation
-
-Documentation can be found at [andresgur.github.io/mind_the_gaps/index.html](https://andresgur.github.io/mind_the_gaps/index.html)
-
 ## Usage
 
 > # Warning
