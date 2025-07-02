@@ -26,39 +26,6 @@ from mind_the_gaps.models.celerite.mean_models import (
 from mind_the_gaps.models.kernel_spec import KernelSpec
 
 
-@jit
-def get_psd_value_jax(
-    alpha_real,
-    beta_real,
-    alpha_complex_real,
-    alpha_complex_imag,
-    beta_complex_real,
-    beta_complex_imag,
-    omega,
-):
-    w2 = omega**2
-    p = 0.0
-
-    # Real terms
-    p += jnp.sum(alpha_real * beta_real / (beta_real**2 + w2))
-
-    # Complex terms
-    w02 = beta_complex_real**2 + beta_complex_imag**2
-    num = (
-        alpha_complex_real * beta_complex_real + alpha_complex_imag * beta_complex_imag
-    ) * w02 + (
-        alpha_complex_real * beta_complex_real - alpha_complex_imag * beta_complex_imag
-    ) * w2
-    denom = w2**2 + 2.0 * (beta_complex_real**2 - beta_complex_imag**2) * w2 + w02**2
-    p += jnp.sum(num / denom)
-
-    return jnp.sqrt(2.0 / jnp.pi) * p
-
-
-# Vectorized for an array of omega
-get_psd_jax = vmap(get_psd_value_jax, in_axes=(None, None, None, None, None, None, 0))
-
-
 class TinyGP(BaseGP):
     """Wrapper round the TinyGP Gaussian Process to handle compute, building the mean,
     returning parameters names etc.
@@ -100,7 +67,7 @@ class TinyGP(BaseGP):
         else:
             init_params = self.kernel_spec.get_param_array()
 
-        self.gp = self.compute_fit(self._lightcurve.times, params=init_params)
+        self.compute_fit(self._lightcurve.times, params=init_params)
 
     def _build_mean_model(
         self, meanmodel: str, mean_params: jax.Array
@@ -162,7 +129,7 @@ class TinyGP(BaseGP):
         self.gp = tinygp.GaussianProcess(
             kernel=kernel,
             X=t,
-            diag=self._lightcurve.dy**2,
+            diag=self._lightcurve.dy**2 + 1e-12,
             mean=mean,
         )
         if log_like:
@@ -186,12 +153,15 @@ class TinyGP(BaseGP):
             Whether the GP is being fitted (i.e. during parameter optiization) or sampled.
         """
         mean = self.meanmodel.sample_mean()
+
         kernel = self.kernel_spec._get_jax_kernel_sample()
         self.gp = tinygp.GaussianProcess(
             kernel=kernel, X=t, diag=self._lightcurve.dy**2, mean=mean
         )
 
-    def compute(self, t: jax.Array, fit: bool, params: jax.Array = None) -> None:
+    def compute(
+        self, t: jax.Array, fit: bool, params: jax.Array = None, jitter: float = 1e-6
+    ) -> None:
         """Set up the TinyGP kernel, GaussianProcess and call compute on it with
         the appropriate params.
 
@@ -204,6 +174,10 @@ class TinyGP(BaseGP):
 
         fit : bool
             Whether the GP is being fitted
+        params : jnp.array, optional
+            Parameters to use for the Gaussian Process, by default None
+        jitter : float, optional
+            Jitter term to add to the diagonal of the covariance matrix, by default 1e-6
         """
         if fit:
             mean_params = params[: self.meanmodel.sampled_parameters]
@@ -217,10 +191,9 @@ class TinyGP(BaseGP):
         self.gp = tinygp.GaussianProcess(
             kernel=kernel,
             X=t,
-            diag=self._lightcurve.dy**2,
+            diag=self._lightcurve.dy**2 + jitter,
             mean=mean,
         )
-        # return gp
 
     def _get_kernel(self, fit=True):
 
@@ -247,18 +220,6 @@ class TinyGP(BaseGP):
         for t in terms[1:]:
             kernel += t
         return kernel
-
-    def get_psd(self, freq_in_hz=True) -> np.ndarray:
-        """Get the power spectral density for the kernel at the current parameters
-
-        Returns
-        -------
-        np.ndarray
-            Power spectral density
-        """
-        kernel = self.kernel_spec.get_kernel(fit=True)
-
-        return self.get_psd_from_kernel(kernel, freq_in_hz=freq_in_hz)
 
     def negative_log_likelihood(self, params: jax.Array, fit=True) -> float:
         """Calcultae the negtaive log likelihood
@@ -345,65 +306,43 @@ class TinyGP(BaseGP):
             param_names = self.kernel_spec.get_param_names()
         return param_names
 
-    def get_psd_from_kernel(self, kernel, freq_in_hz=True, real_eps=1e-5):
+    def standardized_residuals(self, include_noise=True):
+        """Returns the standardized residuals (see e.g. Kelly et al. 2011) Eq. 49.
+        You should set the gp parameters to your best or mean (median) parameter values prior to calling this method.
+
+        Parameters
+        ----------
+        include_noise: bool
+            True to include any jitter term into the standard deviation calculation. False ignores this contribution.
         """
-        Build a callable PSD function from a tinygp Celerite kernel.
 
-        Args:
-            kernel: A tinygp kernel (sum of Celerite terms)
-            freq_in_hz: If True, expects frequencies in Hz and converts to omega
-            real_eps: Threshold for deciding whether b and d are "zero" (real term)
+        _, cond = self.gp.condition(self._lightcurve.y, self._lightcurve.times)
+        pred_mean = cond.mean
+        pred_var = cond.variance
 
-        Returns:
-            A function psd(omega) or psd(f) → PSD values
+        if include_noise:
+
+            jitter_var = getattr(self.gp.kernel, "jitter", 0.0)
+            pred_var = pred_var + jitter_var
+
+        std_res = (self._lightcurve.y - pred_mean) / jnp.sqrt(pred_var)
+        return std_res
+
+    def predict(self, y, **kwargs) -> tuple:
+        """Compute the conditional predictive distribution of the model by calling celerite's predict method.
+
+        Parameters
+        ----------
+        y : np.ndarray
+            Observations at the coordinates of the lightcurve times.
+        **kwargs : dict
+            Additional keyword arguments to pass to the celerite predict method.
+        Returns
+        ------
+
+        tuple
+            mu, (mu, cov), or (mu, var) depending on the values of return_cov and
+            return_var. See https://celerite.readthedocs.io/en/stable/python/gp/#celerite.GP.predict.
+
         """
-        if hasattr(kernel, "terms"):
-            terms = kernel.terms
-        else:
-            terms = [kernel]
-
-        alpha_real = []
-        beta_real = []
-        alpha_complex_real = []
-        alpha_complex_imag = []
-        beta_complex_real = []
-        beta_complex_imag = []
-
-        for term in terms:
-            if not isinstance(term, tinygp.kernels.quasisep.Celerite):
-                raise NotImplementedError(f"Unsupported kernel type: {type(term)}")
-
-            a = term.a
-            b = term.b
-            c = term.c
-            d = term.d
-
-            if jnp.abs(b) < real_eps and jnp.abs(d) < real_eps:
-                alpha_real.append(a)
-                beta_real.append(c)
-            else:
-                alpha_complex_real.append(a)
-                alpha_complex_imag.append(b)
-                beta_complex_real.append(c)
-                beta_complex_imag.append(d)
-
-        alpha_real = jnp.array(alpha_real)
-        beta_real = jnp.array(beta_real)
-        alpha_complex_real = jnp.array(alpha_complex_real)
-        alpha_complex_imag = jnp.array(alpha_complex_imag)
-        beta_complex_real = jnp.array(beta_complex_real)
-        beta_complex_imag = jnp.array(beta_complex_imag)
-
-        def psd_fn(freqs):
-            omega = 2 * jnp.pi * freqs if freq_in_hz else freqs
-            return get_psd_jax(
-                alpha_real,
-                beta_real,
-                alpha_complex_real,
-                alpha_complex_imag,
-                beta_complex_real,
-                beta_complex_imag,
-                omega,
-            )
-
-        return psd_fn
+        return self.gp.predict(y, **kwargs)

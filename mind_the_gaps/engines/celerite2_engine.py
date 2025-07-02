@@ -1,24 +1,14 @@
-import copy
-import time
-import warnings
-from multiprocessing import Pool
-from typing import Dict, List
-
-import arviz as az
 import jax
 import jax.numpy as jnp
 import jaxopt
-import matplotlib.pyplot as plt
 import numpy as np
-import numpyro
-from numpyro.infer import MCMC, NUTS, Predictive
+from numpyro.infer import MCMC, NUTS
 from numpyro.infer.initialization import init_to_value
 
 from mind_the_gaps.engines.base_numpyro_engine import BaseNumpyroGPEngine
-from mind_the_gaps.engines.gp_engine import BaseGPEngine
 from mind_the_gaps.gp.celerite2_gaussian_process import Celerite2GP
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
-from mind_the_gaps.models.kernel_spec import KernelSpec, clone_kernel_spec
+from mind_the_gaps.models.kernel_spec import KernelSpec
 
 
 class Celerite2GPEngine(BaseNumpyroGPEngine):
@@ -39,6 +29,7 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
         "converge_steps",
         "progress",
         "perc",
+        "max_tree_depth",
     }
 
     def __init__(
@@ -83,53 +74,16 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
             mean_params=mean_params,
         )
 
-    def minimize(self) -> jax.Array:
-        """Minimize the negative log likelihood of the Gaussian Process using jaxopt L-BFGS-B method.
-        This method optimises the parameters of the Gaussian Process to fit the lightcurve data.
-        It uses the bounds defined in the kernel specification to ensure that the parameters remain within valid ranges.
-        The method returns the optimised parameters as a jax Array.
-        If the mean model is being fitted, it includes the mean model parameters in the optimisation.
-        The optimisation is performed using the ScipyBoundedMinimize solver from jaxopt.
-        The method also updates the Gaussian Process with the optimised parameters.
-
-        Returns
-        -------
-        jax.Array
-            The optimised parameters of the Gaussian Process after minimization.
-        """
-
-        bounds = self.kernel_spec.get_bounds_array()
-        upper_bounds = jnp.array([values[1] for values in bounds])
-        lower_bounds = jnp.array([values[0] for values in bounds])
-        if self.fit_mean:
-            upper_bounds = jnp.concatenate([self.gp.meanmodel.bounds[1], upper_bounds])
-            lower_bounds = jnp.concatenate([self.gp.meanmodel.bounds[0], lower_bounds])
-
-        solver = jaxopt.ScipyBoundedMinimize(
-            method="l-bfgs-b",
-            fun=self.gp.negative_log_likelihood,
-            maxiter=1000,
-        )
-
-        opt_params, res = solver.run(
-            init_params=self.init_params,
-            bounds=(lower_bounds, upper_bounds),
-        )
-        self.gp.compute_fit(params=opt_params, t=self._lightcurve.times)
-        self.init_params = opt_params
-        self.kernel_spec.update_params_from_array(
-            self.init_params[self.gp.meanmodel.sampled_parameters :]
-        )
-
     def derive_posteriors(
         self,
         num_warmup: int,
         num_chains: int,
         max_steps: int,
         converge_steps: int,
-        fit=True,
-        progress=True,
+        fit: bool = True,
+        progress: bool = True,
         perc: float = 0.1,
+        max_tree_depth: int = 10,
     ) -> None:
         """Derive the posterior distributions of the Gaussian Process parameters using MCMC sampling.
         This method initialises the parameters, runs MCMC sampling using the Numpyro with the NUTS kernel,
@@ -152,7 +106,8 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
             Whether to show a progress bar during MCMC sampling, by default True.
         perc : float
             Percentage for the normal distribution used to spread the parameters, by default 0.1.
-
+        max_tree_depth : int, optional
+            Maximum depth of the tree for the NUTS sampler, by default 10.
         Raises
         ------
         ValueError
@@ -170,12 +125,14 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
                 adapt_step_size=True,
                 dense_mass=False,
                 init_strategy=init_to_value(values=fixed_params),
+                max_tree_depth=max_tree_depth,
             )
         else:
             kernel = NUTS(
                 self.numpyro_model,
                 adapt_step_size=True,
                 dense_mass=False,
+                max_tree_depth=max_tree_depth,
             )
 
         mcmc = MCMC(
@@ -245,8 +202,6 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
         if log_like:
             self._get_log_likes()
 
-        # self._loglikelihoods = idata.posterior["log_likelihood"].values
-
     def _generate_lc_from_params(self, params: jax.Array) -> GappyLightcurve:
         """Generate a lightcurve from the Gaussian Process parameters.
         This method creates a new GappyLightcurve instance by sampling from the Gaussian Process defined by the kernel specification.
@@ -261,8 +216,7 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
         GappyLightcurve
             A new GappyLightcurve instance generated from the Gaussian Process parameters.
         """
-        # kernel_spec = copy.deepcopy(self.kernel_spec)
-        # kernel_spec = clone_kernel_spec(self.kernel_spec)
+
         if self.gp.meanmodel.sampled_mean:
             mean_params = params[: self.gp.meanmodel.sampled_parameters]
             kernel_params = params[self.gp.meanmodel.sampled_parameters :]

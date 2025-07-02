@@ -9,11 +9,8 @@ from numpyro.handlers import seed, trace
 
 from mind_the_gaps.gp.celerite2_gaussian_process import Celerite2GP
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
-from mind_the_gaps.models.kernel_spec import (
-    KernelParameterSpec,
-    KernelSpec,
-    KernelTermSpec,
-)
+from mind_the_gaps.models.kernel_spec import (KernelParameterSpec, KernelSpec,
+                                              KernelTermSpec)
 
 
 class TestCelerite2GP(unittest.TestCase):
@@ -79,7 +76,7 @@ class TestCelerite2GP(unittest.TestCase):
         self.assertEqual(kernel.d, jnp.exp(self.param4.value))
 
     def test_get_kernel_sampling(self):
-
+        print(self.kernel_spec)
         with seed(rng_seed=0), trace() as tr:
             kernel = self.gp_model.kernel_spec.get_kernel(fit=False)
 
@@ -104,10 +101,20 @@ class TestCelerite2GP(unittest.TestCase):
         self.assertAlmostEqual(kernel.d, sampled_d, places=5)
 
     def test_get_kernel_raises_if_no_prior(self):
-        self.param1.fixed = False
-        self.param1.prior = None
+
+        self.param3.prior = None
         with self.assertRaises(ValueError):
-            self.gp_model.kernel_spec.get_kernel(fit=False)
+            term_spec = KernelTermSpec(
+                term_class=j_terms.ComplexTerm,
+                parameters={
+                    "a": self.param1,
+                    "b": self.param2,
+                    "c": self.param3,
+                    "d": self.param4,
+                },
+            )
+            KernelSpec(terms=[term_spec])
+        self.param3.prior = dist.Uniform
 
     def test_numpyro_dist(self):
         mock_dist = MagicMock(spec=CeleriteNormal)

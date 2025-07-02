@@ -67,7 +67,7 @@ class Celerite2GP(BaseGP):
             )
         else:
             init_params = self.kernel_spec.get_param_array()
-        self.gp = self.compute_fit(self._lightcurve.times, params=init_params)
+        self.compute_fit(self._lightcurve.times, params=init_params)
 
     def _build_mean_model(
         self, meanmodel: str, mean_params: jax.Array
@@ -115,7 +115,11 @@ class Celerite2GP(BaseGP):
         return self.gp.numpyro_dist()
 
     def compute_fit(
-        self, t: jax.Array, params: jax.Array = None, log_like: bool = True
+        self,
+        t: jax.Array,
+        params: jax.Array = None,
+        log_like: bool = True,
+        jitter: float = 1e-6,
     ) -> None:
         """Set up the Celerite2 kernel, GaussianProcess and call compute on it with
         the appropriate params.
@@ -129,6 +133,10 @@ class Celerite2GP(BaseGP):
 
         fit : bool
             Whether the GP is being fitted (i.e. during parameter optiization) or sampled.
+        jitter : float, optional
+            Jitter term to add to the diagonal of the covariance matrix, by default 1e-6
+        log_like : bool, optional
+            Whether to return the log likelihood of the Gaussian Process, by default True
         """
 
         mean_params = params[: self.meanmodel.sampled_parameters]
@@ -136,12 +144,15 @@ class Celerite2GP(BaseGP):
         self.kernel_spec.update_params_from_array(kernel_params)
         mean = self.meanmodel.compute_mean(params=mean_params)
         kernel = self.kernel_spec._get_jax_kernel_fit()
-        self.gp = celerite2.jax.GaussianProcess(kernel, mean=mean)
+        self.gp = celerite2.jax.GaussianProcess(
+            kernel, mean=mean, diag=self._lightcurve.dy**2 + jitter
+        )
         self.gp.compute(
             t,
             yerr=self._lightcurve.dy,
             check_sorted=False,
         )
+
         if log_like:
             return self.gp.log_likelihood(self._lightcurve.y)
 
@@ -247,6 +258,7 @@ class Celerite2GP(BaseGP):
             Negative Log Likelihood
         """
         self.compute_fit(self._lightcurve.times, params=params)
+
         nll_value = -self.gp.log_likelihood(self._lightcurve.y)
         return nll_value
 
@@ -268,7 +280,7 @@ class Celerite2GP(BaseGP):
         params : jnp.array
             Parameters to compute the GP for.
         """
-        self.compute_fit(params=params, t=self._lightcurve.times, fit=True)
+        self.compute_fit(params=params, t=self._lightcurve.times)
 
     def log_likelihood(self, observations: jax.Array) -> float:
         """Get the log likelihood of the GP model
@@ -315,7 +327,7 @@ class Celerite2GP(BaseGP):
             param_names = self.kernel_spec.get_param_names()
         return param_names
 
-    def standarized_residuals(self, include_noise=True):
+    def standardized_residuals(self, include_noise=True):
         """Returns the standarized residuals (see e.g. Kelly et al. 2011) Eq. 49.
         You should set the gp parameters to your best or mean (median) parameter values prior to calling this method
 
@@ -327,8 +339,8 @@ class Celerite2GP(BaseGP):
         pred_mean, pred_var = self.gp.predict(
             self._lightcurve.y, return_var=True, return_cov=False
         )
-        if include_noise:
-            pred_var += self.gp.kernel.jitter
+        # if include_noise:
+        #    pred_var += self.gp.kernel.jitter
         std_res = (self._lightcurve.y - pred_mean) / jnp.sqrt(pred_var)
         return std_res
 
@@ -364,8 +376,12 @@ class Celerite2GP(BaseGP):
             self._lightcurve.y, return_var=True, return_cov=False
         )
 
-        # if include_noise:
-        #    ....
+        if include_noise:
+
+            if hasattr(self.gp.kernel, "jitter"):
+                pred_var += self.gp.kernel.jitter
+            else:
+                raise AttributeError("Kernel has no jitter term defined.")
 
         std_res = (self._lightcurve.y - pred_mean) / jnp.sqrt(pred_var)
         return std_res

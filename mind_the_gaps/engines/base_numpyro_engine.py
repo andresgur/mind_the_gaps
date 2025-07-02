@@ -1,5 +1,7 @@
 import time
 import warnings
+from functools import partial
+from multiprocessing import Pool
 from typing import Dict, List
 
 import jax
@@ -98,7 +100,6 @@ class BaseNumpyroGPEngine(BaseGPEngine):
         t : jax.Array
             The time array of the lightcurve.
         """
-
         self.gp.compute_sample(t)
         numpyro.sample("obs", self.gp.numpyro_dist(), obs=self._lightcurve.y)
 
@@ -340,20 +341,23 @@ class BaseNumpyroGPEngine(BaseGPEngine):
         AttributeError
             If the posteriors have not been derived yet, i.e., if `derive_posteriors` has not been called.
         """
-        if self._mcmc_samples is None:
+        if self._mcmc_samples is None or self._loglikelihoods is None:
             raise AttributeError(
-                "Posteriors have not been derived. Please run \
-                    derive_posteriors prior to populate the attributes."
+                "Posteriors have not been derived. Please run derive_posteriors first."
             )
-        flat_idx = jnp.argmax(self._loglikelihoods)
-        idx = jnp.unravel_index(flat_idx, self._loglikelihoods.shape)
-        chain_idx = int(idx[0])
-        step_idx = int(idx[1])
 
+        # Assume all parameters have the same shape: (num_chains, num_samples)
+        sample_shape = next(iter(self._mcmc_samples.values())).shape
+        num_chains, num_samples = sample_shape
+
+        flat_idx = jnp.argmax(self._loglikelihoods)
+        chain_idx, sample_idx = jnp.divmod(flat_idx, num_samples)
+
+        # Extract parameter values at that (chain, sample) location
         values = [
-            self._mcmc_samples[param][chain_idx, step_idx]
+            self._mcmc_samples[param][chain_idx, sample_idx]
             for param in self._mcmc_samples
-            if param != "log_likelihood"
+            if param != "log_likelihood"  # handles "log_likelihood" or other keys
         ]
 
         return jnp.array(values)
@@ -415,7 +419,11 @@ class BaseNumpyroGPEngine(BaseGPEngine):
             )
         return self._tau
 
-    def generate_from_posteriors(self, nsims: int) -> List[GappyLightcurve]:
+    def generate_from_posteriors(
+        self,
+        nsims: int,
+        par_workers: int = 1,
+    ) -> List[GappyLightcurve]:
         """Generate lightcurves from the posterior samples of the Gaussian Process.
         This method samples from the posterior distributions of the parameters derived from MCMC sampling.
         It generates a specified number of lightcurves by randomly selecting parameter sets from the posterior samples.
@@ -424,6 +432,7 @@ class BaseNumpyroGPEngine(BaseGPEngine):
         ----------
         nsims : int
             The number of lightcurves to generate from the posterior samples.
+
 
         Returns
         -------
@@ -457,11 +466,7 @@ class BaseNumpyroGPEngine(BaseGPEngine):
             [v[sampled_indices] for v in flat_samples.values()]
         )
 
-        lightcurves = []
-        for params in sampled_params:
-            lightcurves.append(self._generate_lc_from_params(params=params))
-
-        return lightcurves
+        return [self._generate_lc_from_params(p) for p in sampled_params]
 
     @property
     def k(self):

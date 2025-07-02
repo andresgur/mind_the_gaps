@@ -14,11 +14,8 @@ from mind_the_gaps.gp.celerite2_gaussian_process import Celerite2GP
 from mind_the_gaps.gp.celerite_gaussian_process import CeleriteGP
 from mind_the_gaps.gp.tinygp_gaussian_process import TinyGP
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
-from mind_the_gaps.models.kernel_spec import (
-    KernelParameterSpec,
-    KernelSpec,
-    KernelTermSpec,
-)
+from mind_the_gaps.models.kernel_spec import (KernelParameterSpec, KernelSpec,
+                                              KernelTermSpec)
 
 
 class GPRegressionTest(unittest.TestCase):

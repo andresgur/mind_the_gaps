@@ -1,27 +1,10 @@
-import copy
-import pprint as pp
-import warnings
-from functools import partial
-from multiprocessing import Pool
-from typing import Callable, Dict, List
-
-import arviz as az
-import celerite
-import celerite2.jax
-import emcee
 import jax
-import jax.experimental
 import jax.numpy as jnp
-import jaxopt
-import matplotlib.pyplot as plt
 import numpy as np
-import numpyro
-from numpyro.infer import AIES, MCMC, NUTS, Predictive
-from numpyro.infer.ensemble import EnsembleSampler
+from numpyro.infer import AIES, MCMC, NUTS
 from numpyro.infer.initialization import init_to_value
 
 from mind_the_gaps.engines.base_numpyro_engine import BaseNumpyroGPEngine
-from mind_the_gaps.engines.gp_engine import BaseGPEngine
 from mind_the_gaps.gp.tinygp_gaussian_process import TinyGP
 from mind_the_gaps.lightcurves.gappylightcurve import GappyLightcurve
 from mind_the_gaps.models.kernel_spec import KernelSpec
@@ -157,18 +140,18 @@ class TinyGPEngine(BaseNumpyroGPEngine):
                     dense_mass=False,
                 )
 
-        mcmc = MCMC(
-            kernel,
-            num_warmup=num_warmup,
-            num_samples=1,
-            num_chains=num_chains,
-            chain_method=chain_method,
-            jit_model_args=True,
-            progress_bar=progress,
-        )
+        # mcmc = MCMC(
+        #    kernel,
+        #    num_warmup=0,
+        #    num_samples=1,
+        #    num_chains=num_chains,
+        #    chain_method=chain_method,
+        #    jit_model_args=True,
+        #    progress_bar=progress,
+        # )
 
-        mcmc.run(self.rng_key, self._lightcurve.times)
-        state = mcmc.last_state
+        #        mcmc.run(self.rng_key, self._lightcurve.times)
+        #        state = mcmc.last_state
 
         mcmc = MCMC(
             kernel,
@@ -179,17 +162,22 @@ class TinyGPEngine(BaseNumpyroGPEngine):
             progress_bar=progress,
             jit_model_args=True,
         )
-        mcmc.post_warmup_state = state
+        key = self.rng_key
+
+        state = None
         num_iterations = int(max_steps / converge_steps)
+
         if num_iterations < 1:
             raise ValueError(
                 f"max_steps ({max_steps}) must be at least as large as converge_steps ({converge_steps}) to run at least one iteration."
             )
         for iteration in range(num_iterations):
+            if state is not None:
+                mcmc.post_warmup_state = state
+                self.rng_key = mcmc.post_warmup_state.rng_key
 
-            mcmc.run(mcmc.post_warmup_state.rng_key, self._lightcurve.times)
-            mcmc.post_warmup_state = mcmc.last_state
-            # idata = az.from_numpyro(mcmc)
+            mcmc.run(self.rng_key, self._lightcurve.times)
+            state = mcmc.last_state
 
             samples = mcmc.get_samples(group_by_chain=True)
             if iteration == 0:
@@ -243,6 +231,7 @@ class TinyGPEngine(BaseNumpyroGPEngine):
             kernel_params = params
 
         self.kernel_spec.update_params_from_array(kernel_params)
+        kernel = self.kernel_spec.get_kernel()
         # Is this needed? Can get psd from kernel directly without getting the gp
         gp_sample = TinyGP(
             kernel_spec=self.kernel_spec,

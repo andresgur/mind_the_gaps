@@ -10,8 +10,43 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro
+import tinygp
 from celerite2.jax.terms import Term, TermSum
+from jax import jit, vmap
 from tinygp.kernels.base import Kernel
+
+
+@jit
+def get_psd_value_jax(
+    alpha_real,
+    beta_real,
+    alpha_complex_real,
+    alpha_complex_imag,
+    beta_complex_real,
+    beta_complex_imag,
+    omega,
+):
+    w2 = omega**2
+    p = 0.0
+
+    # Real terms
+    p += jnp.sum(alpha_real * beta_real / (beta_real**2 + w2))
+
+    # Complex terms
+    w02 = beta_complex_real**2 + beta_complex_imag**2
+    num = (
+        alpha_complex_real * beta_complex_real + alpha_complex_imag * beta_complex_imag
+    ) * w02 + (
+        alpha_complex_real * beta_complex_real - alpha_complex_imag * beta_complex_imag
+    ) * w2
+    denom = w2**2 + 2.0 * (beta_complex_real**2 - beta_complex_imag**2) * w2 + w02**2
+    p += jnp.sum(num / denom)
+
+    return jnp.sqrt(2.0 / jnp.pi) * p
+
+
+# Vectorized for an array of omega
+get_psd_jax = vmap(get_psd_value_jax, in_axes=(None, None, None, None, None, None, 0))
 
 
 @dataclass
@@ -130,9 +165,7 @@ class KernelTermSpec:
 
     def _get_term_sampled(self, i):
         _params = {}
-        for name, param_spec in itertools.chain(
-            self._fixed_params.items(), self._sampled_params.items()
-        ):
+        for name, param_spec in self._sampled_params.items():
 
             sample = numpyro.sample(
                 f"terms[{i}]:log_{name}", param_spec.prior(*param_spec.bounds)
@@ -141,8 +174,74 @@ class KernelTermSpec:
             _params[name] = jnp.exp(sample)
         for name, param_spec in self._zeroed_params.items():
             _params[name] = param_spec.value
+        for name, param_spec in self._fixed_params.items():
+            _params[name] = jnp.exp(param_spec.value)
 
         return self.term_class(**_params)
+
+    def get_psd(self, freq_in_hz=True, real_eps=1e-5):
+        """Get the Power Spectral Density (PSD) function for the kernel.
+
+        Parameters
+        ----------
+        freq_in_hz : bool, optional
+            If True, the frequencies are in Hz. If False, they are in radians.
+        real_eps : float, optional
+            Small value to avoid division by zero, by default 1e-5
+
+        Returns
+        -------
+        Callable[[jnp.ndarray], jnp.ndarray]
+            A function that computes the PSD for a given frequency array.
+
+        Raises
+        ------
+        NotImplementedError
+            If the kernel term is not supported for PSD computation.
+        """
+
+        term = self._get_term_fit()
+
+        if not isinstance(term, tinygp.kernels.quasisep.Celerite):
+            raise NotImplementedError(
+                f"PSD only supported for tinygp Celerite terms. Got: {type(term)}"
+            )
+
+        a = term.a
+        b = term.b
+        c = term.c
+        d = term.d
+
+        is_real = jnp.abs(b) < real_eps and jnp.abs(d) < real_eps
+
+        if is_real:
+            alpha_real = jnp.array([a])
+            beta_real = jnp.array([c])
+            alpha_complex_real = jnp.zeros(1)
+            alpha_complex_imag = jnp.zeros(1)
+            beta_complex_real = jnp.zeros(1)
+            beta_complex_imag = jnp.zeros(1)
+        else:
+            alpha_real = jnp.zeros(1)
+            beta_real = jnp.zeros(1)
+            alpha_complex_real = jnp.array([a])
+            alpha_complex_imag = jnp.array([b])
+            beta_complex_real = jnp.array([c])
+            beta_complex_imag = jnp.array([d])
+
+        def psd_fn(freqs):
+            omega = 2 * jnp.pi * freqs if freq_in_hz else freqs
+            return get_psd_jax(
+                alpha_real,
+                beta_real,
+                alpha_complex_real,
+                alpha_complex_imag,
+                beta_complex_real,
+                beta_complex_imag,
+                omega,
+            )
+
+        return psd_fn
 
 
 @dataclass
@@ -171,7 +270,6 @@ class KernelSpec:
             self.use_jax = True
             for term in self.terms:
                 term._resolve_params()
-        # print("")
 
     def __add__(self, other: "KernelSpec") -> "KernelSpec":
         if not isinstance(other, KernelSpec):
@@ -319,28 +417,10 @@ class KernelSpec:
         ValueError
             If a parameter in the kernel specification is not fixed and does not have a prior distribution.
         """
-        terms = []
-        for i, term in enumerate(self.terms):
-            kwargs = {}
-            for name, param_spec in term.parameters.items():
-                if not param_spec.zeroed and not (fit or param_spec.fixed):
-                    if param_spec.prior is None:
-                        raise ValueError(
-                            f"Missing prior for parameter '{name}' in term {i}"
-                        )
-                    sample = numpyro.sample(
-                        f"terms[{i}]:log_{name}",
-                        param_spec.prior(*param_spec.bounds),
-                    )
-                    value = jnp.exp(sample)
-                else:
-                    value = -1.0e-10 if param_spec.zeroed else jnp.exp(param_spec.value)
-                kwargs[name] = value
-            terms.append(term.term_class(**kwargs))
-        kernel = terms[0]
-        for t in terms[1:]:
-            kernel += t
-        return kernel
+        if fit:
+            return self._get_jax_kernel_fit()
+        else:
+            return self._get_jax_kernel_sample()
 
     def _get_jax_kernel_fit(self) -> Term:
         terms = []
@@ -389,3 +469,56 @@ class KernelSpec:
             kernel += term
 
         return kernel
+
+    def get_psd_from_kernel(self, freq_in_hz=True, real_eps=1e-5):
+        """
+        Build a callable PSD function from a tinygp Celerite kernel.
+
+        Args:
+            kernel: A tinygp kernel (sum of Celerite terms)
+            freq_in_hz: If True, expects frequencies in Hz and converts to omega
+            real_eps: Threshold for deciding whether b and d are "zero" (real term)
+
+        Returns:
+            A function psd(omega) or psd(f) → PSD values
+        """
+        kernel = self.get_kernel(fit=True)
+        if not isinstance(kernel, tinygp.kernels.base.Kernel):
+            raise TypeError(
+                f"get_psd_from_kernel should only be called on KernelSpecs constructued from tinyGP Celerite Kernels, git type {type(kernel)}. For celerite & celerite2 kernels use kernel.get_psd directly."
+            )
+
+        def _flatten_terms(kernel):
+            if isinstance(kernel, tinygp.kernels.quasisep.Sum):
+                return _flatten_terms(kernel.kernel1) + _flatten_terms(kernel.kernel2)
+            elif hasattr(kernel, "terms"):
+                flat_terms = []
+                for term in kernel.terms:
+                    flat_terms.extend(_flatten_terms(term))
+                return flat_terms
+            else:
+                return [kernel]
+
+        terms = _flatten_terms(kernel)
+
+        if not self.use_jax:
+            raise TypeError("PSD extraction only implemented for JAX (tinygp) kernels.")
+
+        psd_terms = [
+            term.get_psd(freq_in_hz=freq_in_hz, real_eps=real_eps)
+            for term in self.terms
+        ]
+
+        def composite_psd_fn(freqs):
+            return sum(psd(freqs) for psd in psd_terms)
+
+        return composite_psd_fn
+
+    def get_term_psds(self, freq_in_hz=True, real_eps=1e-5):
+        """Return a list of PSD functions, one per term."""
+        if not self.use_jax:
+            raise TypeError("Term-level PSDs only supported for JAX (tinygp) kernels.")
+        return [
+            term.get_psd(freq_in_hz=freq_in_hz, real_eps=real_eps)
+            for term in self.terms
+        ]

@@ -276,7 +276,7 @@ class GPModelling:
     def get_psd(self):
         return self.modelling_engine.gp.get_psd
 
-    def standarized_residuals(self, include_noise: bool = True):
+    def standardized_residuals(self, include_noise: bool = True):
         """
         Returns the standarized residuals (see e.g. Kelly et al. 2011) Eq. 49.
         You should set the gp parameters to your best or mean (median) parameter values prior to calling this method
@@ -286,7 +286,9 @@ class GPModelling:
         include_noise
             True to include any jitter term into the standard deviation calculation. False ignores this contribution.
         """
-        return self.modelling_engine.gp.standarized_residuals()
+        return self.modelling_engine.gp.standardized_residuals(
+            include_noise=include_noise
+        )
 
     def predict(self, y, **kwargs):
         return self.modelling_engine.gp.predict(y, **kwargs)
@@ -317,6 +319,7 @@ class GPModellingComparison:
         self.null_mean_params = null_mean_params
         self.alt_mean_params = alt_mean_params
         self.modelling_kwargs = modelling_kwargs
+        self.lcs = None
 
         self.null_model = GPModelling(
             kernel_spec=null_kernel_spec,
@@ -333,22 +336,50 @@ class GPModellingComparison:
         )
 
     def derive_posteriors(self, **engine_kwargs: Mapping[str, Any]):
+        """Derive posterior distributions for both null and alternative models.
+        Parameters
+        ----------
+        engine_kwargs : Mapping[str, Any]
+            Keyword arguments for the engine, such as num_warmup, num_chains, max_steps, converge_steps, etc.
+        """
         # self.engine_kwargs = engine_kwargs
         self.null_model.derive_posteriors(**engine_kwargs)
         self.alt_model.derive_posteriors(**engine_kwargs)
 
     def generate_from_posteriors(self, nsims):
-        return self.null_model.generate_from_posteriors(nsims)
-        # self.alt_model.generate_from_posteriors(nsims)
+        """Generate lightcurves from the posterior distributions of the null model.
 
-    def process_lightcurves(self, nsims, **posterior_kwargs):
+        Parameters
+        ----------
+        nsims : int
+            Number of lightcurves to generate.
+        """
+        self.lcs = self.null_model.generate_from_posteriors(nsims)
+
+    def process_lightcurves(self, **posterior_kwargs):
+        """Process the generated lightcurves.
+
+        Parameters
+        ----------
+        posterior_kwargs : Mapping[str, Any]
+            Keyword arguments for the posterior processing, such as num_warmup, num_chains, max_steps, converge_steps, etc.
+
+        Raises
+        ------
+        ValueError
+            If the lightcurves have not been generated yet.
+        """
         self.likelihoods_null = []
         self.likelihoods_alt = []
 
-        lcs = self.null_model.generate_from_posteriors(nsims=nsims)
+        # lcs = self.null_model.generate_from_posteriors(nsims=nsims)
+        if self.lcs is None:
+            raise ValueError(
+                "You need to run generate_from_posteriors first to generate lightcurves."
+            )
 
-        for i, lc in enumerate(lcs):
-            print("Processing lightcurve %d/%d" % (i + 1, len(lcs)), end="\r")
+        for i, lc in enumerate(self.lcs):
+            print("Processing lightcurve %d/%d" % (i + 1, len(self.lcs)), end="\r")
 
             null_modelling = GPModelling(
                 kernel_spec=self.null_kernel_spec,
@@ -369,6 +400,18 @@ class GPModellingComparison:
             self.likelihoods_alt.append(alternative_modelling.max_loglikelihood)
 
     def likelihood_ratio_test(self, path: str = "LRT.png") -> None:
+        """Perform a likelihood ratio test between the null and alternative models.
+
+        Parameters
+        ----------
+        path : str, optional
+            Path to save the LRT plot, by default "LRT.png"
+
+        Raises
+        ------
+        ValueError
+            If the lightcurves have not been processed yet.
+        """
         if self.likelihoods_null is None:
             raise ValueError(
                 "You need to run process_lightcurves or process_lightcurves_par first."
@@ -397,9 +440,20 @@ class GPModellingComparison:
         print(f"Plot saved at: {path}")
 
     def process_lightcurves_par(self, nsims, par_workers=None, **posterior_kwargs):
+        """Process the generated lightcurves in parallel.
+
+        Parameters
+        ----------
+        nsims : int
+            Number of lightcurves to generate.
+        par_workers : int, optional
+            Number of parallel workers to use, by default None
+        """
         self.likelihoods_null = [None] * nsims
         self.likelihoods_alt = [None] * nsims
-        lcs = self.null_model.generate_from_posteriors(nsims=nsims)
+        # lcs = self.null_model.generate_from_posteriors(
+        #    nsims=nsims, par_workers=par_workers
+        # )
 
         args_list = [
             (
@@ -412,7 +466,7 @@ class GPModellingComparison:
                 self.modelling_kwargs,
                 posterior_kwargs,
             )
-            for i, lc in enumerate(lcs)
+            for i, lc in enumerate(self.lcs)
         ]
         with ProcessPoolExecutor(
             max_workers=par_workers  # or multiprocessing.cpu_count()
@@ -431,32 +485,21 @@ class GPModellingComparison:
             print(f"Processed {n_done}/{nsims} lightcurves ({pct:.1f}%)", end="\r")
             sys.stdout.flush()
 
-    def likelihood_ratio_test(self, path: str = "LRT.png") -> None:
-        path = os.path.abspath(path)
-        plt.figure()
-        T_dist = -2 * (np.array(self.likelihoods_null) - np.array(self.likelihoods_alt))
-        plt.hist(T_dist, bins=10)
-        T_obs = -2 * (
-            self.null_model.max_loglikelihood - self.alt_model.max_loglikelihood
-        )
-        print("Observed LRT_stat: %.3f" % T_obs)
-        perc = percentileofscore(T_dist, T_obs)
-        print("p-value: %.4f" % (1 - perc / 100))
-        plt.axvline(T_obs, label="%.2f%%" % perc, ls="--", color="black")
-
-        sigmas = [95, 99.7]
-        colors = ["red", "green"]
-        for i, sigma in enumerate(sigmas):
-            plt.axvline(np.percentile(T_dist, sigma), ls="--", color=colors[i])
-        plt.legend()
-        plt.xlabel("$T_\\mathrm{LRT}$")
-        plt.savefig(path, dpi=300, bbox_inches="tight")
-        plt.close()
-
-        print(f"Plot saved at: {path}")
-
 
 def _process_one_lightcurve(args):
+    """Process a single lightcurve.
+
+    Parameters
+    ----------
+    args : tuple
+        A tuple containing the arguments needed to process the lightcurve.
+
+    Returns
+    -------
+    tuple
+        A tuple containing the index of the lightcurve, the null log-likelihood, and the alternative log-likelihood.
+    """
+
     (
         i,
         lc,

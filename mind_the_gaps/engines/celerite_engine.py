@@ -371,7 +371,7 @@ class CeleriteGPEngine(BaseGPEngine):
     def generate_from_posteriors(
         self,
         nsims: int = 10,
-        cpus: int = 8,
+        par_workers: int = 8,
         pdf: str = "Gaussian",
         sigma_noise: float = None,
     ) -> List[GappyLightcurve]:
@@ -381,7 +381,7 @@ class CeleriteGPEngine(BaseGPEngine):
         ----------
         nsims : int, optional
             Number of lightcurve simulations to perform, by default 10.
-        cpus : int, optional
+        par_workers : int, optional
             Number of cpus to use for parallelisation, by default 8
         pdf : str, optional
             PDF for the simulations: "Gaussian", "Lognormal" or "Uniform", by default "Gaussian"
@@ -418,7 +418,7 @@ class CeleriteGPEngine(BaseGPEngine):
             np.random.randint(len(self._mcmc_samples), size=nsims)
         ]
         warnings.simplefilter("ignore")
-        with Pool(processes=cpus, initializer=np.random.seed) as pool:
+        with Pool(processes=par_workers, initializer=np.random.seed) as pool:
             lightcurves = pool.map(
                 partial(
                     self._generate_lc_from_params,
