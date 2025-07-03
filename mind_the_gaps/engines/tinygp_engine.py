@@ -66,7 +66,7 @@ class TinyGPEngine(BaseNumpyroGPEngine):
 
     def derive_posteriors(
         self,
-        num_warmup: int,
+        burnin: int,
         num_chains: int,
         max_steps: int,
         converge_steps: int,
@@ -74,6 +74,7 @@ class TinyGPEngine(BaseNumpyroGPEngine):
         progress=True,
         aies: bool = False,
         perc: float = 0.1,
+        max_tree_depth: int = 6,
     ) -> None:
         """Derive the posterior distributions of the Gaussian Process parameters using MCMC sampling.
         This method initialises the parameters, runs MCMC sampling using the Numpyro with the NUTS kernel,
@@ -82,8 +83,8 @@ class TinyGPEngine(BaseNumpyroGPEngine):
 
         Parameters
         ----------
-        num_warmup : int
-            Number of warmup steps for the MCMC sampling.
+        burnin : int
+            Number of burnin steps for the MCMC sampling.
         num_chains : int
             Number of chains to run in parallel for MCMC sampling.
         max_steps : int
@@ -98,6 +99,8 @@ class TinyGPEngine(BaseNumpyroGPEngine):
             Percentage for the normal distribution used to spread the parameters, by default 0.1.
         aies : bool, optional
             Whether to use the AIES kernel for MCMC sampling instead of NUTS, by default False.
+        max_tree_depth : int, optional
+            Maximum depth of the tree for the sampler, by default 6.
         Raises
         ------
         ValueError
@@ -124,6 +127,7 @@ class TinyGPEngine(BaseNumpyroGPEngine):
                     adapt_step_size=True,
                     dense_mass=False,
                     init_strategy=init_to_value(values=fixed_params),
+                    max_tree_depth=max_tree_depth,
                 )
         else:
             if aies:
@@ -138,6 +142,7 @@ class TinyGPEngine(BaseNumpyroGPEngine):
                     self.numpyro_model,
                     adapt_step_size=True,
                     dense_mass=False,
+                    max_tree_depth=max_tree_depth,
                 )
 
         # mcmc = MCMC(
@@ -155,7 +160,7 @@ class TinyGPEngine(BaseNumpyroGPEngine):
 
         mcmc = MCMC(
             kernel,
-            num_warmup=0,
+            num_warmup=burnin,
             num_samples=converge_steps,
             num_chains=num_chains,
             chain_method=chain_method,
@@ -231,15 +236,8 @@ class TinyGPEngine(BaseNumpyroGPEngine):
             kernel_params = params
 
         self.kernel_spec.update_params_from_array(kernel_params)
-        kernel = self.kernel_spec.get_kernel()
-        # Is this needed? Can get psd from kernel directly without getting the gp
-        gp_sample = TinyGP(
-            kernel_spec=self.kernel_spec,
-            meanmodel=self.meanmodel,
-            lightcurve=self._lightcurve,
-            mean_params=mean_params,
-        )
-        psd_model = gp_sample.get_psd()
+
+        psd_model = self.kernel_spec.get_psd_from_kernel()
         simulator = self._lightcurve.get_simulator(psd_model, pdf="Gaussian")
         rates = simulator.generate_lightcurve()
         noisy_rates, dy = simulator.add_noise(rates)

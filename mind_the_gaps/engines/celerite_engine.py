@@ -32,6 +32,7 @@ class CeleriteGPEngine(BaseGPEngine):
         "cores",
         "progress",
         "convergenece_steps",
+        "burnin",
     }
 
     def __init__(
@@ -67,6 +68,7 @@ class CeleriteGPEngine(BaseGPEngine):
         self._autocorr = []
         self._loglikelihoods = None
         self._mcmc_samples = None
+        self.lcs = None
 
     def _log_probability(self, params: List[float]) -> float:
         """Set the GP Parameters and return the log probability of the posterior.
@@ -140,6 +142,7 @@ class CeleriteGPEngine(BaseGPEngine):
         walkers: int = 12,
         cores: int = 6,
         progress: bool = True,
+        burnin: int = 3000,
     ):
         """Derive GP Posteriors
 
@@ -160,10 +163,13 @@ class CeleriteGPEngine(BaseGPEngine):
             Number of cores for parallelization, by default 6
         progress : bool, optional
             Whether to show progress throught MCMC, by default True
+        burnin: int, optional
+            Number of burn-in steps for the MCMC sampling, by default 3000.
         """
 
         # set the initial parameters if not given
-
+        if burnin == 0:
+            burnin = 1
         if initial_chain_params is None:
             if not fit:
                 initial_params = self.initial_params
@@ -187,9 +193,16 @@ class CeleriteGPEngine(BaseGPEngine):
         sampler = emcee.EnsembleSampler(
             walkers, self._ndim, self._log_probability, pool=pool
         )
-        for sample in sampler.sample(
-            initial_chain_params, iterations=max_steps, progress=progress
-        ):
+        if burnin > 0:
+            print(f"Running burn-in for {burnin} steps...")
+            state = sampler.run_mcmc(
+                initial_chain_params, nsteps=burnin, progress=progress
+            )
+            sampler.reset()
+        else:
+            state = emcee.State(initial_chain_params, log_prob=None)
+
+        for sample in sampler.sample(state, iterations=max_steps, progress=progress):
             # Only check convergence every 100 steps
             if sampler.iteration % every_samples:
                 continue
@@ -427,6 +440,7 @@ class CeleriteGPEngine(BaseGPEngine):
                 ),
                 param_samples,
             )
+        self.lcs = lightcurves
         return lightcurves
 
     def _generate_lc_from_params(

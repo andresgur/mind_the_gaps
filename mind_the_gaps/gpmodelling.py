@@ -319,7 +319,6 @@ class GPModellingComparison:
         self.null_mean_params = null_mean_params
         self.alt_mean_params = alt_mean_params
         self.modelling_kwargs = modelling_kwargs
-        self.lcs = None
 
         self.null_model = GPModelling(
             kernel_spec=null_kernel_spec,
@@ -346,7 +345,7 @@ class GPModellingComparison:
         self.null_model.derive_posteriors(**engine_kwargs)
         self.alt_model.derive_posteriors(**engine_kwargs)
 
-    def generate_from_posteriors(self, nsims):
+    def generate_from_posteriors(self, nsims: int, par_workers: int = 1):
         """Generate lightcurves from the posterior distributions of the null model.
 
         Parameters
@@ -354,7 +353,7 @@ class GPModellingComparison:
         nsims : int
             Number of lightcurves to generate.
         """
-        self.lcs = self.null_model.generate_from_posteriors(nsims)
+        self.null_model.generate_from_posteriors(nsims=nsims, par_workers=par_workers)
 
     def process_lightcurves(self, **posterior_kwargs):
         """Process the generated lightcurves.
@@ -373,13 +372,17 @@ class GPModellingComparison:
         self.likelihoods_alt = []
 
         # lcs = self.null_model.generate_from_posteriors(nsims=nsims)
-        if self.lcs is None:
+        if self.null_model.modelling_engine.lcs is None:
             raise ValueError(
                 "You need to run generate_from_posteriors first to generate lightcurves."
             )
 
-        for i, lc in enumerate(self.lcs):
-            print("Processing lightcurve %d/%d" % (i + 1, len(self.lcs)), end="\r")
+        for i, lc in enumerate(self.null_model.modelling_engine.lcs):
+            print(
+                "Processing lightcurve %d/%d"
+                % (i + 1, len(self.null_model.modelling_engine.lcs)),
+                end="\r",
+            )
 
             null_modelling = GPModelling(
                 kernel_spec=self.null_kernel_spec,
@@ -466,7 +469,7 @@ class GPModellingComparison:
                 self.modelling_kwargs,
                 posterior_kwargs,
             )
-            for i, lc in enumerate(self.lcs)
+            for i, lc in enumerate(self.null_model.modelling_engine.lcs)
         ]
         with ProcessPoolExecutor(
             max_workers=par_workers  # or multiprocessing.cpu_count()

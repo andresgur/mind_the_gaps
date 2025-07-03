@@ -22,10 +22,11 @@ class BaseNumpyroGPEngine(BaseGPEngine):
         "fit",
         "max_steps",
         "num_chains",
-        "num_warmup",
+        "burnin",
         "converge_steps",
         "progress",
         "perc",
+        "max_tree_depth",
     }
 
     def __init__(
@@ -87,6 +88,7 @@ class BaseNumpyroGPEngine(BaseGPEngine):
         self.gp = None
         self._ndim = len(self.init_params)
         self._converged = False
+        self.lcs = None
 
     def numpyro_model(
         self,
@@ -465,8 +467,8 @@ class BaseNumpyroGPEngine(BaseGPEngine):
         sampled_params = np.column_stack(
             [v[sampled_indices] for v in flat_samples.values()]
         )
-
-        return [self._generate_lc_from_params(p) for p in sampled_params]
+        self.lcs = [self._generate_lc_from_params(p) for p in sampled_params]
+        return self.lcs
 
     @property
     def k(self):

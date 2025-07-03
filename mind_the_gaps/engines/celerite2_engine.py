@@ -25,7 +25,7 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
         "fit",
         "max_steps",
         "num_chains",
-        "num_warmup",
+        "burnin",
         "converge_steps",
         "progress",
         "perc",
@@ -76,7 +76,6 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
 
     def derive_posteriors(
         self,
-        num_warmup: int,
         num_chains: int,
         max_steps: int,
         converge_steps: int,
@@ -84,6 +83,7 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
         progress: bool = True,
         perc: float = 0.1,
         max_tree_depth: int = 10,
+        burnin: int = 3000,
     ) -> None:
         """Derive the posterior distributions of the Gaussian Process parameters using MCMC sampling.
         This method initialises the parameters, runs MCMC sampling using the Numpyro with the NUTS kernel,
@@ -92,8 +92,8 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
 
         Parameters
         ----------
-        num_warmup : int
-            Number of warmup steps for the MCMC sampling.
+        burnin : int
+            Number of burn-in steps for the MCMC sampling.
         num_chains : int
             Number of chains to run in parallel for MCMC sampling.
         max_steps : int
@@ -137,36 +137,29 @@ class Celerite2GPEngine(BaseNumpyroGPEngine):
 
         mcmc = MCMC(
             kernel,
-            num_warmup=num_warmup,
-            num_samples=1,
-            num_chains=num_chains,
-            chain_method="parallel",
-            jit_model_args=True,
-            progress_bar=progress,
-        )
-        self.rng_key, subkey = jax.random.split(self.rng_key)
-        mcmc.run(subkey, t=self._lightcurve.times)
-        state = mcmc.last_state
-
-        mcmc = MCMC(
-            kernel,
-            num_warmup=0,
+            num_warmup=burnin,
             num_samples=converge_steps,
             num_chains=num_chains,
             chain_method="parallel",
             progress_bar=progress,
             jit_model_args=True,
         )
-        mcmc.post_warmup_state = state
+        key = self.rng_key
+
+        state = None
         num_iterations = int(max_steps / converge_steps)
+
         if num_iterations < 1:
             raise ValueError(
                 f"max_steps ({max_steps}) must be at least as large as converge_steps ({converge_steps}) to run at least one iteration."
             )
         for iteration in range(num_iterations):
-            # self.rng_key, subkey = jax.random.split(self.rng_key)
+            if state is not None:
+                mcmc.post_warmup_state = state
+                self.rng_key = mcmc.post_warmup_state.rng_key
+
             mcmc.run(
-                mcmc.post_warmup_state.rng_key,
+                self.rng_key,
                 t=self._lightcurve.times,
             )
             mcmc.post_warmup_state = mcmc.last_state
