@@ -383,20 +383,22 @@ class GPModellingComparison:
                 % (i + 1, len(self.null_model.modelling_engine.lcs)),
                 end="\r",
             )
+            # null_spec = copy.deepcopy(self._null_kernel_spec)
+            # alt_spec = copy.deepcopy(self._alt_kernel_spec)
 
             null_modelling = GPModelling(
-                kernel_spec=self.null_kernel_spec,
+                kernel_spec=copy.deepcopy(self._null_kernel_spec),
                 lightcurve=lc,
-                mean_params=self.null_mean_params,
+                mean_params=copy.deepcopy(self.null_mean_params),
                 **self.modelling_kwargs,
             )
             null_modelling.derive_posteriors(**posterior_kwargs)
             self.likelihoods_null.append(null_modelling.max_loglikelihood)
 
             alternative_modelling = GPModelling(
-                kernel_spec=self.alt_kernel_spec,
+                kernel_spec=copy.deepcopy(self._alt_kernel_spec),
                 lightcurve=lc,
-                mean_params=self.alt_mean_params,
+                mean_params=copy.deepcopy(self.alt_mean_params),
                 **self.modelling_kwargs,
             )
             alternative_modelling.derive_posteriors(**posterior_kwargs)

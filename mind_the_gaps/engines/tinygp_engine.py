@@ -145,19 +145,6 @@ class TinyGPEngine(BaseNumpyroGPEngine):
                     max_tree_depth=max_tree_depth,
                 )
 
-        # mcmc = MCMC(
-        #    kernel,
-        #    num_warmup=0,
-        #    num_samples=1,
-        #    num_chains=num_chains,
-        #    chain_method=chain_method,
-        #    jit_model_args=True,
-        #    progress_bar=progress,
-        # )
-
-        #        mcmc.run(self.rng_key, self._lightcurve.times)
-        #        state = mcmc.last_state
-
         mcmc = MCMC(
             kernel,
             num_warmup=burnin,
